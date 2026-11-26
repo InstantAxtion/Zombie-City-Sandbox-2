@@ -186,8 +186,8 @@ final class DirectorScreens {
         // the buttons
         boolean onKey = keyAt(r, w.tick) >= 0;
         String[][] b = {{"rb:back", "-1h"}, {"rb:play", g0.paused ? "Play" : "Pause"}, {"rb:step", "Step"},
-                {"rb:speed", Game.SPEED_NAMES[g0.speedIdx]}, {"rb:key", onKey ? "-Key" : "+Key"}, {"rb:path", g0.pathOn ? "Path on" : "Path"},
-                {"rb:cut", "Save cut"}};
+                {"rb:speed", Game.SPEED_NAMES[g0.speedIdx]}, {"rb:key", onKey ? "-Key" : "+Key"}, {"rb:path", g0.pathOn && r.path.size() > 0 ? "Path on" : "Path"},
+                {"rb:cut", "Cut"}};
         float gap = ui.dp(4), by = cy + ui.dp(18), bh2 = y0 + bh - by - ui.dp(8);
         float each = (bw - m * 2 + gap) / b.length;
         for (int k = 0; k < b.length; k++) {
@@ -254,7 +254,9 @@ final class DirectorScreens {
                     g0.toast("Keyframe removed");
                 } else {
                     r.path.add(w.tick, g0.cam.cx, g0.cam.cy, g0.cam.zoom);
-                    g0.toast("Keyframe " + r.path.size() + " at " + Game.clockAt(w.time) + ": the camera will be here then");
+                    // (the camera stays yours while the path is made: Path plays it back)
+                    g0.pathOn = false;
+                    g0.toast("Keyframe " + r.path.size() + " at " + Game.clockAt(w.time) + ". Path plays the camera along them");
                 }
                 break;
             }
@@ -491,7 +493,7 @@ final class DirectorScreens {
                 return new String[][]{
                         {"ed:plk", "Tap the map to put down", PLACE_KINDS[plKind]},
                         {"ed:plw", plKind == 0 ? "How many" : plKind == 1 ? "Which squad" : "Which defence", what},
-                        {"ed:undo", "Put down: " + edPoints.size() + (edPoints.size() == 1 ? " point, " : " points, ") + edPlace.size() + " forces and defences", "Undo"},
+                        {"ed:undo", edPoints.size() + (edPoints.size() == 1 ? " point, " : " points, ") + edPlace.size() + " forces/defences", "Undo"},
                         {"ed:clear", "", "Clear all"}};
             }
             case 2: {
@@ -506,7 +508,7 @@ final class DirectorScreens {
                         {"ed:gdays", "Win by surviving", HOLD_DAYS[gDays] == 0 ? "Off" : HOLD_DAYS[gDays] + (HOLD_DAYS[gDays] == 1 ? " day" : " days")},
                         {"ed:gtown", "Keep a town (tap the map)", gTown < 0 ? "Off" : townName(gTown)},
                         {"ed:gpct", "...with at least", KEEP_PCT[gPct] + "% of its people"},
-                        {"ed:gclear", "Win by putting down every one of the dead", gClear ? "On" : "Off"},
+                        {"ed:gclear", "Win: kill all the dead", gClear ? "On" : "Off"},
                         {"ed:gloss", "Lose if more are lost than", LOSSES[gLoss] == 0 ? "Off" : WorldView.people(LOSSES[gLoss])}};
             case 4: {
                 String whenV = tWhen == 0 ? "after " + minutes(WHEN_MIN[tTime]) : tWhen == 1 ? "more than " + WorldView.people(WHEN_DEAD[tDead]) : tWhen == 2 ? townName(tTown) : facilityName(tFac);

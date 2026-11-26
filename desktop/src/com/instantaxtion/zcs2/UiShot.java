@@ -32,6 +32,10 @@ public final class UiShot {
             directorShots(pf);
             return;
         }
+        if (a.length > 4 && a[4].equals("director14")) {
+            director14Shots(pf);
+            return;
+        }
         if (a.length > 4 && a[4].equals("tools")) {
             toolShots();
             return;
@@ -276,6 +280,217 @@ public final class UiShot {
         System.exit(0);
     }
 
+    /** A tap on the editor's map at (fx, fy), fractions of the map's side. */
+    static void edMap(float fx, float fy) {
+        DirectorScreens d = game.dir;
+        tapAt(d.mapX + fx * d.mapS, d.mapY + fy * d.mapS);
+    }
+
+    /** Where a town is on the editor's map, as fractions. */
+    static float[] edTown(int id) {
+        java.util.List<Region.Settlement> l = game.previewSettlements();
+        int side = game.previewSide();
+        Region.Settlement s = l.get(id);
+        return new float[]{s.cx / (float) side, s.cy / (float) side};
+    }
+
+    static void waitSeek() throws Exception {
+        long t0 = System.currentTimeMillis();
+        while (game.seekTarget >= 0 || game.seekProgress() >= 0) {
+            frames(1);
+            Thread.sleep(5);
+            if (System.currentTimeMillis() - t0 > 120000) throw new IllegalStateException("the seek never finished");
+        }
+        frames(2);
+    }
+
+    /** 1.4: the editor's tabs (places, rules, goals, triggers), a scripted game, the replay's scrubber and camera path. */
+    static void tp(String id) {
+        frames(1);
+        tap(id);
+    }
+
+    static void director14Shots(DesktopPlatform pf) throws Exception {
+        tp("new");
+        game.ngSize = 0;
+        long t0 = System.currentTimeMillis();
+        while (System.currentTimeMillis() - t0 < 4000) { frames(1); Thread.sleep(50); }
+        tp("editor");
+        t0 = System.currentTimeMillis();
+        while ((game.previewSide() == 0 || System.currentTimeMillis() - t0 < 1500) && System.currentTimeMillis() - t0 < 30000) { frames(1); Thread.sleep(50); }
+        frames(2);
+        boolean map = game.ui.find("ed:map") != null;
+        float[] cap = edTown(0);
+        if (map) edMap(cap[0] + 0.02f, cap[1]);
+        tp("ed:strain");
+        tp("ed:z");
+        frames(2);
+        shot("e01-editor-start");
+        tp("ed:tab:1");
+        frames(1);
+        if (map) {
+            edMap(cap[0] - 0.12f, cap[1] - 0.08f);
+            tp("ed:plw");
+            edMap(cap[0] + 0.1f, cap[1] + 0.1f);
+            tp("ed:plk");
+            frames(1);
+            edMap(cap[0] + 0.03f, cap[1] + 0.02f);
+            tp("ed:plw");
+            frames(1);
+            edMap(cap[0] + 0.05f, cap[1] + 0.02f);
+            tp("ed:plk");
+            frames(1);
+            edMap(cap[0] + 0.04f, cap[1] + 0.04f);
+            tp("ed:plw");
+            tp("ed:plw");
+            frames(1);
+            edMap(cap[0] + 0.045f, cap[1] + 0.045f);
+        }
+        frames(2);
+        shot("e02-editor-places");
+        tp("ed:tab:2");
+        tp("ed:rule:0");
+        tp("ed:rule:0");
+        tp("ed:rule:6");
+        tp("ed:rule:6");
+        tp("ed:rule:6");
+        frames(2);
+        shot("e03-editor-rules");
+        tp("ed:tab:3");
+        frames(1);
+        tp("ed:gdays");
+        tp("ed:gdays");
+        tp("ed:gdays");
+        if (map) edMap(cap[0], cap[1]);
+        frames(1);
+        tp("ed:gpct");
+        tp("ed:gloss");
+        tp("ed:gloss");
+        tp("ed:gloss");
+        frames(2);
+        shot("e04-editor-goals");
+        tp("ed:tab:4");
+        frames(1);
+        // 1: after 3 hours, a horde of 2,000 out in the fields
+        if (map) edMap(cap[0] - 0.15f, cap[1] + 0.12f);
+        tp("ed:tadd");
+        frames(1);
+        // 2: more than 1,000 dead in the capital: an air strike on it
+        tp("ed:tw");
+        frames(1);
+        tp("ed:ttown");
+        if (map) edMap(cap[0], cap[1]);
+        tp("ed:tdo");
+        frames(1);
+        tp("ed:tplace");
+        if (map) edMap(cap[0] + 0.01f, cap[1] - 0.01f);
+        tp("ed:tadd");
+        frames(1);
+        // 3: the capital falls: the weather turns to storm
+        tp("ed:tw");
+        frames(1);
+        tp("ed:tdo");
+        tp("ed:tdo");
+        frames(1);
+        tp("ed:tadd");
+        frames(1);
+        // 4: after 30 minutes, a message
+        tp("ed:tw");
+        tp("ed:tw");
+        frames(1);
+        for (int k = 0; k < 2; k++) {
+            tp("ed:tt");
+            frames(1);
+        }
+        for (int k = 0; k < 7; k++) tp("ed:tt");
+        tp("ed:tdo");
+        frames(1);
+        pf.answers.add("Reports of the dead in the hills");
+        tp("ed:tmsg");
+        frames(2);
+        tp("ed:tadd");
+        frames(2);
+        shot("e05-editor-triggers");
+        tp("ed:save");
+        frames(2);
+        shot("e06-yours");
+        tp("start");
+        waitPlay();
+        game.speedIdx = 4;
+        frames(150);
+        shot("e07-scripted-game");
+        game.speedIdx = 6;
+        frames(40);
+        game.speedIdx = 4;
+        frames(60);
+        tp("pause");
+        frames(1);
+        tp("savereplay");
+        frames(1);
+        tp("tomenu");
+        frames(2);
+        tp("replays");
+        frames(2);
+        String[] names = pf.pref("replays", "").split(",");
+        tp("rp:" + names[0]);
+        waitPlay();
+        frames(30);
+        shot("e08-replay-bar");
+        // to two thirds of the way along (played on fast), then back to a quarter (from a snapshot)
+        DirectorScreens d = game.dir;
+        float[] sc = game.ui.find("rb:scrub");
+        tapAt(d.rbX0 + (d.rbX1 - d.rbX0) * 0.66f, sc[1]);
+        waitSeek();
+        shot("e09-replay-seeked");
+        tapAt(d.rbX0 + (d.rbX1 - d.rbX0) * 0.25f, sc[1]);
+        frames(1);
+        shot("e10-replay-going-back");
+        waitSeek();
+        // a camera path: three keyframes at different times and places
+        World w = game.world();
+        Region.Settlement c = w.r.city();
+        game.paused = true;
+        game.seekTo(game.replay.endTick / 5);
+        waitSeek();
+        game.cam.cx = c.cx * 16f;
+        game.cam.cy = c.cy * 16f;
+        game.cam.zoom = 0.12f;
+        frames(2);
+        tp("rb:key");
+        game.seekTo(game.world().tick + game.replay.endTick / 4);
+        waitSeek();
+        game.cam.cx = c.cx * 16f + 1500;
+        game.cam.zoom = 0.5f;
+        frames(2);
+        tp("rb:key");
+        game.seekTo(game.world().tick + game.replay.endTick / 4);
+        waitSeek();
+        game.cam.cx = c.cx * 16f + 600;
+        game.cam.cy = c.cy * 16f + 800;
+        game.cam.zoom = 1.0f;
+        frames(2);
+        tp("rb:key");
+        frames(2);
+        shot("e11-camera-keyframes");
+        tp("rb:path");
+        tapAt(d.rbX0 + (d.rbX1 - d.rbX0) * 0.3f, sc[1]);
+        waitSeek();
+        tp("rb:play");
+        frames(45);
+        shot("e12-camera-path-playing");
+        tp("rb:cut");
+        frames(2);
+        tp("pause");
+        frames(1);
+        tp("tomenu");
+        frames(2);
+        tp("replays");
+        frames(2);
+        shot("e13-replays-with-cut");
+        System.out.println("ok director 1.4: replay " + (game.replay != null ? game.replay.snaps.size() + " snapshots" : "over"));
+        game.world().shutdown();
+        System.exit(0);
+    }
     /** Pass-and-play: add players, hand over, and a friend's result on the report. */
     static void coop() throws Exception {
         tap("new");
