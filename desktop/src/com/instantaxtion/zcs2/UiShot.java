@@ -465,7 +465,8 @@ public final class UiShot {
         tap("tool:look");
         frames(1);
         int v = -1;
-        for (int i = 0; i < game.w.veh.top; i++) if (game.w.veh.usable(i) && game.w.veh.type(i).id.equals("gunship")) v = i;
+        for (int i = 0; i < game.w.veh.top; i++)
+            if (game.w.veh.usable(i) && game.w.veh.type(i).id.equals("gunship") && (v < 0 || game.w.veh.uid[i] > game.w.veh.uid[v])) v = i;
         if (v >= 0) {
             game.inspVeh = v;
             frames(2);

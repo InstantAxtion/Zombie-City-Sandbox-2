@@ -684,7 +684,7 @@ public final class Game {
         g.color(Ui.TEXT);
         g.text("Rules", x + ui.dp(16), y + ui.dp(32), ui.dp(Ui.XL - 2), Gfx.ALIGN_LEFT, true);
         g.color(Ui.DIM);
-        g.text(Ui.fit(g, ng ? "For the new game" : "Changed from now on (kept in replays)", pw - ui.dp(120), ui.dp(Ui.S + 0.5f), false),
+        g.text(Ui.fit(g, ng ? "For the new game" : "From now on (kept in replays)", pw - ui.dp(146), ui.dp(Ui.S + 0.5f), false),
                 x + ui.dp(92), y + ui.dp(31), ui.dp(Ui.S + 0.5f), Gfx.ALIGN_LEFT, false);
         ui.button("rules:close", x + pw - ui.dp(44), y + ui.dp(10), ui.dp(34), ui.dp(34), "✕", false, 13);
         float cw = (pw - ui.dp(16) * 2 - ui.dp(12) * (cols - 1)) / cols, vw = Math.min(ui.dp(140), cw * 0.48f);
@@ -1457,6 +1457,8 @@ public final class Game {
         if (goLive) {
             float bw = ui.dp(170), bh = ui.dp(36);
             float bx = (freeL + freeR - bw) / 2, by = top - bh - ui.dp(8);
+            // clear of the stick
+            if (stickOn()) bx = Math.max(bx, Math.min(freeR - bw - ui.dp(8), joyCX + ui.dp(64)));
             ui.bigButton("golive", bx, by, bw, bh, "To the outbreak", 0xE0B03028);
             top = by;
         }
@@ -2200,7 +2202,9 @@ public final class Game {
         g.fillRect(0, y, W, 1);
         ui.block(0, y, W, toolbarH);
         float bw = (W - ui.dp(8)) / ts.length;
-        for (int i = 0; i < ts.length; i++) toolButton(ts[i], ui.dp(4) + i * bw + ui.dp(1), y + ui.dp(4), bw - ui.dp(2), toolbarH - ui.dp(8));
+        // ten tools on a narrow phone: no gap between them, so each name keeps its whole width
+        float tg = ts.length >= 10 ? 0 : ui.dp(2);
+        for (int i = 0; i < ts.length; i++) toolButton(ts[i], ui.dp(4) + i * bw + tg / 2, y + ui.dp(4), bw - tg, toolbarH - ui.dp(8));
         if (inspectorOpen()) {
             inspector(g, 0, 0, W, y);
             return;
