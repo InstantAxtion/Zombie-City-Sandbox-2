@@ -55,6 +55,25 @@ public final class Audit {
                 sb.append("entity ").append(i).append(" thinks it's in squad ").append(e.squad[i]).append('\n');
         }
         if (live != e.live && problems++ < 5) sb.append("live count ").append(e.live).append(" but ").append(live).append(" slots in use\n");
+        // a national map: the resident pages are exactly the active chunks, each standing as the cache's own chunk
+        // (never a copy), with the overlay's edits on
+        if (w.r.nation != null) {
+            ChunkStore st = w.r.store;
+            for (int p = 0; p < st.pages(); p++) {
+                boolean res = st.resident(p), act = w.act.active(p);
+                if (res != act && problems++ < 5) sb.append("chunk ").append(p).append(res ? " resident but not active\n" : " active but not resident\n");
+                if (!res) continue;
+                Chunk c = st.chunk(p);
+                if (c == null || c.index != p) {
+                    if (problems++ < 5) sb.append("page ").append(p).append(" isn't its chunk\n");
+                    continue;
+                }
+                if (!w.r.cache.pinned(c.cx, c.cy) && problems++ < 5) sb.append("chunk ").append(p).append(" attached but not pinned\n");
+                if (w.r.cache.peek(c.cx, c.cy) != c && problems++ < 5) sb.append("chunk ").append(p).append(" attached is not the cache's\n");
+                if (c.overlayVersion != w.r.overlay.version(p) && w.r.overlay.version(p) != 0 && problems++ < 5)
+                    sb.append("chunk ").append(p).append(" hasn't the overlay's edits\n");
+            }
+        }
         for (int s = 0; s < w.sec.n; s++)
             if ((w.sec.popIn[s] < 0 || w.sec.zIn[s] < 0 || w.sec.inf[s] < 0) && problems++ < 5) sb.append("sector ").append(s).append(" negative count\n");
         return sb.toString();

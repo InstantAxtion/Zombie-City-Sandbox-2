@@ -355,7 +355,11 @@ public final class Tests {
     }
 
     static void simThreads(int size) {
-        World a = game(21, size, "sandbox", 1), b = game(21, size, "sandbox", 4);
+        simThreads(size, 4);
+    }
+
+    static void simThreads(int size, int threads) {
+        World a = game(21, size, "sandbox", 1), b = game(21, size, "sandbox", threads);
         for (World w : new World[]{a, b}) {
             camOver(w, Setup.originX, Setup.originY);
             Tools.paintZombies(w, Setup.originX, Setup.originY, 900, 500, -1);
@@ -2743,6 +2747,7 @@ public final class Tests {
         });
         scaleTests();
         sparseTests();
+        nationalTests();
     }
 
     // ------------------------------------------------------------------ active-area paging (docs/SCALE_PLAN.md P2)
@@ -2816,6 +2821,127 @@ public final class Tests {
                         w.shutdown();
                     }
                 });
+            }
+        });
+    }
+
+    // ------------------------------------------------------------------ national maps wired in (docs/SCALE_PLAN.md P7)
+
+    /** The smallest national map: NationGen at 8,192 tiles (33 km), a capital, a base, a prison and airfields. */
+    static final int NAT = 8192;
+
+    /** Runs a test with the parallel phases reading only resident pages (Region throws otherwise). */
+    static void strict(T t) throws Exception {
+        boolean was = World.strictParallel;
+        World.strictParallel = true;
+        try {
+            t.run();
+        } finally {
+            World.strictParallel = was;
+        }
+    }
+
+    private static void nationalTests() {
+        test("national: a game on a nation starts from its residents, its chunks are the cache's", new T() {
+            public void run() throws Exception {
+                strict(new T() {
+                    public void run() {
+                        World w = game(7, NAT, "lab_leak", 2);
+                        Nation n = w.r.nation;
+                        check(n != null && w.national && w.act.sparse, "not a national, sparse world");
+                        check(w.r.bCount == n.bCount && w.r.facilities.size() >= n.facilities.size() && w.r.facilities.get(0) == n.facilities.get(0), "national buildings and facilities not in the region: " + w.r.bCount + "/" + n.bCount + " " + w.r.facilities.size() + "/" + n.facilities.size());
+                        long res = n.totalResidents();
+                        check(Audit.people(w) == res, "people " + Audit.people(w) + " vs the nation's " + res);
+                        for (int s = 0; s < w.sec.n; s++) check(w.sec.home[s] == n.residents[s], "sector " + s + " home differs from the nation's residents");
+                        int doors = 0;
+                        for (int b = 0; b < w.r.bCount; b++) if (w.r.doorX(b) >= 0) doors++;
+                        check(doors > w.r.bCount * 9 / 10, "national buildings without doors: " + (w.r.bCount - doors) + " of " + w.r.bCount);
+                        camOver(w, Setup.originX, Setup.originY);
+                        play(w, 60, true);
+                        int act = w.act.activeCount();
+                        check(act > 4 && act < w.act.pages / 8, act + " chunks active of " + w.act.pages);
+                        check(w.r.cache.size() <= w.r.cache.capacity() + act, "cache over its size");
+                        // chunk buildings in the lists of active sectors, with doors in their sector
+                        int chunkB = 0;
+                        for (int p = 0; p < w.act.pages; p++) {
+                            if (!w.act.active(p)) continue;
+                            for (int b : w.secBuildings[p])
+                                if (Chunk.isChunkBuilding(b)) {
+                                    chunkB++;
+                                    check(w.r.sectorOfPx(w.r.doorX(b), w.r.doorY(b)) == p, "door outside its sector");
+                                }
+                        }
+                        check(chunkB > 50, "only " + chunkB + " chunk buildings in active sectors");
+                        // an edit on a page not in memory takes it in first, and the overlay keeps it
+                        Region.Settlement far = null;
+                        for (Region.Settlement st : w.r.settlements)
+                            if (st.kind == Region.S_VILLAGE && !w.act.activePx(st.cx * 16f, st.cy * 16f)) far = st;
+                        check(far != null, "no village out of the active set");
+                        int tx = far.cx, ty = far.cy;
+                        int p = w.r.store.pageOf(tx, ty);
+                        boolean was = Region.strictPages;
+                        Region.strictPages = true;
+                        boolean threw = false;
+                        try {
+                            w.r.t(tx, ty);
+                        } catch (IllegalStateException ex) {
+                            threw = true;
+                        }
+                        Region.strictPages = was;
+                        check(threw, "a read of a page not in memory didn't throw in strict mode");
+                        w.r.set(tx, ty, Tile.BARRICADE);
+                        check(w.act.active(p) && w.r.store.resident(p) && w.r.t(tx, ty) == Tile.BARRICADE, "the edited page wasn't taken in");
+                        check(w.r.overlay.edited(p), "the overlay didn't record it");
+                        check(Audit.check(w).isEmpty(), Audit.check(w));
+                        w.shutdown();
+                    }
+                });
+            }
+        });
+        test("national: the same game on 1 and 2 threads (8192)", new T() {
+            public void run() throws Exception {
+                strict(new T() {
+                    public void run() {
+                        simThreads(NAT, 2);
+                    }
+                });
+            }
+        });
+        test("national: everyone accounted for with no dead about (8192)", new T() {
+            public void run() throws Exception {
+                simAccounted(NAT);
+            }
+        });
+        test("national: a loaded game plays on exactly the same (8192)", new T() {
+            public void run() throws Exception {
+                saveExact(NAT);
+            }
+        });
+        test("national: a replay rebuilds the same outbreak (8192)", new T() {
+            public void run() throws Exception {
+                replayExact(NAT);
+            }
+        });
+        test("national: every scenario starts sensibly on a nation", new T() {
+            public void run() throws Exception {
+                String[] ids = {"sandbox", "lab_leak", "airliner", "prison", "festival", "port", "random", "hold_city", "evacuate", "retake", "protect"};
+                for (String id : ids) {
+                    Content.Scenario sc = content.scenario(id);
+                    check(sc != null, "no scenario " + id);
+                    World w = game(11, NAT, id, 2);
+                    float ox = Setup.outbreakX, oy = Setup.outbreakY;
+                    check(ox > 0 && oy > 0 && ox < w.r.px() && oy < w.r.px(), id + ": the start is off the map");
+                    w.sp.build(w.e);
+                    long dead = w.totalZombies();
+                    check(dead >= sc.zombies * 9 / 10, id + ": " + dead + " of the dead, asked for " + sc.zombies);
+                    Region.Settlement near = w.r.settlementAt(ox, oy);
+                    camOver(w, Setup.originX, Setup.originY);
+                    play(w, 20, true);
+                    check(Audit.ledger(w) == 0, id + ": the ledger is out by " + Audit.ledger(w));
+                    System.out.printf("        %-9s starts at %s, %d of the dead, %d chunks active, %d police out%n", id,
+                            near != null ? near.name + " (" + Region.SNAMES[near.kind] + ")" : "open country", dead, w.act.activeCount(), w.sq.count(Ents.COP));
+                    w.shutdown();
+                }
             }
         });
     }
