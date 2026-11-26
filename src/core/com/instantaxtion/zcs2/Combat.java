@@ -110,11 +110,8 @@ final class Combat {
         Content.VType t = vh.type(v);
         // the heavier the vehicle, the less it moves
         float move = Math.min(14, zt.smashPower * 0.5f) * (1 - t.armor * 0.8f);
-        float nx = vh.x[v] + dx / d * move, ny = vh.y[v] + dy / d * move;
-        if (move > 0.5f && nx > 1 && ny > 1 && nx < w.r.px() - 1 && ny < w.r.px() - 1 && w.r.walkablePx(nx, ny)) {
-            vh.x[v] = nx;
-            vh.y[v] = ny;
-        }
+        // up against another vehicle it goes no further, and a wreck doesn't move at all
+        if (move > 0.5f) vh.shove(v, dx / d, dy / d, move);
         vh.spd[v] *= 0.3f;
         w.fx.add(Effects.SPARK, vh.x[v], vh.y[v], 0, 0, 0.15f);
         w.fx.noise(vh.x[v], vh.y[v], 18, 2);

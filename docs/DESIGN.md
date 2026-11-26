@@ -98,7 +98,8 @@ phase never writes (position, velocity, uid, type). Leaders are a hash of the ui
   the scent field. The dead round about keep with them: on the scent they slow when ahead of their leader and hurry
   when behind; without one they follow its way.
 - *Big ones*: brutes and giants charge (knocking the living back) and shove cars aside, denting them until they're
-  wrecks; bruisers wind up, lunge, then rest.
+  wrecks (a shoved car stops against the next vehicle; a wreck stays put, an obstacle the rest park round);
+  bruisers wind up, lunge, then rest.
 - *Strains* change the dead themselves: runners' strain is faster, the armoured tougher, stalkers see further and
   move faster at night.
 - *A watched horde* (`Strategic` asks `Undead.watchedHorde`) comes on with its front (`hordeFront`) as individuals in

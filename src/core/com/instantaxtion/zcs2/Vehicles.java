@@ -371,6 +371,25 @@ public final class Vehicles {
         }
     }
 
+    /**
+     * Pushed bodily up to dist px along (ux, uy) (one of the big dead shoving it): it goes a little at a time and
+     * stops at the first vehicle (wrecks included) or wall in the way, so it never ends up on top of anything. A wreck
+     * doesn't move at all: it stays where it burned out, an obstacle the others park round.
+     */
+    void shove(int v, float ux, float uy, float dist) {
+        if (state[v] == V_WRECK || state[v] == V_NONE || flying(v)) return;
+        float m = w.r.px();
+        for (float done = 0; done < dist - 0.01f; ) {
+            float s = Math.min(2, dist - done);
+            float nx = x[v] + ux * s, ny = y[v] + uy * s;
+            if (nx <= 1 || ny <= 1 || nx >= m - 1 || ny >= m - 1 || !w.r.walkablePx(nx, ny)) break;
+            if (onRoad(v) && !roomFor(v, nx, ny, head[v])) break;
+            x[v] = nx;
+            y[v] = ny;
+            done += s;
+        }
+    }
+
     void blast(float bx, float by, float rad, float dmg) {
         for (int v = 0; v < top; v++) {
             if (state[v] == V_NONE || flying(v)) continue;
@@ -773,11 +792,26 @@ public final class Vehicles {
     private boolean moveToSlot(int v, float dt) {
         float dx = slotX[v] - x[v], dy = slotY[v] - y[v], d = (float) Math.sqrt(dx * dx + dy * dy);
         if (d < 1.5f) {
+            // there: the last of the turn into line, at the same rate as on the way in and only if there's room to
+            // swing (snapping straight to slotH swept the footprint through whoever had pulled up alongside)
+            float turn = angle(slotH[v] - head[v]);
+            boolean last = Math.abs(turn) <= 3 * dt;
+            float nh = last ? slotH[v] : head[v] + Math.signum(turn) * 3 * dt;
+            spd[v] = 0;
+            if (!roomFor(v, slotX[v], slotY[v], nh)) {
+                wait[v] += dt;
+                // no room to finish the turn: it stays as it is
+                if (wait[v] > 3) {
+                    wait[v] = 0;
+                    return true;
+                }
+                return false;
+            }
+            wait[v] = 0;
             x[v] = slotX[v];
             y[v] = slotY[v];
-            head[v] = slotH[v];
-            spd[v] = 0;
-            return true;
+            head[v] = nh;
+            return last;
         }
         float s = Math.min(36, d * 2.5f + 4) * dt;
         if (s > d) s = d;
