@@ -219,7 +219,7 @@ public final class Undead extends Module {
         int cy0 = Math.max(0, (int) (y / Spatial.CELL) - 1), cy1 = Math.min(sp.ch - 1, (int) (y / Spatial.CELL) + 1);
         for (int cy = cy0; cy <= cy1; cy++)
             for (int cx = cx0; cx <= cx1; cx++) {
-                int c = cy * sp.cw + cx;
+                int c = sp.cell(cx, cy);
                 int start = sp.zStart[c], end = sp.zEnd[c];
                 int stride = Math.max(1, (end - start) / 8);
                 for (int j = start; j < end; j += stride) {

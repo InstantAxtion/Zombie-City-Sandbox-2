@@ -70,6 +70,11 @@ public final class Fires extends Module {
         return burning.size();
     }
 
+    /** The k-th building burning (0 .. count() - 1), in the order they caught. */
+    public int burningAt(int k) {
+        return burning.get(k);
+    }
+
     /** Sets a building alight (looting, the society systems...). */
     public void ignite(int b, float h) {
         if (b < 0 || b >= heat.length || w.r.bfloors(b) <= 0) return;

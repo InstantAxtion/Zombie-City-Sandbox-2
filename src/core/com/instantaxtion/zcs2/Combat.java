@@ -224,7 +224,7 @@ final class Combat {
         float massCut = 0.45f + 0.55f * massFactor();
         for (int cy = cy0; cy <= cy1; cy++)
             for (int cx = cx0; cx <= cx1; cx++) {
-                int c = cy * w.sp.cw + cx;
+                int c = w.sp.cell(cx, cy);
                 for (int j = w.sp.zStart[c]; j < w.sp.zEnd[c]; j++) {
                     int o = w.sp.zList[j];
                     if (e.loc[o] != Ents.FREE) continue;

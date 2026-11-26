@@ -113,11 +113,10 @@ public final class Dispatch {
         int n = 0;
         float cs = Tile.SIZE * Region.SECT;
         float x0 = (s % w.sec.sw) * cs, y0 = (s / w.sec.sw) * cs;
-        int c0 = w.sp.cellOf(x0, y0), c1 = w.sp.cellOf(x0 + cs - 1, y0 + cs - 1);
-        int cx0 = c0 % w.sp.cw, cy0 = c0 / w.sp.cw, cx1 = c1 % w.sp.cw, cy1 = c1 / w.sp.cw;
+        int cx0 = w.sp.cellX(x0), cy0 = w.sp.cellY(y0), cx1 = w.sp.cellX(x0 + cs - 1), cy1 = w.sp.cellY(y0 + cs - 1);
         for (int cy = cy0; cy <= cy1; cy++)
             for (int cx = cx0; cx <= cx1; cx++) {
-                int c = cy * w.sp.cw + cx;
+                int c = w.sp.cell(cx, cy);
                 int a = w.sp.zStart[c], b = w.sp.zEnd[c];
                 int stride = Math.max(1, (b - a) / 6);
                 for (int j = a; j < b; j += stride) {

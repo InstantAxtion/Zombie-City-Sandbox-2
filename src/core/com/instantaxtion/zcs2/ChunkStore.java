@@ -20,9 +20,12 @@ import java.io.OutputStream;
  */
 public final class ChunkStore {
     public static final int SHIFT = 6, SIZE = 1 << SHIFT, MASK = SIZE - 1, AREA = SIZE * SIZE;
+    /** Navigation cells per page side (Region.NAV tiles each), and per page. */
+    public static final int NAV_SHIFT = SHIFT - 1, NAVS = 1 << NAV_SHIFT, NAV_AREA = NAVS * NAVS;
 
     static {
         if (Chunk.SIZE != SIZE) throw new IllegalStateException("pages and chunks must be the same square");
+        if (Chunk.NAVS != NAVS || Region.NAV != 2) throw new IllegalStateException("navigation pages must match chunks");
     }
 
     /** Map size in tiles, and in pages. */
@@ -31,6 +34,8 @@ public final class ChunkStore {
     final byte[][] tile;
     /** The building on each tile of each page (see the class comment), or null where it isn't resident. */
     final short[][] bld;
+    /** The navigation cells of each page (32x32, row-major, as Chunk.nav: 0 blocked, 1 open, 2 road), or null. */
+    final byte[][] nav;
     /** The Chunk a page is, when it is one; null for a plain page (today's maps). */
     final Chunk[] chunk;
 
@@ -41,6 +46,7 @@ public final class ChunkStore {
         ph = (h + MASK) >> SHIFT;
         tile = new byte[pw * ph][];
         bld = new short[pw * ph][];
+        nav = new byte[pw * ph][];
         chunk = new Chunk[pw * ph];
     }
 
@@ -49,6 +55,7 @@ public final class ChunkStore {
         for (int p = 0; p < tile.length; p++) {
             if (tile[p] == null) tile[p] = new byte[AREA];
             if (bld[p] == null) bld[p] = new short[AREA];
+            if (nav[p] == null) nav[p] = new byte[NAV_AREA];
         }
     }
 
@@ -57,6 +64,7 @@ public final class ChunkStore {
         int p = c.cy * pw + c.cx;
         tile[p] = c.tile;
         bld[p] = c.bld;
+        nav[p] = c.nav;
         chunk[p] = c;
     }
 
@@ -64,6 +72,7 @@ public final class ChunkStore {
     void detach(int p) {
         tile[p] = null;
         bld[p] = null;
+        nav[p] = null;
         chunk[p] = null;
     }
 

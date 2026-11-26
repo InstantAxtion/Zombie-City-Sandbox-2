@@ -2,7 +2,7 @@ package com.instantaxtion.zcs2;
 
 /**
  * Checks that the world is in a sound state: everyone is in exactly one place, crews and squads agree with the
- * people in them, nothing is off the map or not-a-number. Built in from day one (the first game found most of its
+ * people in them, nothing is off the map or not-a-number, everyone on the map stands in an active chunk. Built in from day one (the first game found most of its
  * worst bugs only once such checks existed). Returns a description of the first few problems, or "" if none.
  */
 public final class Audit {
@@ -48,6 +48,9 @@ public final class Audit {
                     if (problems++ < 5) sb.append("entity ").append(i).append(" off the map at ").append(e.x[i]).append(',').append(e.y[i]).append('\n');
                 }
             }
+            // the street-level simulation reads only active chunks: everyone on the map stands in one
+            if (l == Ents.FREE && !w.act.activePx(e.x[i], e.y[i]) && problems++ < 5)
+                sb.append("entity ").append(i).append(" stands in chunk ").append(w.act.pageOfPx(e.x[i], e.y[i])).append(", which isn't active\n");
             if (l == Ents.FREE && e.squad[i] >= 0 && inSquads[i] == 0 && e.armed(i) && problems++ < 5)
                 sb.append("entity ").append(i).append(" thinks it's in squad ").append(e.squad[i]).append('\n');
         }

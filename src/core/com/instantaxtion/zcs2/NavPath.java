@@ -5,26 +5,77 @@ import java.util.Arrays;
 /**
  * Paths for people on foot over the navigation grid (A*, 8 directions, a counted search budget so a step can't
  * stall). One path per squad, not per person: the squad's members follow their leader.
+ * The search state is kept per active page (ActiveSet, cells indexed as in Flow) and paths go only through active
+ * pages: a goal beyond them gets a path to the first frontier cell the search reaches towards it, and the squad
+ * plans again later, by when the pages round it are active.
  */
-public final class NavPath {
+public final class NavPath implements ActiveSet.Paged {
     private final Region r;
     private final int w, h;
-    private final float[] g;
+    private final int[] slotOf;
+    private final int ppw;
+    private float[] g;
     /** stamp: cur = seen in this search, cur + 1 = closed in this search (one array instead of two). */
-    private final int[] prev, stamp;
+    private int[] prev, stamp;
+    private byte[][] navS;
+    private int[] sx0, sy0;
     private int cur;
     private int[] heap = new int[1024];
     private float[] key = new float[1024];
     private int hn;
     public long searched;
 
-    public NavPath(Region r) {
+    public NavPath(Region r, ActiveSet act) {
         this.r = r;
         w = r.navW;
         h = r.navH;
-        g = new float[w * h];
-        prev = new int[w * h];
-        stamp = new int[w * h];
+        slotOf = act.slotOf;
+        ppw = act.pw;
+        act.register(this);
+    }
+
+    @Override
+    public void slotsGrown(int cap) {
+        int n = cap << 10;
+        g = g == null ? new float[n] : Arrays.copyOf(g, n);
+        prev = prev == null ? new int[n] : Arrays.copyOf(prev, n);
+        stamp = stamp == null ? new int[n] : Arrays.copyOf(stamp, n);
+        navS = navS == null ? new byte[cap][] : Arrays.copyOf(navS, cap);
+        sx0 = sx0 == null ? new int[cap] : Arrays.copyOf(sx0, cap);
+        sy0 = sy0 == null ? new int[cap] : Arrays.copyOf(sy0, cap);
+    }
+
+    @Override
+    public void slotAssigned(int s, int p) {
+        // (stamps left in the slot are from earlier searches: always below cur)
+        navS[s] = r.navPage(p);
+        sx0[s] = (p % ppw) << 5;
+        sy0[s] = (p / ppw) << 5;
+    }
+
+    /** The index of cell (cx, cy), which must be on the map, or -1 if its page isn't active. */
+    private int index(int cx, int cy) {
+        int s = slotOf[(cy >> 5) * ppw + (cx >> 5)];
+        return s < 0 ? -1 : s << 10 | (cy & 31) << 5 | (cx & 31);
+    }
+
+    private int navOf(int i) {
+        return navS[i >>> 10][i & 1023];
+    }
+
+    /** Cell (cx, cy) open, as the search sees it (off the map or on a page that isn't active: blocked). */
+    private boolean open(int cx, int cy) {
+        if (!in(cx, cy)) return false;
+        int s = slotOf[(cy >> 5) * ppw + (cx >> 5)];
+        return s >= 0 && navS[s][(cy & 31) << 5 | (cx & 31)] != 0;
+    }
+
+    private int cellX(int i) {
+        return sx0[i >>> 10] + (i & 31);
+    }
+
+    private int cellY(int i) {
+        return sy0[i >>> 10] + ((i >> 5) & 31);
     }
 
     /** Waypoints (x0, y0, x1, y1, ...) in px from a to b, or null. budget = most cells to search. */
@@ -32,9 +83,11 @@ public final class NavPath {
         float cs = Tile.SIZE * Region.NAV;
         int sx = (int) (ax / cs), sy = (int) (ay / cs), ex = (int) (bx / cs), ey = (int) (by / cs);
         if (!in(sx, sy) || !in(ex, ey)) return null;
-        int start = sy * w + sx, goal = nearestOpen(ex, ey);
-        if (goal < 0) return null;
-        if (r.nav[start] == 0) {
+        // a goal on a page that isn't active: towards it, as far as the frontier
+        boolean beyond = index(ex, ey) < 0;
+        int start = index(sx, sy), goal = beyond ? -1 : nearestOpen(ex, ey);
+        if (goal < 0 && !beyond) return null;
+        if (start < 0 || navOf(start) == 0) {
             start = nearestOpen(sx, sy);
             if (start < 0) return null;
         }
@@ -49,7 +102,7 @@ public final class NavPath {
         prev[start] = -1;
         stamp[start] = cur;
         push(start, 0);
-        int gx = goal % w, gy = goal / w;
+        int gx = beyond ? ex : cellX(goal), gy = beyond ? ey : cellY(goal);
         int found = -1, n = 0, bestC = start;
         float bestH = Float.MAX_VALUE;
         while (hn > 0 && n < budget) {
@@ -61,23 +114,53 @@ public final class NavPath {
                 found = c;
                 break;
             }
-            int cx = c % w, cy = c / w;
+            int l = c & 1023, lx = l & 31, ly = l >> 5;
+            int cx = sx0[c >>> 10] + lx, cy = sy0[c >>> 10] + ly;
             float hh = octile(cx, cy, gx, gy);
             if (hh < bestH) {
                 bestH = hh;
                 bestC = c;
             }
+            float gc = g[c];
+            if (lx > 0 && lx < 31 && ly > 0 && ly < 31) {
+                // all eight neighbours on this page
+                byte[] nv = navS[c >>> 10];
+                for (int dy = -1; dy <= 1; dy++)
+                    for (int dx = -1; dx <= 1; dx++) {
+                        if (dx == 0 && dy == 0) continue;
+                        int off = dy * 32 + dx, ni = c + off;
+                        byte nn = nv[l + off];
+                        if (nn == 0 || stamp[ni] == cur + 1) continue;
+                        if (dx != 0 && dy != 0 && (nv[l + dx] == 0 || nv[l + dy * 32] == 0)) continue;
+                        float step = (dx != 0 && dy != 0) ? 1.414f : 1f;
+                        if (nn == 2) step *= 0.9f; // a slight liking for streets
+                        float ng = gc + step;
+                        if (stamp[ni] != cur || ng < g[ni]) {
+                            stamp[ni] = cur;
+                            g[ni] = ng;
+                            prev[ni] = c;
+                            push(ni, ng + octile(cx + dx, cy + dy, gx, gy));
+                        }
+                    }
+                continue;
+            }
+            boolean edge = false;
             for (int dy = -1; dy <= 1; dy++)
                 for (int dx = -1; dx <= 1; dx++) {
                     if (dx == 0 && dy == 0) continue;
                     int nx = cx + dx, ny = cy + dy;
                     if (!in(nx, ny)) continue;
-                    int ni = ny * w + nx;
-                    if (r.nav[ni] == 0 || stamp[ni] == cur + 1) continue;
-                    if (dx != 0 && dy != 0 && (r.nav[cy * w + nx] == 0 || r.nav[ny * w + cx] == 0)) continue;
+                    int ni = index(nx, ny);
+                    if (ni < 0) {
+                        edge = true;
+                        continue;
+                    }
+                    int nn = navOf(ni);
+                    if (nn == 0 || stamp[ni] == cur + 1) continue;
+                    if (dx != 0 && dy != 0 && (!open(nx, cy) || !open(cx, ny))) continue;
                     float step = (dx != 0 && dy != 0) ? 1.414f : 1f;
-                    if (r.nav[ni] == 2) step *= 0.9f; // a slight liking for streets
-                    float ng = g[c] + step;
+                    if (nn == 2) step *= 0.9f; // a slight liking for streets
+                    float ng = gc + step;
                     if (stamp[ni] != cur || ng < g[ni]) {
                         stamp[ni] = cur;
                         g[ni] = ng;
@@ -85,6 +168,11 @@ public final class NavPath {
                         push(ni, ng + octile(nx, ny, gx, gy));
                     }
                 }
+            // heading beyond the active pages: the first frontier cell reached is as far as this path goes
+            if (beyond && edge) {
+                found = c;
+                break;
+            }
         }
         searched += n;
         if (found < 0) found = bestC; // out of budget: go as far as we got
@@ -101,14 +189,14 @@ public final class NavPath {
         while (k < len - 1) {
             int far = k + 1;
             for (int j = len - 1; j > k + 1; j--) {
-                float jx = (cells[j] % w + 0.5f) * cs, jy = (cells[j] / w + 0.5f) * cs;
+                float jx = (cellX(cells[j]) + 0.5f) * cs, jy = (cellY(cells[j]) + 0.5f) * cs;
                 if (straightWalkable(px, py, jx, jy)) {
                     far = j;
                     break;
                 }
             }
-            px = (cells[far] % w + 0.5f) * cs;
-            py = (cells[far] / w + 0.5f) * cs;
+            px = (cellX(cells[far]) + 0.5f) * cs;
+            py = (cellY(cells[far]) + 0.5f) * cs;
             pts[pn++] = px;
             pts[pn++] = py;
             k = far;
@@ -125,17 +213,18 @@ public final class NavPath {
         return x >= 0 && y >= 0 && x < w && y < h;
     }
 
+    /** The open cell nearest (cx, cy) (on an active page), or -1. */
     private int nearestOpen(int cx, int cy) {
         for (int rad = 0; rad < 6; rad++)
             for (int dy = -rad; dy <= rad; dy++)
                 for (int dx = -rad; dx <= rad; dx++) {
                     int x = cx + dx, y = cy + dy;
-                    if (in(x, y) && r.nav[y * w + x] != 0) return y * w + x;
+                    if (open(x, y)) return index(x, y);
                 }
         return -1;
     }
 
-    /** True if every navigation cell along the line is open. */
+    /** True if every navigation cell along the line is open (and on an active page). */
     public boolean straightWalkable(float ax, float ay, float bx, float by) {
         float cs = Tile.SIZE * Region.NAV;
         float dx = bx - ax, dy = by - ay;
@@ -144,7 +233,7 @@ public final class NavPath {
         for (int s = 0; s <= steps; s++) {
             float x = ax + dx * s / steps, y = ay + dy * s / steps;
             int cx = (int) (x / cs), cy = (int) (y / cs);
-            if (!in(cx, cy) || r.nav[cy * w + cx] == 0) return false;
+            if (!open(cx, cy)) return false;
         }
         return true;
     }
