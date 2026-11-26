@@ -31,6 +31,17 @@ public final class Tests {
         if (!ok) throw new AssertionError(what);
     }
 
+    private static Synth synth;
+
+    /** Every sound, made once for the tests that need them. */
+    static synchronized Synth synth() {
+        if (synth == null) {
+            synth = new Synth();
+            synth.prerenderAll();
+        }
+        return synth;
+    }
+
     static World game(long seed, int size, String scenario, int threads) {
         return Setup.newGame(content, size, RegionGen.COAST, seed, scenario == null ? null : content.scenario(scenario), threads);
     }
@@ -1566,6 +1577,108 @@ public final class Tests {
                     check(Math.abs(f.hq.x - hx[i]) + Math.abs(f.hq.y - hy[i]) < 50, f.name + " moved with nobody ordering it");
                 }
                 m.shutdown();
+            }
+        });
+        test("audio: every sound renders, loops join, the mix never clips", new T() {
+            public void run() {
+                Synth sy = synth();
+                for (int id = 0; id < Synth.COUNT; id++) {
+                    short[] b = sy.get(id);
+                    String n = Synth.NAMES[id];
+                    check(b != null && b.length > 200, n + " is empty");
+                    int pk = 0;
+                    long sum = 0, diffs = 0;
+                    for (int i = 0; i < b.length; i++) {
+                        pk = Math.max(pk, Math.abs(b[i]));
+                        sum += b[i];
+                        if (i > 0) diffs += Math.abs(b[i] - b[i - 1]);
+                    }
+                    check(pk > 8000, n + " is too quiet: " + pk);
+                    check(Math.abs(sum / (double) b.length) < 900, n + " is off centre (DC)");
+                    if (Synth.isLoop(id)) {
+                        // the join: no bigger a step than the sound makes anyway
+                        int seam = Math.abs(b[0] - b[b.length - 1]);
+                        float typical = diffs / (float) b.length;
+                        check(seam <= typical * 6 + 600, n + " clicks where it loops: " + seam + " (typical step " + typical + ")");
+                    } else check(Math.abs(b[b.length - 1]) < 400, n + " stops dead");
+                }
+                for (int k = 0; k < Synth.STEMS; k++) {
+                    short[] st = sy.makeStem(k);
+                    check(st.length == (int) (Synth.MUSIC_LEN * Synth.MUSIC_RATE), Synth.STEM_NAMES[k] + " is the wrong length");
+                    check(Math.abs(st[0] - st[st.length - 1]) < 2500, Synth.STEM_NAMES[k] + " clicks where it loops");
+                }
+                // everything at once, as loud as it goes: the limiter keeps it under full scale
+                Mixer m = new Mixer(sy);
+                m.setVolumes(1, 1);
+                m.setMusic(Mixer.CUE_BATTLE, 1);
+                for (int k = 0; k < Mixer.LOOPS && Synth.L_SIREN_POLICE + k < Synth.COUNT; k++)
+                    m.setLoop(k, Synth.L_SIREN_POLICE + k, 1, k % 2 == 0 ? -1 : 1, 1);
+                short[] out = new short[2048];
+                int over = 0, peak = 0;
+                for (int b = 0; b < 60; b++) {
+                    for (int k = 0; k < 4; k++) m.play(k % 2 == 0 ? Synth.BIGBOOM : Synth.RIFLE, 1.2f, 0, 1, 9, 8);
+                    m.mix(out, 1024);
+                    for (short v : out) {
+                        peak = Math.max(peak, Math.abs(v));
+                        if (Math.abs(v) > 32000) over++;
+                    }
+                }
+                check(m.busy() <= Mixer.VOICES, "more voices than there are");
+                check(peak < 32767 && over < 50, "the mix clips: peak " + peak + ", " + over + " samples near full scale");
+                // copies of one sound are capped
+                Mixer m2 = new Mixer(sy);
+                for (int k = 0; k < 20; k++) m2.play(Synth.GROAN, 0.5f, 0, 1, 2, 3);
+                check(m2.busy() == 3, "copies of one sound weren't capped: " + m2.busy());
+                // mono puts both ears the same
+                Mixer m3 = new Mixer(sy);
+                m3.setMono(true);
+                m3.play(Synth.PISTOL, 1, -1, 1, 5, 2);
+                m3.mix(out, 1024);
+                for (int i = 0; i < 1024; i++) check(out[i * 2] == out[i * 2 + 1], "mono isn't");
+            }
+        });
+        test("audio: the director hears a fight, picks the cue, and never touches the world", new T() {
+            public void run() {
+                World a = game(8, 1024, "sandbox", 1), b = game(8, 1024, "sandbox", 1);
+                Region.Settlement c = a.r.city();
+                float x = c.cx * 16f + 300, y = c.cy * 16f + 200;
+                DesktopPlatform pf = new DesktopPlatform(new java.io.File("build/test-audio"));
+                pf.mixer = new Mixer(synth()); // every sound made, so the director's choices really play
+                Mixer mx = pf.mixer;
+                Settings st = new Settings();
+                st.captions = true;
+                AudioDirector ad = new AudioDirector(pf);
+                ad.applySettings(st);
+                Camera cam = new Camera();
+                cam.setScreen(540, 1170, a.r.px());
+                cam.cx = x;
+                cam.cy = y;
+                cam.zoom = 0.7f;
+                for (World w : new World[]{a, b}) {
+                    camOver(w, x, y);
+                    Tools.paintZombies(w, x, y, 30, 120, w.c.ztype("walker").index);
+                }
+                short[] out = new short[4096];
+                boolean tense = false, caption = false;
+                for (int k = 0; k < 20 * 90; k++) {
+                    a.step();
+                    b.step();
+                    ad.update(a, cam, st, World.DT, false, 1);
+                    if (k % 4 == 0) mx.mix(out, 1100);
+                    if (ad.cue() != Mixer.CUE_CALM) tense = true;
+                    if (ad.latestCaption() != null) caption = true;
+                }
+                check(mx.requests > 20, "the director played almost nothing: " + mx.requests);
+                check(tense, "the cue stayed calm with the dead on screen");
+                check(caption, "no captions for a fight");
+                long ha = 0, hb = 0;
+                for (int i = 0; i < a.e.top; i++) {
+                    ha = ha * 31 + Float.floatToIntBits(a.e.x[i]) + a.e.kind[i];
+                    hb = hb * 31 + Float.floatToIntBits(b.e.x[i]) + b.e.kind[i];
+                }
+                check(a.e.top == b.e.top && ha == hb && a.rng.state() == b.rng.state(), "listening changed the world");
+                a.shutdown();
+                b.shutdown();
             }
         });
         test("perf: 20,000 of the dead", new T() {

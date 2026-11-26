@@ -25,23 +25,20 @@ final class AndroidPlatform implements Platform {
     private final SharedPreferences prefs;
     private final Synth synth = new Synth();
     private final Mixer mixer = new Mixer(synth);
-    private final short[][] tracks = new short[2][];
     private Thread audio;
-    private int wantTrack = -1;
-    private float wantVolume;
 
     AndroidPlatform(Activity act) {
         this.act = act;
         prefs = act.getSharedPreferences("zcs2", Context.MODE_PRIVATE);
-        // the score takes a moment to make: do it out of the way
-        new Thread(new Runnable() {
+        // every sound and the score's stems are made once, out of the way (what's heard first, first); until a
+        // sound is ready the mixer simply skips it
+        Thread t = new Thread(new Runnable() {
             public void run() {
-                tracks[0] = synth.music(0.15f);
-                tracks[1] = synth.music(0.85f);
-                if (wantTrack >= 0) mixer.setMusic(tracks[wantTrack], wantVolume);
-                for (String s : new String[]{"pistol", "rifle", "mg", "shotgun", "boom", "scream", "click"}) synth.get(s);
+                synth.prerenderAll();
             }
-        }, "synth").start();
+        }, "synth");
+        t.setPriority(Thread.MIN_PRIORITY + 1);
+        t.start();
         startAudio();
     }
 
@@ -130,12 +127,9 @@ final class AndroidPlatform implements Platform {
 
     public void playSound(String name, float volume, float pan) { mixer.play(name, volume, pan); }
 
-    public void setMusic(int track, float volume) {
-        wantTrack = track;
-        wantVolume = volume * 0.6f;
-        short[] t = tracks[Math.max(0, Math.min(1, track))];
-        if (t != null) mixer.setMusic(t, wantVolume);
-    }
+    public void setMusic(int track, float volume) { mixer.setMusic(track, volume); }
+
+    public Mixer mixer() { return mixer; }
 
     @SuppressWarnings("deprecation")
     public void vibrate(int ms) {

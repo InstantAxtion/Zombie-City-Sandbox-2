@@ -183,7 +183,7 @@ public final class Weather extends Module {
         if (wet() || state == SNOW) {
             // streaks (or flakes) over the screen, slanted by the wind
             boolean snow = state == SNOW;
-            int n = state == STORM ? 260 : snow ? 160 : 150;
+            int n = state == STORM ? 260 : snow ? 160 : 150 * (1 + view.effects) / 2;
             float far = cam.zoom < 0.15f ? 0.5f : 1;
             float len = (state == STORM ? 22 : 16) * dp, slant = state == STORM ? 0.35f : 0.18f;
             g.color(snow ? 0xD8FFFFFF : state == STORM ? (int) (0x90 * far) << 24 | 0xC0D4EC : (int) (0x78 * far) << 24 | 0xB8CCE4);

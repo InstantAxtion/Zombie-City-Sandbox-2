@@ -33,7 +33,12 @@ final class GameView extends View {
             // never take the app down from a frame: the game shows what went wrong and offers the menu
             game.crashed(t);
         }
-        if (running) postInvalidateOnAnimation();
+        if (!running) return;
+        if (game.settings.fpsCap == 30) {
+            // the battery saver: the next frame no sooner than a thirtieth of a second after this one began
+            long spentMs = (System.nanoTime() - now) / 1000000L;
+            postInvalidateDelayed(Math.max(0, 30 - spentMs));
+        } else postInvalidateOnAnimation();
     }
 
     void pause() {

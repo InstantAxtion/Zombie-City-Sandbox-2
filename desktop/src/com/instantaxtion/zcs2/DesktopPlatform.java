@@ -43,6 +43,9 @@ public final class DesktopPlatform implements Platform {
     public void setPref(String key, String value) { prefs.setProperty(key, value); }
     public void playSound(String name, float volume, float pan) { sounds++; }
     public void setMusic(int track, float volume) { }
+    /** Silent: nothing is rendered, but the game's calls go through it (and are counted) as on a phone. */
+    public Mixer mixer = new Mixer(new Synth());
+    public Mixer mixer() { return mixer; }
     public void vibrate(int ms) { }
     public void shareImage(GImage img) { }
     public void exit() { }

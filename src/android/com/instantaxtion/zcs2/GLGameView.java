@@ -80,6 +80,14 @@ final class GLGameView extends GLSurfaceView implements GLSurfaceView.Renderer {
             }
         }
         long now = System.nanoTime();
+        if (game.settings.fpsCap == 30 && last != 0 && now - last < 33_000_000L) {
+            // the battery saver: hold this thread until a thirtieth of a second has passed since the last frame
+            try {
+                Thread.sleep((33_000_000L - (now - last)) / 1000000L);
+            } catch (InterruptedException ignored) {
+            }
+            now = System.nanoTime();
+        }
         float dt = last == 0 ? 1 / 60f : (now - last) / 1e9f;
         last = now;
         // the first frames are watched: an exception there means this GPU (or driver) isn't for us
