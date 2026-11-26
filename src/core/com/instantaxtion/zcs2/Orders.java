@@ -267,6 +267,8 @@ public final class Orders extends Module {
         vh.timer[v] = 0;
         // turn towards the stick, then drive on (a car can't turn on the spot)
         float want = t.speed * len;
+        // (the survivor's car: an empty tank goes nowhere)
+        if (w.surv.enabled && vh.fuel[v] <= 0) want = 0;
         if (len > 0.15f) {
             float target = (float) Math.atan2(jy, jx), h = vh.head[v];
             float d = target - h;

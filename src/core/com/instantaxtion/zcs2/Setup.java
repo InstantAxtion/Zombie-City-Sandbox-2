@@ -54,6 +54,8 @@ public final class Setup {
         outbreakY = originY;
         w.roles.assign(role, originX, originY);
         if (role == Roles.SURVIVOR && w.playerEnt < 0) survivor(w);
+        // someone to play: hiding, scavenging, needs, weapons, cars and companions (Survival)
+        if (w.playerEnt >= 0 && (role == Roles.SURVIVOR || role == Roles.OFFICER)) w.enableSurvival();
         if (w.playerEnt >= 0) {
             originX = w.e.x[w.playerEnt];
             originY = w.e.y[w.playerEnt];

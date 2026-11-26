@@ -176,7 +176,7 @@ public final class Roles extends Module {
             float[] p = w.sq.where(w.sq.get(t));
             return new float[]{p[0], p[1], 0.8f};
         }
-        if (k == 0 && w.playerEnt >= 0 && w.e.loc[w.playerEnt] == Ents.FREE) return new float[]{w.e.x[w.playerEnt], w.e.y[w.playerEnt], 1.2f};
+        if (k == 0 && w.playerAlive()) return new float[]{w.playerX(), w.playerY(), 1.2f};
         Region.Settlement c = w.r.city();
         return new float[]{c.cx * 16f, c.cy * 16f, 0.08f};
     }
@@ -670,7 +670,7 @@ public final class Roles extends Module {
             int n = callsAnswered.size();
             progress = Math.min(1, n / (float) CALLS_NEEDED);
             progressText = n + " of " + CALLS_NEEDED + " calls answered; " + days() + " of " + gd + (gd == 1 ? " day" : " days");
-            if (w.playerEnt < 0 || w.e.loc[w.playerEnt] != Ents.FREE) return;
+            if (!w.playerAlive()) return;
             if (n >= CALLS_NEEDED && late) end(true, "Your shift is over", "You answered " + n + " calls and lived through " + gd + (gd == 1 ? " day" : " days") + " of it.");
             else if (late) end(false, "Too few calls answered", "You answered " + n + " of the " + CALLS_NEEDED + " calls needed in " + gd + (gd == 1 ? " day" : " days") + ".");
             return;
@@ -678,8 +678,8 @@ public final class Roles extends Module {
         if (g.equals("reach")) {
             progress = Math.min(1, (float) (w.time / Math.max(1, deadline)));
             progressText = "Find safety: " + days() + " of " + gd + (gd == 1 ? " day" : " days") + " gone";
-            if (w.playerEnt < 0 || w.e.loc[w.playerEnt] != Ents.FREE) return;
-            float[] safe = w.strat.safeAt(w.e.x[w.playerEnt], w.e.y[w.playerEnt]);
+            if (!w.playerAlive()) return;
+            float[] safe = w.e.loc[w.playerEnt] == Ents.INSIDE ? null : w.strat.safeAt(w.playerX(), w.playerY());
             if (safe != null) end(true, "You reached safety", "You made it to " + Strategic.SAFE_NAMES[(int) safe[2]] + ", " + days() + " in.");
             else if (late) end(false, "Still out there", "Alive, but not safe: " + gd + (gd == 1 ? " day" : " days") + " gone and nowhere reached.");
             return;
@@ -689,7 +689,7 @@ public final class Roles extends Module {
             if (!campaign()) return;
             progress = (float) (w.time / Math.max(1, deadline));
             progressText = "Alive " + days() + " of " + gd + (gd == 1 ? " day" : " days");
-            if (w.playerEnt >= 0 && w.e.loc[w.playerEnt] == Ents.FREE && late) end(true, "You survived", "You lived through " + gd + " days of it.");
+            if (w.playerAlive() && late) end(true, "You survived", "You lived through " + gd + " days of it.");
             return;
         }
         if (g.equals("precinct")) {

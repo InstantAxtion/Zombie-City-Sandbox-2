@@ -11,11 +11,15 @@ import java.util.Arrays;
  */
 public final class Ents {
     public static final byte NONE = 0, FREE = 1, ABOARD = 2, BODY = 3;
+    /** Hiding inside a building (the survivor and their companions only, see Survival): off the street, still themselves. */
+    public static final byte INSIDE = 4;
     public static final byte CIV = Content.CIV, COP = Content.COP, SOLDIER = Content.SOLDIER, ZOMBIE = Content.ZOMBIE;
 
     // flags
     public static final int F_INFECTED = 1, F_HELMET = 2, F_PLAYER = 4, F_RISES = 8, F_FLEEING = 16, F_EVAC = 32,
             F_AMBIENT = 64, F_PLACED = 128, F_WOUNDED = 256, F_LEADER = 512;
+    /** One of the survivor's companions (Survival): never folded into the counts, thinks by the survivor's orders. */
+    public static final int F_COMPANION = 1 << 20;
 
     public int cap, top, live;
     public float[] x, y, vx, vy, hp, maxHp, face, timer, aimT, infT, gx, gy, dvx, dvy;
@@ -96,6 +100,22 @@ public final class Ents {
         check(i, ABOARD);
         loc[i] = FREE;
         vehicle[i] = -1;
+        x[i] = px;
+        y[i] = py;
+        if (act != null) act.touchPx(px, py);
+    }
+
+    /** Someone on the street goes into a building to hide (Survival): off the map, keeping their slot and everything else. */
+    void goInside(int i) {
+        check(i, FREE);
+        loc[i] = INSIDE;
+        vx[i] = vy[i] = dvx[i] = dvy[i] = 0;
+    }
+
+    /** Someone hiding inside comes out at a place on the map (the building's door). */
+    void comeOut(int i, float px, float py) {
+        check(i, INSIDE);
+        loc[i] = FREE;
         x[i] = px;
         y[i] = py;
         if (act != null) act.touchPx(px, py);

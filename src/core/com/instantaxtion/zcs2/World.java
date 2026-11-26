@@ -67,6 +67,12 @@ public final class World {
     public final Undead undead;
     /** A normal day round the camera: traffic, parked cars, buses, trains, patrols, people with somewhere to be (Life). */
     public final Life life;
+    /**
+     * Living through it as one person (the survivor, and the officer's own play): buildings, scavenging, needs,
+     * weapons, cars, companions. A module only once a game has someone to play (enableSurvival), so other games and
+     * their saves are exactly as before.
+     */
+    public final Survival surv;
     /** Systems plugged in (updated, saved and drawn in this order). */
     public final List<Module> modules = new ArrayList<Module>();
     /** Strategic fast-forward: everything as numbers, ten game seconds a step. */
@@ -189,6 +195,7 @@ public final class World {
         aai = new ArmedAI(this);
         modules.add(aai.module);
         modules.add(stats.rec); // reads the world, changes nothing: last
+        surv = new Survival(this);
         combat = new Combat(this);
         par = new Parallel(threads);
     }
@@ -582,6 +589,30 @@ public final class World {
         if (e.squad[i] >= 0) sq.removeMember(e.squad[i], i);
         if (i == playerEnt) return;
         e.remove(i);
+    }
+
+    /** Survival joins the modules (after everything else: it reads what the step did). Once; a save with its part calls it too. */
+    public void enableSurvival() {
+        if (!modules.contains(surv)) modules.add(surv);
+        surv.enabled = true;
+    }
+
+    /** The person the player plays is alive: on the street, in a vehicle or hiding in a building. */
+    public boolean playerAlive() {
+        if (playerEnt < 0) return false;
+        byte l = e.loc[playerEnt];
+        return e.kind[playerEnt] != Ents.ZOMBIE && (l == Ents.FREE || l == Ents.ABOARD || l == Ents.INSIDE);
+    }
+
+    /** Where that person is (their vehicle's place while aboard). */
+    public float playerX() {
+        int i = playerEnt;
+        return e.loc[i] == Ents.ABOARD && e.vehicle[i] >= 0 ? veh.x[e.vehicle[i]] : e.x[i];
+    }
+
+    public float playerY() {
+        int i = playerEnt;
+        return e.loc[i] == Ents.ABOARD && e.vehicle[i] >= 0 ? veh.y[e.vehicle[i]] : e.y[i];
     }
 
     public String nameOf(int i) {

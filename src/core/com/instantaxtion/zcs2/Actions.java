@@ -13,7 +13,7 @@ public final class Actions {
             DEPLOY = 17, ARTILLERY = 18, REQUEST_ARMY = 19, CAMERA = 20, STRATEGIC = 21, JOY = 22, FIRE = 23, MAX_IND = 24,
             WATCH = 25, ADD_PLAYER = 26, SWITCH_PLAYER = 27, GENERAL = 28, PRECINCT_CORDON = 29, PRECINCT_EVAC = 30,
             DEFENCE = 31, BUILD = 32, VEH_ORDER = 33, DRIVE = 34, POSSESS = 35, STANCE = 36, SQ_ORDER = 37, MOUNT = 38,
-            POSTURE = 39, RULE = 40, CLEAR = 41, TEMPLATE = 42, MASS = 43;
+            POSTURE = 39, RULE = 40, CLEAR = 41, TEMPLATE = 42, MASS = 43, SURV = 44;
 
     public static Object exec(World w, int kind, float[] f, int[] i, String s) {
         w.director.record(kind, f, i, s);
@@ -208,6 +208,7 @@ public final class Actions {
             case CLEAR: return Tools.clear(w, i[0], i.length > 1 ? i[1] : -1);
             case TEMPLATE: return Tools.placeTemplate(w, e.s, f[0], f[1]);
             case MASS: return Tools.paintMass(w, f[0], f[1], i[0], i[1]);
+            case SURV: return i.length > 0 ? w.surv.act(i[0], f, i) : Boolean.FALSE;
             default:
                 return null;
         }
@@ -426,6 +427,16 @@ public final class Actions {
     /** Tens of thousands of the dead: returns how many went down as individuals (the rest into the counts). */
     public static int mass(World w, float x, float y, int count, int ztype) {
         return (Integer) exec(w, MASS, new float[]{x, y}, new int[]{count, ztype}, null);
+    }
+
+    /** One of the survivor's verbs (Survival.ENTER...), with its argument and a second one (a target's uid). */
+    public static boolean survival(World w, int op, int arg, int arg2) {
+        Object r = exec(w, SURV, null, new int[]{op, arg, arg2}, null);
+        return r instanceof Boolean && (Boolean) r;
+    }
+
+    public static boolean survival(World w, int op) {
+        return survival(w, op, 0, 0);
     }
 
     public static void generalCommands(World w, boolean on) {

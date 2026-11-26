@@ -595,6 +595,164 @@ public final class Tests {
         r.w.shutdown();
     }
 
+    /** A survivor's game (the survivor scenario on a small map), a second in, with the camera on them. */
+    static World survivorGame(long seed) {
+        World w = Setup.newGame(content, 768, RegionGen.COAST, seed, content.scenario("survivor"), 2, Roles.SURVIVOR, 60000);
+        check(w.surv.enabled && w.playerEnt >= 0, "no survivor to play");
+        SurvivalBot.camOn(w);
+        steps(w, 1.5f);
+        return w;
+    }
+
+    /** Puts the survivor at (x, y) (tests only: not an action, so not for replays). */
+    static void putAt(World w, float x, float y) {
+        int p = w.playerEnt;
+        w.act.touchPx(x, y);
+        w.e.x[p] = x;
+        w.e.y[p] = y;
+        SurvivalBot.camOn(w);
+        w.step();
+        w.e.x[p] = x;
+        w.e.y[p] = y;
+    }
+
+    /** Puts the survivor at the door of a home or shop near them; returns the building (or -1). */
+    static int besideBuilding(World w) {
+        int p = w.playerEnt;
+        float px = w.e.x[p], py = w.e.y[p];
+        int best = -1;
+        float bd = Float.MAX_VALUE;
+        for (int b = 0; b < w.r.bCount; b++) {
+            float dx = w.r.doorX(b) - px, dy = w.r.doorY(b) - py, d = dx * dx + dy * dy;
+            int k = w.r.bkind(b);
+            if (d < bd && w.r.walkablePx(w.r.doorX(b), w.r.doorY(b)) && (k == Region.B_HOUSE || k == Region.B_SHOP || k == Region.B_APARTMENT)) {
+                bd = d;
+                best = b;
+            }
+        }
+        if (best >= 0) putAt(w, w.r.doorX(best), w.r.doorY(best));
+        return best;
+    }
+
+    /** The survivor's verbs in a session (only through Actions and the stick), then replayed and saved part way. */
+    static void survivalReplay() throws Exception {
+        World w = Setup.newGame(content, 768, RegionGen.COAST, 5, content.scenario("survivor"), 2, Roles.SURVIVOR, 60000);
+        SurvivalBot bot = new SurvivalBot(w);
+        SurvivalBot.camOn(w);
+        steps(w, 2);
+        Survival s = w.surv;
+        int p = w.playerEnt;
+        check(s.ready && s.owns(Survival.W_PISTOL) && s.gun == Survival.W_PISTOL, "the survivor has no pistol in hand");
+        // to the nearest door we can walk to
+        int bld = -1;
+        float bd = Float.MAX_VALUE;
+        for (int b = 0; b < w.r.bCount; b++) {
+            float dx = w.r.doorX(b) - w.e.x[p], dy = w.r.doorY(b) - w.e.y[p], d = dx * dx + dy * dy;
+            if (d < bd && d < 400 * 400 && w.r.walkablePx(w.r.doorX(b), w.r.doorY(b))) {
+                bd = d;
+                bld = b;
+            }
+        }
+        check(bld >= 0, "no door near the survivor");
+        for (int k = 0; k < 60 * 20 && !bot.toward(w.r.doorX(bld), w.r.doorY(bld), 10); k++) {
+            if (k % 20 == 0) SurvivalBot.camOn(w);
+            w.step();
+        }
+        Actions.joy(w, 0, 0);
+        check(s.can(Survival.ENTER), "no way in at the door");
+        check(Actions.survival(w, Survival.ENTER), "couldn't go in");
+        int sec = w.r.sectorOfPx(s.doorPX, s.doorPY);
+        check(w.e.loc[p] == Ents.INSIDE, "not inside");
+        Actions.survival(w, Survival.SEARCH);
+        check(Actions.survival(w, Survival.BARRICADE) && s.barricaded(), "no barricade");
+        steps(w, 2);
+        Actions.survival(w, Survival.REST, 1, 0);
+        steps(w, 5);
+        Actions.survival(w, Survival.REST, 0, 0);
+        Actions.survival(w, Survival.USE, Survival.I_WATER, 0);
+        int pop0 = w.sec.popIn[sec];
+        check(Actions.survival(w, Survival.LEAVE), "couldn't leave");
+        check(w.sec.popIn[sec] == pop0 - 1, "the count inside didn't let the survivor go");
+        check(w.e.loc[p] == Ents.FREE && !s.barricaded() && w.r.walkablePx(w.e.x[p], w.e.y[p]), "didn't get out through the door");
+        steps(w, 1);
+        // a fight: the manual aim, a shot, a shove and a swing
+        float px = w.e.x[p], py = w.e.y[p];
+        Actions.paint(w, px + 70, py, 2, 6, w.c.ztype("walker").index);
+        steps(w, 0.3f);
+        Actions.survival(w, Survival.AIM, 1, 0);
+        int z = w.sp.nearestZombie(w.e, w.e.x[p], w.e.y[p], 200);
+        check(z >= 0, "no zombie to aim at");
+        check(Actions.survival(w, Survival.AIM_AT, z, w.e.uid[z]), "couldn't aim");
+        int shots = w.stats.shots;
+        Actions.survival(w, Survival.SHOOT);
+        steps(w, 1);
+        check(w.stats.shots > shots, "the manual shot didn't go off");
+        Actions.survival(w, Survival.MELEE, 0, 0);
+        steps(w, 1);
+        Actions.survival(w, Survival.MELEE, 1, 0);
+        Actions.survival(w, Survival.AIM, 0, 0);
+        Actions.erase(w, w.e.x[p], w.e.y[p], 300);
+        steps(w, 2);
+        check(w.playerAlive(), "the survivor died in the fight");
+        // a car: put down near (a recorded action too), walked to, driven, left
+        int v = Actions.vehicle(w, "car", w.e.x[p], w.e.y[p]);
+        check(v >= 0, "no car");
+        for (int k = 0; k < 60 * 20 && w.playerAlive() && !bot.toward(w.veh.x[v], w.veh.y[v], 18); k++) w.step();
+        check(w.playerAlive(), "the survivor died on the way to the car");
+        check(Actions.survival(w, Survival.CAR) && w.orders.driven == v, "couldn't take the car");
+        float fuel = w.veh.fuel[v];
+        Actions.joy(w, 1, 0.2f);
+        steps(w, 4);
+        Actions.joy(w, 0, 0);
+        steps(w, 2);
+        check(w.veh.fuel[v] < fuel, "driving burned no fuel");
+        check(Actions.survival(w, Survival.CAR) && w.e.loc[p] == Ents.FREE, "couldn't get out");
+        // companions
+        Actions.people(w, "civilian", 2, w.e.x[p] + 14, w.e.y[p]);
+        steps(w, 0.5f);
+        Actions.survival(w, Survival.RECRUIT);
+        Actions.survival(w, Survival.RECRUIT);
+        check(s.compN >= 1, "nobody came along");
+        Actions.survival(w, Survival.ORDER, Survival.C_STAY, -1);
+        steps(w, 2);
+        Actions.survival(w, Survival.ORDER, Survival.C_CARRY, 0);
+        Actions.survival(w, Survival.ORDER, Survival.C_FOLLOW, -1);
+        Actions.joy(w, -0.5f, 0);
+        steps(w, 3);
+        Actions.joy(w, 0, 0);
+        Actions.survival(w, Survival.EQUIP, Survival.W_HANDS, 0);
+        Actions.survival(w, Survival.PICKUP);
+        steps(w, 2);
+        check(Audit.check(w).isEmpty(), "audit: " + Audit.check(w));
+        check(Audit.ledger(w) == 0, "the ledger is off by " + Audit.ledger(w));
+        Replay r = Replay.of(content, w, 1);
+        r.runTo(w.tick);
+        check(Audit.hash(r.w) == Audit.hash(w), "the replay of the survivor came out different");
+        check(java.util.Arrays.equals(survBytes(r.w), survBytes(w)), "the replay's survival state came out different");
+        ByteArrayOutputStream bo = new ByteArrayOutputStream();
+        SaveIO.save(w, bo);
+        World l = SaveIO.load(content, new ByteArrayInputStream(bo.toByteArray()), 2);
+        check(l.surv.enabled && l.modules.contains(l.surv), "survival didn't come back from the save");
+        check(java.util.Arrays.equals(survBytes(l), survBytes(w)), "the survival state didn't come back from the save");
+        for (int k = 0; k < 20 * 20; k++) {
+            w.step();
+            l.step();
+        }
+        check(Audit.hash(l) == Audit.hash(w), "diverged after loading");
+        check(java.util.Arrays.equals(survBytes(l), survBytes(w)), "the survival state diverged after loading");
+        w.shutdown();
+        l.shutdown();
+        r.w.shutdown();
+    }
+
+    static byte[] survBytes(World w) throws Exception {
+        ByteArrayOutputStream bo = new ByteArrayOutputStream();
+        java.io.DataOutputStream o = new java.io.DataOutputStream(bo);
+        w.surv.save(o);
+        o.flush();
+        return bo.toByteArray();
+    }
+
     /** Runs a test with every new world in sparse mode (ActiveSet: only the chunks the simulation needs are active). */
     static void sparse(T t) throws Exception {
         boolean was = ActiveSet.sparseDefault;
@@ -1953,6 +2111,133 @@ public final class Tests {
                     Thread.sleep(20);
                 }
                 check(g2.world() == null && g2.screen() == Game.S_NEW, "a cancelled load still started the game");
+            }
+        });
+        test("survival: every survival action replays exactly and survives a save", new T() {
+            public void run() throws Exception {
+                survivalReplay();
+            }
+        });
+        test("survival: hiding in a barricaded building outlives a horde that kills you in the street", new T() {
+            public void run() throws Exception {
+                boolean[] alive = new boolean[2];
+                boolean[] bitten = new boolean[2];
+                for (int pass = 0; pass < 2; pass++) {
+                    World w = survivorGame(11);
+                    int p = w.playerEnt;
+                    int b = besideBuilding(w);
+                    check(b >= 0, "no building near the survivor");
+                    w.surv.items[Survival.I_TOOLS] = 2;
+                    if (pass == 1) {
+                        check(Actions.survival(w, Survival.ENTER), "couldn't go in");
+                        check(Actions.survival(w, Survival.BARRICADE), "couldn't barricade");
+                        check(Actions.survival(w, Survival.BARRICADE), "couldn't reinforce");
+                        check(w.surv.barricaded() && w.surv.doorStrength() > 2, "the barricade isn't strong: " + w.surv.doorStrength());
+                    }
+                    Actions.paint(w, w.r.doorX(b), w.r.doorY(b), 140, 90, w.c.ztype("walker").index);
+                    for (int k = 0; k < 150 * 20 && w.playerAlive(); k++) {
+                        if (k % 20 == 0) SurvivalBot.camOn(w);
+                        w.step();
+                    }
+                    alive[pass] = w.playerAlive();
+                    bitten[pass] = !alive[pass] || (w.e.flags[p] & Ents.F_INFECTED) != 0;
+                    String a = Audit.check(w);
+                    check(a.isEmpty(), "audit: " + a);
+                    check(Audit.ledger(w) == 0, "the ledger is off by " + Audit.ledger(w));
+                    w.shutdown();
+                }
+                check(bitten[0], "the horde didn't get the survivor in the street");
+                check(alive[1] && !bitten[1], "the survivor didn't outlive the horde behind a barricade");
+            }
+        });
+        test("survival: scavenging depletes", new T() {
+            public void run() throws Exception {
+                World w = survivorGame(12);
+                Survival s = w.surv;
+                int sec = 0;
+                for (int q = 0; q < w.sec.n; q++) if (w.secBuildings[q].length > w.secBuildings[sec].length) sec = q;
+                java.util.List<Integer> bl = new java.util.ArrayList<Integer>();
+                for (int b : w.secBuildings[sec]) bl.add(b);
+                check(bl.size() >= 6, "too few buildings in the busiest street: " + bl.size());
+                int found = 0, searched = 0;
+                float lastYield = s.yieldIn(sec);
+                check(lastYield == 1, "a fresh street isn't full: " + lastYield);
+                for (int k = 0; k < Math.min(10, bl.size()); k++) {
+                    int b = bl.get(k);
+                    putAt(w, w.r.doorX(b), w.r.doorY(b));
+                    if (!Actions.survival(w, Survival.ENTER)) continue;
+                    if (s.inside != b) {
+                        Actions.survival(w, Survival.LEAVE);
+                        continue;
+                    }
+                    java.util.Arrays.fill(s.items, 0);
+                    int before = s.finds;
+                    Actions.survival(w, Survival.SEARCH);
+                    found += s.finds - before;
+                    searched++;
+                    check(!s.can(Survival.SEARCH), "a building can be searched twice");
+                    check(!Actions.survival(w, Survival.SEARCH), "a second search found something");
+                    float y = s.yieldIn(sec);
+                    check(y < lastYield, "the street didn't get poorer: " + y + " after " + lastYield);
+                    lastYield = y;
+                    check(Actions.survival(w, Survival.LEAVE), "couldn't leave");
+                    // and back in: still searched
+                    putAt(w, w.r.doorX(b), w.r.doorY(b));
+                    Actions.survival(w, Survival.ENTER);
+                    check(!s.can(Survival.SEARCH), "the building filled up again");
+                    Actions.survival(w, Survival.LEAVE);
+                }
+                check(searched >= 5, "only " + searched + " buildings could be entered");
+                check(found > 0, "nothing found in " + searched + " buildings");
+                // the loot tables differ by kind: a hospital holds medkits, a police station rounds, a shop food
+                check(Survival.loot(Region.B_HOSPITAL)[Survival.I_MEDS] > Survival.loot(Region.B_SHOP)[Survival.I_MEDS], "hospitals have no more medkits than shops");
+                check(Survival.loot(Region.B_POLICE)[5] > Survival.loot(Region.B_HOUSE)[5], "police stations have no more rounds than homes");
+                check(Survival.loot(Region.B_SHOP)[Survival.I_FOOD] > Survival.loot(Region.B_POLICE)[Survival.I_FOOD], "shops have no more food than police stations");
+                String a = Audit.check(w);
+                check(a.isEmpty(), "audit: " + a);
+                check(Audit.ledger(w) == 0, "the ledger is off by " + Audit.ledger(w));
+                w.shutdown();
+            }
+        });
+        test("survival: needs decay and items restore them", new T() {
+            public void run() throws Exception {
+                World w = survivorGame(13);
+                Survival s = w.surv;
+                int p = w.playerEnt;
+                check(s.needsOn, "the survivor has no needs");
+                float f0 = s.food, w0 = s.water, r0 = s.rest;
+                int b = besideBuilding(w);
+                check(b >= 0 && Actions.survival(w, Survival.ENTER), "couldn't go in");
+                // six game hours (inside, quiet: nothing else wears on them)
+                for (int k = 0; k < 360 * 20 && w.playerAlive(); k++) w.step();
+                check(w.playerAlive(), "died sitting indoors");
+                check(s.food < f0 - 0.08f && s.water < w0 - 0.2f && s.rest < r0 - 0.1f, "needs didn't decay: food " + s.food + " water " + s.water + " rest " + s.rest);
+                check(s.water < s.food, "thirst isn't quicker than hunger");
+                s.items[Survival.I_FOOD] = 1;
+                s.items[Survival.I_WATER] = 1;
+                s.items[Survival.I_MEDS] = 1;
+                float f1 = s.food, w1 = s.water;
+                check(Actions.survival(w, Survival.USE, Survival.I_FOOD, 0) && s.food > f1 + 0.3f, "food didn't help");
+                check(Actions.survival(w, Survival.USE, Survival.I_WATER, 0) && s.water > w1 + 0.3f, "water didn't help");
+                check(s.items[Survival.I_FOOD] == 0 && s.items[Survival.I_WATER] == 0, "the items weren't used up");
+                check(!Actions.survival(w, Survival.USE, Survival.I_FOOD, 0), "ate food that wasn't there");
+                w.e.hp[p] = 20;
+                check(Actions.survival(w, Survival.USE, Survival.I_MEDS, 0) && w.e.hp[p] > 45, "the medkit didn't heal");
+                float r1 = s.rest;
+                check(Actions.survival(w, Survival.REST, 1, 0), "couldn't rest inside");
+                for (int k = 0; k < 120 * 20; k++) w.step();
+                check(s.rest > r1 + 0.2f, "rest didn't restore: " + s.rest + " from " + r1);
+                // sprinting drains stamina and walking brings it back
+                Actions.survival(w, Survival.LEAVE);
+                Actions.joy(w, 1, 0);
+                float st0 = s.stamina;
+                for (int k = 0; k < 6 * 20; k++) w.step();
+                check(s.stamina < st0 - 0.3f, "sprinting didn't tire: " + s.stamina);
+                Actions.joy(w, 0, 0);
+                float st1 = s.stamina;
+                for (int k = 0; k < 10 * 20; k++) w.step();
+                check(s.stamina > st1 + 0.2f, "stamina didn't come back: " + s.stamina);
+                w.shutdown();
             }
         });
         test("workability: a survivor starts away from the outbreak", new T() {

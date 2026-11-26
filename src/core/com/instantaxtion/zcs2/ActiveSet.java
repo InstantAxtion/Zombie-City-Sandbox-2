@@ -220,8 +220,8 @@ public final class ActiveSet {
         wn = 0;
         Ents e = w.e;
         // the individuals' own chunks, then a ring round each
-        for (int i = 0; i < e.top; i++) if (e.loc[i] == Ents.FREE) want(pageOfPx(e.x[i], e.y[i]));
-        for (int i = 0; i < e.top; i++) if (e.loc[i] == Ents.FREE) wantRingPx(e.x[i], e.y[i]);
+        for (int i = 0; i < e.top; i++) if (e.loc[i] == Ents.FREE || e.loc[i] == Ents.INSIDE) want(pageOfPx(e.x[i], e.y[i]));
+        for (int i = 0; i < e.top; i++) if (e.loc[i] == Ents.FREE || e.loc[i] == Ents.INSIDE) wantRingPx(e.x[i], e.y[i]);
         // building fires
         Fires f = w.fires;
         for (int k = 0; k < f.count(); k++) {

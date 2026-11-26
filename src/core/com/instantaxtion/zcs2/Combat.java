@@ -131,8 +131,9 @@ final class Combat {
         Ents e = w.e;
         if (t < 0 || e.loc[t] != Ents.FREE || e.kind[t] != Ents.ZOMBIE) return;
         Content.Unit u = w.unitOf(i);
-        Content.Weapon wp = grenade ? u.grenade : u.weapon;
+        Content.Weapon wp = grenade ? u.grenade : i == w.playerEnt && w.surv.enabled ? w.surv.gunWeapon(u) : u.weapon;
         if (wp == null) return;
+        if (!grenade && i == w.playerEnt && w.surv.enabled) w.surv.fired();
         float x = e.x[i], y = e.y[i], tx = e.x[t], ty = e.y[t];
         float dx = tx - x, dy = ty - y, d = (float) Math.sqrt(dx * dx + dy * dy);
         boolean armed = e.armed(i);
@@ -376,6 +377,11 @@ final class Combat {
 
     /** The survivor the player controls. */
     void playerThink(int i, Parallel.Scratch s) {
+        // (survival: sprinting on stamina, the weapon in hand, a manual aim)
+        if (w.surv.enabled) {
+            w.surv.think(i, s);
+            return;
+        }
         Ents e = w.e;
         Content.Unit u = w.unitOf(i);
         if (e.aimT[i] > 0) e.aimT[i] -= World.DT;

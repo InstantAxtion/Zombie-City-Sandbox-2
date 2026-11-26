@@ -495,6 +495,8 @@ public final class SaveIO {
             byte[] data = new byte[in.readInt()];
             in.readFully(data);
             if (ver < 4) data = upgradeModule(id, data);
+            // (survival is a module only in games with someone to play: a save that has its part brings it in)
+            if (id.equals(w.surv.id())) w.enableSurvival();
             for (Module m : w.modules)
                 if (m.id().equals(id)) m.load(new DataInputStream(new java.io.ByteArrayInputStream(data)));
         }
