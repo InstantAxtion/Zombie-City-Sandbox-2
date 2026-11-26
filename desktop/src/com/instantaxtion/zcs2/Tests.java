@@ -402,6 +402,25 @@ public final class Tests {
                 l.shutdown();
             }
         });
+        test("balance: outbreak sizes play out in broad bands (many seeds)", new T() {
+            public void run() throws Exception {
+                int[] sizes = {3000, 60000, 250000};
+                java.util.List<Balance.Run> runs = Balance.batch(content, sizes, 2, 1536, 12, 2);
+                System.out.print(Balance.table(runs, sizes).replaceAll("(?m)^", "        "));
+                for (Balance.Run r : runs) {
+                    if (r.zombies == 3000)
+                        check(r.result == Balance.CONTAINED && r.days < 1, "a small outbreak should be put down within a day: " + Balance.RESULTS[r.result] + " after " + r.days);
+                    if (r.zombies == 60000) {
+                        check(r.days > 0.2f, "a medium outbreak should be a fight, not over in " + r.days + " days");
+                        check(r.lostShare < 0.6f, "a medium outbreak shouldn't usually take the country: lost " + r.lostShare);
+                    }
+                    if (r.zombies == 250000) {
+                        check(r.result != Balance.CONTAINED || r.days > 2, "a big outbreak shouldn't be over in " + r.days + " days");
+                        check(r.lostShare > 0.05f, "a big outbreak should cost a lot: lost " + r.lostShare);
+                    }
+                }
+            }
+        });
         test("perf: 20,000 of the dead", new T() {
             public void run() {
                 World w = game(2, 1024, "sandbox", 4);

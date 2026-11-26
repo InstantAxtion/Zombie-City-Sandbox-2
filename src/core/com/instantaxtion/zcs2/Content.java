@@ -308,6 +308,11 @@ public final class Content {
         return formationById.get(id);
     }
 
+    /** Overrides a rule (for balancing tools; the game reads content.ini). */
+    public void setRule(String key, float value) {
+        rules.put(key, value);
+    }
+
     /** A number from the [rules] section. */
     public float rule(String key, float def) {
         Float v = rules.get(key);

@@ -116,7 +116,7 @@ public final class Dispatch {
         for (int cy = cy0; cy <= cy1; cy++)
             for (int cx = cx0; cx <= cx1; cx++) {
                 int c = cy * w.sp.cw + cx;
-                for (int j = w.sp.zStart[c]; j < w.sp.zStart[c + 1] && n < 200; j++) {
+                for (int j = w.sp.zStart[c]; j < w.sp.zEnd[c] && n < 200; j++) {
                     int z = w.sp.zList[j];
                     sx += e.x[z];
                     sy += e.y[z];
