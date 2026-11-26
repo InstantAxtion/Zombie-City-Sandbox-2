@@ -532,16 +532,17 @@ public final class Forces extends Module {
             // the player commands; idle formations only defend where they stand
             return;
         }
-        int[] z = w.stats.zBySettlement;
+        // the general plans with what's been reported, not the truth
+        int[] z = w.command.reportedZ();
         for (Formation f : formations) if (f.task == -2) f.task = -1; // couldn't get there last time: try again
         List<Region.Settlement> threats = new ArrayList<Region.Settlement>();
         for (Region.Settlement s : w.r.settlements)
-            if ((s.kind == Region.S_CITY || s.kind == Region.S_TOWN) && z[s.id] > 150) threats.add(s);
+            if ((s.kind == Region.S_CITY || s.kind == Region.S_TOWN) && z[s.id] > 150 && !w.command.isAbandoned(s.id)) threats.add(s);
         // the worst first: more of the dead, more people at stake
         java.util.Collections.sort(threats, new java.util.Comparator<Region.Settlement>() {
             public int compare(Region.Settlement a, Region.Settlement b) {
-                float sa = w.stats.zBySettlement[a.id] + w.stats.popBySettlement[a.id] * 0.002f + (a.capital ? 5000 : 0);
-                float sb = w.stats.zBySettlement[b.id] + w.stats.popBySettlement[b.id] * 0.002f + (b.capital ? 5000 : 0);
+                float sa = w.command.repZ[a.id] + w.stats.popBySettlement[a.id] * 0.002f + (a.capital ? 5000 : 0);
+                float sb = w.command.repZ[b.id] + w.stats.popBySettlement[b.id] * 0.002f + (b.capital ? 5000 : 0);
                 return Float.compare(sb, sa);
             }
         });

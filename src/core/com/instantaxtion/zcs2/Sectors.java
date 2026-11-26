@@ -200,7 +200,7 @@ public final class Sectors {
             if (inf[s] >= 4 && settlement[s] >= 0) {
                 int hs = w.strat.hospitalSector(settlement[s]);
                 if (hs >= 0 && hs != s) {
-                    int m = Math.min((int) inf[s], stoch(inf[s] * 0.02f * dt, s * 7L + 4));
+                    int m = Math.min((int) inf[s], stoch(inf[s] * 0.02f * dt * (1 - w.media.hidden()), s * 7L + 4));
                     inf[s] -= m;
                     inf[hs] += m;
                 }
@@ -279,7 +279,7 @@ public final class Sectors {
             }
         }
         // ordinary life on the streets, where the camera is
-        if (cam[s] && zHere == 0 && popIn[s] > 0 && room && !w.gov.curfew && w.daylight() > 0.3f) {
+        if (cam[s] && zHere == 0 && popIn[s] > 0 && room && !w.gov.curfew && !w.command.sheltering(settlement[s]) && w.daylight() > 0.3f) {
             int want = Math.min(28, popIn[s] / 25 + 2);
             if (ambient[s] < want) {
                 int m = Math.min(want - ambient[s], 3);

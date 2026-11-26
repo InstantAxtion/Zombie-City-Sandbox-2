@@ -425,6 +425,18 @@ public final class Strategic {
         columnT = 15;
         for (int st = 0; st < pending.length; st++) {
             if (pending[st] <= 0) continue;
+            if (w.command.quarantined(st)) {
+                // turned back at the checkpoints
+                Region.Settlement qs = w.r.settlements.get(st);
+                int back = qs.hubNode >= 0 ? w.r.sectorOfPx(w.r.roads.nx[qs.hubNode], w.r.roads.ny[qs.hubNode]) : w.r.sectorOfPx(qs.cx * 16f, qs.cy * 16f);
+                int inf = Math.min(pending[st], infectedPending);
+                infectedPending -= inf;
+                sec.popIn[back] += pending[st] - inf;
+                sec.inf[back] += inf;
+                w.stats.turnedBack += pending[st];
+                pending[st] = 0;
+                continue;
+            }
             Column c = new Column();
             c.count = pending[st];
             c.infected = Math.min(c.count, infectedPending);
@@ -528,6 +540,7 @@ public final class Strategic {
         }
         for (int k = 0; k < count; k++) sec.popIn[homes.get(k % homes.size())]++;
         if (infected > 0) sec.inf[homes.get(0)] += infected;
+        w.society.arrived(st, count, infected);
     }
 
     // ------------------------------------------------------------------ bridges

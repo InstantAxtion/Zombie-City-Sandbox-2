@@ -40,6 +40,9 @@ public final class World {
     public final Stats stats;
     public final Forces forces;
     public final Weather weather;
+    public final Command command;
+    public final Media media;
+    public final Society society;
     /** Systems plugged in (updated, saved and drawn in this order). */
     public final List<Module> modules = new ArrayList<Module>();
     /** Strategic fast-forward: everything as numbers, ten game seconds a step. */
@@ -100,6 +103,12 @@ public final class World {
         weather = new Weather(this);
         modules.add(weather);
         modules.add(forces);
+        command = new Command(this);
+        media = new Media(this);
+        society = new Society(this);
+        modules.add(command);
+        modules.add(media);
+        modules.add(society);
         zai = new ZombieAI(this);
         cai = new CivAI(this);
         aai = new ArmedAI(this);

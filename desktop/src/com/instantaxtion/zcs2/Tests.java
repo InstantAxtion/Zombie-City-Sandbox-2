@@ -286,7 +286,7 @@ public final class Tests {
                 boolean arrived = !h.alive;
                 float d1 = (float) Math.hypot(h.x - c.cx * 16f, h.y - c.cy * 16f);
                 check(arrived || d1 < d0 - 300 || h.target >= 0, "the horde didn't move towards anyone: " + d0 + " -> " + d1);
-                check(w.totalZombies() <= 800, "dead appeared from nowhere: " + w.totalZombies());
+                check(w.totalZombies() <= 800 + w.stats.zombiesMade, "dead appeared from nowhere: " + w.totalZombies());
                 w.shutdown();
             }
         });
@@ -400,6 +400,92 @@ public final class Tests {
                 play(w, 10, true);
                 w.shutdown();
                 l.shutdown();
+            }
+        });
+        test("command: the authorities see less than the truth, less without phones", new T() {
+            public void run() {
+                float[] seen = new float[2];
+                for (int k = 0; k < 2; k++) {
+                    World w = game(17, 1024, "sandbox", 2);
+                    Region.Settlement c = w.r.city();
+                    if (k == 1) for (Region.Facility f : w.r.facilities) if (f.kind == Region.F_PHONE) w.strat.online[f.id] = false;
+                    // well away from the telephone exchange (so in the first run it stays up)
+                    float px = c.cx * 16f, py = c.cy * 16f;
+                    for (Region.Facility f : w.r.facilities)
+                        if (f.kind == Region.F_PHONE && f.settlement == c.id) {
+                            float dx = px - f.x, dy = py - f.y, d = (float) Math.sqrt(dx * dx + dy * dy) + 1;
+                            px = f.x + dx / d * 1800;
+                            py = f.y + dy / d * 1800;
+                        }
+                    camOver(w, px, py);
+                    Tools.paintZombies(w, px, py, 600, 400, -1);
+                    for (int t = 0; t < 90; t++) {
+                        // (the exchange stays down: nobody's there to repair it)
+                        if (k == 1) for (Region.Facility f : w.r.facilities) if (f.kind == Region.F_PHONE) w.strat.online[f.id] = false;
+                        play(w, 1, t % 10 == 0);
+                        if (t == 14) check(w.command.repZ[c.id] < w.stats.zBySettlement[c.id], "the reports caught up instantly");
+                    }
+                    seen[k] = w.command.repZ[c.id] / Math.max(1, w.stats.zBySettlement[c.id]);
+                    check(w.command.repZ[c.id] > 0, "nothing was ever reported");
+                    w.shutdown();
+                }
+                check(seen[1] < seen[0], "phones down should hide more: " + seen[1] + " vs " + seen[0]);
+            }
+        });
+        test("command: a quarantine turns refugees back", new T() {
+            public void run() {
+                World w = game(18, 1024, "sandbox", 2);
+                w.gov.playerDecides = true;
+                Region.Settlement t = null;
+                for (Region.Settlement s : w.r.settlements) if (s.kind == Region.S_TOWN && (t == null || s.residents > t.residents)) t = s;
+                long before = Audit.people(w);
+                w.command.setQuarantine(t.id, true);
+                for (int s = 0; s < w.sec.n; s++)
+                    if (w.sec.settlement[s] == t.id && w.sec.popIn[s] >= 300) {
+                        w.sec.popIn[s] -= 300;
+                        w.strat.pending[t.id] += 300;
+                        break;
+                    }
+                play(w, 20, true);
+                for (Strategic.Column c : w.strat.columns) check(c.from != t.id, "a column left the quarantined town");
+                check(w.stats.turnedBack >= 300, "nobody was turned back: " + w.stats.turnedBack);
+                check(Audit.people(w) == before, "people lost at the checkpoint");
+                w.shutdown();
+            }
+        });
+        test("society: militias form where police are thin and fear is high", new T() {
+            public void run() {
+                World w = game(19, 1024, "sandbox", 2);
+                Region.Settlement t = null;
+                for (Region.Settlement s : w.r.settlements) if (s.kind == Region.S_TOWN && (t == null || s.residents > t.residents)) t = s;
+                for (Region.Facility f : w.r.facilities) if (f.settlement == t.id && f.pool != null) java.util.Arrays.fill(f.pool, 0);
+                Tools.paintZombies(w, t.cx * 16f, t.cy * 16f, 200, 300, -1);
+                play(w, 5, false);
+                w.media.belief[t.id] = 1;
+                w.media.social[t.id] = 1;
+                play(w, 70, true);
+                check(w.society.militia[t.id] > 0, "no militia formed");
+                w.shutdown();
+            }
+        });
+        test("society: refugees crowding a town get a camp", new T() {
+            public void run() {
+                World w = game(20, 1024, "sandbox", 2);
+                Region.Settlement t = null;
+                for (Region.Settlement s : w.r.settlements) if (s.kind == Region.S_TOWN && (t == null || s.residents > t.residents)) t = s;
+                int add = t.residents;
+                for (int s = 0; s < w.sec.n; s++)
+                    if (w.sec.settlement[s] == t.id && w.sec.home[s] > 0) {
+                        w.sec.popIn[s] += add;
+                        break;
+                    }
+                long before = Audit.people(w);
+                w.society.arrived(t.id, add, 0);
+                play(w, 62, true);
+                check(!w.society.camps.isEmpty(), "no camp");
+                check(w.sec.popIn[w.society.camps.get(0).sector] > 0, "nobody in the camp");
+                check(Audit.people(w) == before, "people lost moving to the camp");
+                w.shutdown();
             }
         });
         test("perf: 20,000 of the dead", new T() {
