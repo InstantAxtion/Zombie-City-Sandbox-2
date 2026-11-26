@@ -174,6 +174,11 @@ public final class Region {
         return tp[(ty >> 6) * pw + (tx >> 6)][(ty & 63) << 6 | (tx & 63)];
     }
 
+    /** Every tile the game has turned into 'kind' since the map was made: (x, y, the tile it replaced) triples. */
+    public int[] editedTiles(int kind) {
+        return overlay == null ? new int[0] : overlay.editsOf(kind, pw);
+    }
+
     /** Changes a tile (the game's edits: barricades, walls, rubble, blown bridges, camps), recorded in the overlay. */
     public void set(int tx, int ty, byte k) {
         if (tx < 0 || ty < 0 || tx >= W || ty >= H) return;

@@ -56,6 +56,10 @@ public final class World {
     public final Fires fires;
     public final Navy navy;
     public final Engineers engineers;
+    /** The player's rules sheet, defences and lasting orders (see Rules, Defences, Orders). */
+    public final Rules rules;
+    public final Defences defs;
+    public final Orders orders;
     public final Roles roles;
     public final Director director;
     public final Recovery recovery;
@@ -136,6 +140,9 @@ public final class World {
         fires = new Fires(this);
         navy = new Navy(this);
         engineers = new Engineers(this);
+        rules = new Rules(this);
+        defs = new Defences(this);
+        orders = new Orders(this);
         modules.add(weather);
         modules.add(forces);
         infra = new Infrastructure(this);
@@ -160,6 +167,9 @@ public final class World {
         modules.add(undead);
         director = new Director(this);
         modules.add(director);
+        modules.add(rules);
+        modules.add(defs);
+        modules.add(orders);
         zai = new ZombieAI(this);
         cai = new CivAI(this);
         aai = new ArmedAI(this);
@@ -215,6 +225,8 @@ public final class World {
     // ------------------------------------------------------------------ time
 
     public float hour() {
+        // the rules sheet can hold the time of day
+        if (rules != null && rules.hour() >= 0) return rules.hour();
         return (float) ((START_HOUR + time / 60.0) % 24.0);
     }
 

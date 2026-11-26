@@ -162,6 +162,7 @@ final class ArmedAI {
         if ((b & B_AURA) != 0) m *= 1.08f;
         if ((b & B_PERCHED) != 0) m *= 1.15f;
         if ((b & B_COVER) != 0 && docOf[w.e.type[i]] != D_ARMY) m *= 1.08f;
+        if (w.defs.count[Defences.SANDBAGS] > 0 && w.defs.sandbagged(w.e.x[i], w.e.y[i])) m *= 1.12f;
         // shaky hands
         if (nerve[i] < 0.35f) m *= 0.85f + 0.4f * nerve[i];
         return m;
@@ -350,6 +351,8 @@ final class ArmedAI {
             speed = u.run;
         }
         // shoot whatever I can see and reach
+        // the player's "hold fire": only when the dead are on them
+        if (sq != null && sq.stance == Squads.STANCE_HOLD && zd > 22) holdFire = true;
         if (z >= 0 && loaded && !holdFire && e.aimT[i] <= 0 && zd <= range && (perched || seen(i, z, zd))) {
             if (u.grenade != null && gcool[i] <= 0 && zd > 60 && w.sp.zombiesNear(e, e.x[z], e.y[z], 40, 6) >= 6
                     && w.sp.livingNear(e, e.x[z], e.y[z], u.grenade.blast + 10, 1) == 0) {
@@ -420,7 +423,9 @@ final class ArmedAI {
             Region.Facility f = w.r.facilities.get(sq.home);
             float dx = f.x - x, dy = f.y - y;
             if (dx * dx + dy * dy < 400 * 400) target += 0.08f;
-        }
+            else if (w.defs.postNear(x, y)) target += 0.08f;
+        } else if (w.defs.postNear(x, y)) target += 0.08f; // a command post the player set up (Defences)
+        if (sq != null && sq.stance == Squads.STANCE_AGGRESSIVE) target += 0.05f;
         target -= shock[i];
         if (wp != null && ammoShare < 0.15f) target -= 0.12f;
         if (wp != null && ammo == 0) target -= 0.2f;
@@ -719,7 +724,7 @@ final class ArmedAI {
         for (int dy = -1; dy <= 1; dy++)
             for (int dx = -1; dx <= 1; dx++)
                 if ((dx != 0 || dy != 0) && Tile.blocksSight(w.r.t(tx + dx, ty + dy))) return true;
-        return false;
+        return w.defs.sandbagged(x, y);
     }
 
     /**

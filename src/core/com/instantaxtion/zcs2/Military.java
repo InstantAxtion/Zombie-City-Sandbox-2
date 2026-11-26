@@ -165,7 +165,7 @@ public final class Military {
     /** A formation from outside arrives at a highway entry (or the naval base, for marines). */
     public Forces.Formation arrive(String formationId, String agency) {
         Content.FormationT t = w.c.formationT(formationId);
-        if (t == null || w.r.entryNodes.isEmpty()) return null;
+        if (t == null || w.r.entryNodes.isEmpty() || !w.rules.outsideHelp()) return null;
         Forces.Formation f;
         int k = guardsArrived + regularsArrived + wavesArrived;
         boolean train = !w.r.railEntries.isEmpty() && k % 2 == 1;

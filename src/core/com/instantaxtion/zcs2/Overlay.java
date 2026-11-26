@@ -100,6 +100,29 @@ public final class Overlay implements ChunkCache.Overlay {
 
     // ------------------------------------------------------------------ recording (Region)
 
+    /**
+     * Every edited tile now holding 'kind', as (x, y, the tile it replaced) triples, for pages pw to a row (the
+     * player's "clear the barricades").
+     */
+    synchronized int[] editsOf(int kind, int pw) {
+        int n = 0;
+        for (Page pg : page) if (pg != null) for (int k = 0; k < pg.n; k++) if (pg.tile[k] == (byte) kind) n++;
+        int[] out = new int[n * 3];
+        int o = 0;
+        for (int p = 0; p < page.length; p++) {
+            Page pg = page[p];
+            if (pg == null) continue;
+            for (int k = 0; k < pg.n; k++) {
+                if (pg.tile[k] != (byte) kind) continue;
+                int i = pg.at[k] & 0xFFFF;
+                out[o++] = (p % pw) * 64 + (i & 63);
+                out[o++] = (p / pw) * 64 + (i >> 6);
+                out[o++] = pg.orig[k];
+            }
+        }
+        return out;
+    }
+
     /** Tile i of page p went from 'was' to 'now' (they differ). Returns the page's new version. */
     synchronized int tile(int p, int i, int was, int now) {
         Page pg = at(p);

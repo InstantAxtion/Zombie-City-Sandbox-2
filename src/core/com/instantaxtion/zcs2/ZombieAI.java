@@ -358,6 +358,8 @@ final class ZombieAI {
                 }
             }
         }
+        // the rules sheet's pace for the dead, and razor wire holding them back (Defences)
+        speed *= w.rules.zombieSpeed() * w.defs.wireSlow(x, y);
         e.dvx[i] = dirX * speed + px * 4;
         e.dvy[i] = dirY * speed + py * 4;
     }

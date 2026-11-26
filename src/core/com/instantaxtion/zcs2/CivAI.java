@@ -29,7 +29,7 @@ final class CivAI {
         float dt = World.DT * 2;
         Content.Unit u = w.unitOf(i);
         float x = e.x[i], y = e.y[i];
-        int z = w.sp.nearestZombie(e, x, y, 150);
+        int z = w.sp.nearestZombie(e, x, y, 150 * w.rules.fleeSight());
         float speed = u.walk;
         float dirX = 0, dirY = 0;
         if (z >= 0) {

@@ -470,6 +470,12 @@ public final class Vehicles implements ActiveSet.Paged {
     void update() {
         float dt = World.DT;
         for (int v = 0; v < top; v++) {
+            if (state[v] != V_NONE && w.orders.drives(v)) {
+                // driven with the stick (Orders.wheel); its guns fire by themselves
+                w.orders.wheel(v, dt);
+                weapons(v, dt);
+                continue;
+            }
             switch (state[v]) {
                 case V_NONE: continue;
                 case V_DRIVE:
