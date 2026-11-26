@@ -179,7 +179,10 @@ public final class DesktopGfx implements Gfx {
         }
 
         public void setPixels(int[] argb, int w, int h) {
-            img.setRGB(0, 0, w, h, argb, 0, w);
+            // straight into the raster, row by row (setRGB converts each pixel through the colour model)
+            int[] dst = ((java.awt.image.DataBufferInt) img.getRaster().getDataBuffer()).getData();
+            int iw = img.getWidth(), cw = Math.min(w, iw), ch = Math.min(h, img.getHeight());
+            for (int y = 0; y < ch; y++) System.arraycopy(argb, y * w, dst, y * iw, cw);
         }
 
         public void updatePixels(int[] argb, int offset, int stride, int x, int y, int w, int h) {

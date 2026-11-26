@@ -108,8 +108,39 @@ public final class WorldView {
     /** A label drawn whatever else is there (its place already taken, or a mark that must show). */
     public void labelAlways(Gfx g, String s, float x, float y, float sizeDp, int color, int align, boolean bold) {
         justPlaced = false;
+        if (deferLabels && lqN < lqText.length) {
+            // while the map's marks are still being drawn, the words wait, so no dot, symbol or badge lands on them
+            int k = lqN++;
+            lqText[k] = s;
+            lqXY[k * 3] = x;
+            lqXY[k * 3 + 1] = y;
+            lqXY[k * 3 + 2] = sizeDp;
+            lqColor[k] = color;
+            lqStyle[k] = (byte) (align | (bold ? 4 : 0));
+            return;
+        }
         g.color(color);
         g.textHalo(s, x, y, sizeDp * dp, align, bold, 0xD0000000, Math.max(1.2f, 1.3f * dp));
+    }
+
+    // the labels placed while the overlays and the modules draw their marks, drawn over all of them at the end
+    private boolean deferLabels;
+    private final String[] lqText = new String[384];
+    private final float[] lqXY = new float[384 * 3];
+    private final int[] lqColor = new int[384];
+    private final byte[] lqStyle = new byte[384];
+    private int lqN;
+
+    /** Draws the labels that waited: the first placed (the most important) last, so on top. */
+    private void flushLabels(Gfx g) {
+        deferLabels = false;
+        float hw = Math.max(1.2f, 1.3f * dp);
+        for (int k = lqN - 1; k >= 0; k--) {
+            g.color(lqColor[k]);
+            g.textHalo(lqText[k], lqXY[k * 3], lqXY[k * 3 + 1], lqXY[k * 3 + 2] * dp, lqStyle[k] & 3, (lqStyle[k] & 4) != 0, 0xD0000000, hw);
+            lqText[k] = null;
+        }
+        lqN = 0;
     }
 
     // where labels may go this frame (the map area the bars leave free), and areas the interface keeps for itself
@@ -155,8 +186,11 @@ public final class WorldView {
         if (z >= 0.22f) vehicles(g, cam, x0, y0, x1, y1, true);
         else vehicleDots(g, cam);
         effects(g, cam, x0, y0, x1, y1);
+        lqN = 0;
+        deferLabels = true;
         overlays(g, cam);
         for (int i = 0; i < w.modules.size(); i++) w.modules.get(i).draw(g, cam, this);
+        flushLabels(g);
         areaX0 = areaY0 = -1e9f;
         areaX1 = areaY1 = 1e9f;
         if (brushX >= 0 && time - brushT < 0.8f) {
