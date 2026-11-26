@@ -119,6 +119,8 @@ public final class NationGen {
         g.lap("countryside");
         g.statesAndNetworks();
         g.lap("statesAndNetworks");
+        g.doors();
+        g.lap("doors");
         g.hgt = null;
         g.farmMid = null;
         g.n.buildMs = (System.nanoTime() - t0) / 1000000;
@@ -1497,6 +1499,82 @@ public final class NationGen {
             case Region.B_GOV: return 0xFFD0C8B0;
             default: return 0xFF888888;
         }
+    }
+
+    // ------------------------------------------------------------------ doors of the national buildings
+
+    /**
+     * Each national building's door, worked out from what the chunk generator will paint round it (the facility
+     * blocks, the site operations and the other national buildings), so no chunk has to be made for it: the middle of
+     * a side, the first with the best ground (pavement, lot or plaza before anything else walkable), as World's doors
+     * pick. A side whose ground only the chunk knows (terrain, roads, lattice blocks) isn't a candidate; a building with
+     * no known side keeps -1 and World works its door out from the tiles.
+     */
+    private void doors() {
+        int nb = n.bCount;
+        n.bdoor = new int[nb];
+        // national buildings bucketed by chunk, to test "inside another building" cheaply
+        int sw = n.sw;
+        java.util.HashMap<Integer, List<Integer>> byChunk = new java.util.HashMap<Integer, List<Integer>>();
+        for (int b = 0; b < nb; b++)
+            for (int cy = n.by[b] >> 6; cy <= (n.by[b] + n.bh[b] - 1) >> 6; cy++)
+                for (int cx = n.bx[b] >> 6; cx <= (n.bx[b] + n.bw[b] - 1) >> 6; cx++) {
+                    Integer k = cy * sw + cx;
+                    List<Integer> l = byChunk.get(k);
+                    if (l == null) byChunk.put(k, l = new ArrayList<Integer>());
+                    l.add(b);
+                }
+        List<Region.Facility> lat = new ArrayList<Region.Facility>();
+        for (Region.Facility f : n.facilities) if (ChunkGen.latticeFacility(n, f)) lat.add(f);
+        for (int b = 0; b < nb; b++) {
+            int x0 = n.bx[b], y0 = n.by[b], x1 = x0 + n.bw[b] - 1, y1 = y0 + n.bh[b] - 1;
+            int mx = (x0 + x1) / 2, my = (y0 + y1) / 2;
+            int[][] cand = {{mx, y1 + 1}, {mx, y0 - 1}, {x0 - 1, my}, {x1 + 1, my}};
+            int best = -1, door = -1;
+            for (int[] p : cand) {
+                int t = knownTile(p[0], p[1], byChunk, lat);
+                if (t < 0 || !Tile.walkable(t)) continue;
+                int score = (t == Tile.PAVEMENT || t == Tile.LOT || t == Tile.PLAZA) ? 2 : 1;
+                if (score > best) {
+                    best = score;
+                    door = p[1] * n.size + p[0];
+                }
+            }
+            n.bdoor[b] = door;
+        }
+    }
+
+    /** The tile the chunk generator will paint at (x, y) as far as the nation knows it, or -1 if only the chunk knows. */
+    private int knownTile(int x, int y, java.util.HashMap<Integer, List<Integer>> byChunk, List<Region.Facility> lat) {
+        if (x < 0 || y < 0 || x >= n.size || y >= n.size) return -1;
+        List<Integer> l = byChunk.get((y >> 6) * n.sw + (x >> 6));
+        if (l != null)
+            for (int b : l)
+                if (x >= n.bx[b] && y >= n.by[b] && x < n.bx[b] + n.bw[b] && y < n.by[b] + n.bh[b]) return Tile.BUILDING;
+        int t = -1;
+        int[] so = n.siteOps;
+        for (int o = 0; o < n.siteOpCount; o++) {
+            int k = o * Nation.OP_INTS;
+            int ax = so[k + 2], ay = so[k + 3], bx = so[k + 4], by = so[k + 5];
+            if (x < ax || x > bx || y < ay || y > by) continue;
+            boolean rim = x == ax || x == bx || y == ay || y == by;
+            int tk = so[k + 6];
+            switch (so[k + 1]) {
+                case Nation.OP_FILL: t = tk; break;
+                case Nation.OP_FRAME: t = rim ? so[k + 7] : tk; break;
+                case Nation.OP_OUTLINE: if (rim) t = tk; break;
+                case Nation.OP_LAND: t = t >= 0 && Tile.water(t) ? t : tk; break;
+                case Nation.OP_WATER: if (t >= 0 && Tile.water(t)) t = tk; break;
+                default:
+            }
+        }
+        for (Region.Facility f : lat) {
+            if (x < f.bx0 || x > f.bx1 || y < f.by0 || y > f.by1) continue;
+            if (t >= 0 && t != Tile.GRASS) return t; // (facility ground doesn't cover hard ground)
+            if (f.kind == Region.F_PARK) return -1;
+            return x == f.bx0 || x == f.bx1 || y == f.by0 || y == f.by1 ? Tile.PAVEMENT : Tile.LOT;
+        }
+        return t;
     }
 
     // ------------------------------------------------------------------ large sites, as data

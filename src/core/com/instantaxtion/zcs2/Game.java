@@ -33,21 +33,39 @@ public final class Game {
     String error;
 
     // new game choices
+    /** ngSize indexes Nation.SIZES (the menu: State, Country, Large country); the Country is the default. */
     int ngMode, ngScenario, ngPreset, ngSize = 1;
     /**
-     * A real-scale map size picked by a challenge code (a developer's way in until P10 puts them on the menu: e.g.
-     * ZC2-28672-0-7-lab_leak), or 0 for the menu's size.
+     * A map size the menu doesn't offer, picked by a challenge code: today's RegionGen maps (1,536-3,072 tiles, kept
+     * as quick test maps) or the small 8,192 test nation; 0 for the menu's size.
      */
     int ngNational;
 
+    /** The heap the Large country needs (its sectors, chunk cache and pictures); below it the menu skips it. */
+    static final long LARGE_NEEDS = 400L << 20;
+
+    /** Whether the menu's size i can be played on this device. */
+    boolean sizeOffered(int i) {
+        return Nation.SIZES[i] != 36864 || pf.maxMemory() >= LARGE_NEEDS;
+    }
+
     /** The map side the New Game screen will build. */
     int ngMapSize() {
-        return ngNational > 0 ? ngNational : RegionGen.SIZES[ngSize];
+        return ngNational > 0 ? ngNational : Nation.SIZES[ngSize];
     }
 
     String ngSizeName() {
-        if (ngNational > 0) for (int i = 0; i < Nation.SIZES.length; i++) if (Nation.SIZES[i] == ngNational) return Nation.SIZE_NAMES[i];
-        return ngNational > 0 ? "Nation" : RegionGen.SIZE_NAMES[ngSize];
+        if (ngNational > 0) {
+            for (int i = 0; i < RegionGen.SIZES.length; i++) if (RegionGen.SIZES[i] == ngNational) return "Test map " + ngNational;
+            return "Test nation";
+        }
+        return Nation.SIZE_NAMES[ngSize];
+    }
+
+    /** The menu's size with its width, for the size button. */
+    String ngSizeLabel() {
+        if (ngNational > 0) return ngSizeName();
+        return Nation.SIZE_NAMES[ngSize] + " " + Math.round(Nation.SIZES[ngSize] / Nation.KM) + " km";
     }
     /** The role picked on the New Game screen (-1 = the scenario's own). */
     int ngRole = -1;
@@ -539,15 +557,16 @@ public final class Game {
             int size = Integer.parseInt(p[1]), preset = Integer.parseInt(p[2]);
             long seed = Long.parseLong(p[3]);
             int si = -1;
-            for (int i = 0; i < RegionGen.SIZES.length; i++) if (RegionGen.SIZES[i] == size) si = i;
-            // (a real-scale size isn't on the menu yet: a code is the hidden way to one)
-            boolean nat = national(size) || size == SMALL_NATIONAL;
-            if ((si < 0 && !nat) || preset < 0 || preset >= Data.presetCount()) return false;
+            for (int i = 0; i < Nation.SIZES.length; i++) if (Nation.SIZES[i] == size) si = i;
+            // today's maps and the small test nation aren't on the menu: a code is the way to them
+            boolean hidden = si < 0 && (size == SMALL_NATIONAL || isTestMap(size));
+            if ((si < 0 && !hidden) || preset < 0 || preset >= Data.presetCount()) return false;
             if (si >= 0) ngSize = si;
-            ngNational = nat ? size : 0;
+            ngNational = hidden ? size : 0;
+            codeNote = null;
+            if (si >= 0 && !sizeOffered(si)) codeNote = "This map needs more memory than the phone gives the game: it may not load";
             ngPreset = preset;
             ngSeed = seed;
-            codeNote = null;
             if (p.length > 4) {
                 boolean found = false;
                 for (int tab = 0; tab < TABS.length; tab++) {
@@ -669,7 +688,7 @@ public final class Game {
         // the map
         float bw = (rightW - ui.dp(16)) / 3;
         ui.button("preset", rightX, ry, bw, ui.dp(40), Data.presetName(ngPreset), false, 13);
-        ui.button("size", rightX + bw + ui.dp(8), ry, bw, ui.dp(40), ngSizeName(), false, 13);
+        ui.button("size", rightX + bw + ui.dp(8), ry, bw, ui.dp(40), Ui.fit(g, ngSizeLabel(), bw - ui.dp(10), ui.dp(13), true), false, 13);
         ui.button("seed", rightX + (bw + ui.dp(8)) * 2, ry, bw, ui.dp(40), "New map", false, 13);
         ry += ui.dp(46);
         // the start, and the challenge code tucked above it
@@ -896,6 +915,11 @@ public final class Game {
 
     /** The small national map the tests use (8,192 tiles), also allowed in a code. */
     static final int SMALL_NATIONAL = 8192;
+
+    static boolean isTestMap(int size) {
+        for (int v : RegionGen.SIZES) if (v == size) return true;
+        return size == 768 || size == 1024;
+    }
 
     /** A real-scale map size (built by NationGen). */
     static boolean national(int size) {
@@ -4373,7 +4397,10 @@ public final class Game {
                 return;
             case "start": start(); return;
             case "preset": ngPreset = (ngPreset + 1) % Data.presetCount(); return;
-            case "size": ngSize = (ngSize + 1) % RegionGen.SIZES.length; ngNational = 0; return;
+            case "size":
+                if (ngNational > 0) ngNational = 0;
+                else do ngSize = (ngSize + 1) % Nation.SIZES.length; while (!sizeOffered(ngSize));
+                return;
             case "seed": ngSeed = (ngSeed * 1103515245L + 12345L + System.nanoTime()) % 1000000L; if (ngSeed < 0) ngSeed = -ngSeed; return;
             case "pause": screen = S_PAUSE; return;
             case "playpause": paused = !paused; return;
