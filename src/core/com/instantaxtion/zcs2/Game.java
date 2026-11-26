@@ -851,6 +851,30 @@ public final class Game {
         return previewKey == key() ? preview : null;
     }
 
+    /** The preview map's towns (today's map or a nation's), or null while it's drawn: the editor picks from them. */
+    java.util.List<Region.Settlement> previewSettlements() {
+        if (previewKey != key()) return null;
+        Region pr = preview;
+        Nation pn = previewNation;
+        return pr != null ? pr.settlements : pn != null ? pn.settlements : null;
+    }
+
+    /** The preview map's facilities, or null. */
+    java.util.List<Region.Facility> previewFacilities() {
+        if (previewKey != key()) return null;
+        Region pr = preview;
+        Nation pn = previewNation;
+        return pr != null ? pr.facilities : pn != null ? pn.facilities : null;
+    }
+
+    /** The preview map's side in tiles, or 0. */
+    int previewSide() {
+        if (previewKey != key()) return 0;
+        Region pr = preview;
+        Nation pn = previewNation;
+        return pr != null ? pr.W : pn != null ? pn.size : 0;
+    }
+
     long key() {
         return ngSeed * 31 + ngPreset * 7 + ngSize + ngNational * 131L;
     }
@@ -998,6 +1022,91 @@ public final class Game {
                 }
             }
         }, "replay").start();
+    }
+
+    // ------------------------------------------------------------------ seeking in a replay
+
+    /** The tick a replay is being taken to (played on fast, after a snapshot is loaded if one has to be), or -1. */
+    long seekTarget = -1;
+    /** A snapshot being loaded in the background for a seek, and what came of it. */
+    private boolean seekLoading;
+    private volatile World seekLoaded;
+    private volatile Replay.Snap seekSnap;
+    private volatile Throwable seekError;
+    /** The camera follows the replay's camera path (until the player moves it). */
+    boolean pathOn = true;
+
+    /** Takes the replay to a tick: back (or far ahead) by a snapshot, then played on as fast as the phone can. */
+    void seekTo(long tick) {
+        if (replay == null || seekLoading) return;
+        tick = Math.max(0, Math.min(replay.endTick, tick));
+        seekTarget = tick;
+        seekFrom = w.tick;
+        if (!replay.needsLoad(tick)) return;
+        final Replay rp = replay;
+        final Replay.Snap s = rp.nearest(tick);
+        seekLoading = true;
+        seekLoaded = null;
+        seekError = null;
+        new Thread(new Runnable() {
+            public void run() {
+                try {
+                    World nw = rp.load(s);
+                    seekSnap = s;
+                    seekLoaded = nw;
+                } catch (Throwable t) {
+                    seekError = t;
+                }
+            }
+        }, "seek").start();
+    }
+
+    /** A seek's share done, 0..1 (for the progress shown), or -1 when there's none. */
+    float seekProgress() {
+        if (replay == null || seekTarget < 0) return -1;
+        if (seekLoading) return 0;
+        return 1f - Math.max(0, seekTarget - w.tick) / (float) Math.max(1, seekTarget - Math.min(seekTarget, seekFrom));
+    }
+
+    private long seekFrom;
+
+    /** Once a frame in a replay: a loaded snapshot put in place, then the replay played on towards the target. */
+    private void seekStep() {
+        if (seekLoading) {
+            if (seekError != null) {
+                seekLoading = false;
+                seekTarget = -1;
+                toast("Couldn't go there: " + seekError.getMessage());
+                seekError = null;
+            } else if (seekLoaded != null) {
+                World old = w;
+                WorldView oldView = view;
+                w = seekLoaded;
+                seekLoaded = null;
+                seekLoading = false;
+                replay.adopt(w, seekSnap);
+                view = new WorldView(w, pf);
+                applySettings();
+                closeInspector();
+                cam.follow = -1;
+                cam.followVehicle = -1;
+                ended = w.ended;
+                if (oldView != null) oldView.map.clear();
+                old.shutdown();
+                seekFrom = w.tick;
+            }
+            return;
+        }
+        if (seekTarget < 0) return;
+        if (seekFrom > w.tick || seekFrom < 0) seekFrom = w.tick;
+        long t0 = System.nanoTime();
+        stepping = true;
+        while (w.tick < seekTarget && !replay.done() && System.nanoTime() - t0 < 24_000_000L) replay.step();
+        stepping = false;
+        if (w.tick >= seekTarget || replay.done()) {
+            seekTarget = -1;
+            seekFrom = -1;
+        }
     }
 
     /** The tool a role starts with. */
@@ -1210,6 +1319,13 @@ public final class Game {
             cam.cx += (w.veh.x[cam.followVehicle] - cam.cx) * Math.min(1, dt * 5);
             cam.cy += (w.veh.y[cam.followVehicle] - cam.cy) * Math.min(1, dt * 5);
         }
+        if (replay != null && pathOn && replay.path.size() > 0 && !seekLoading) {
+            // the replay's camera path: the view glides along it (the step under way counted in, so it doesn't stutter)
+            float[] p = replay.path.at(w.tick + (w.strategic ? acc / World.STRATEGIC_DT * 200 : acc / World.DT));
+            cam.cx = p[0];
+            cam.cy = p[1];
+            cam.zoom = p[2];
+        }
         cam.update(dt, w.r.px());
         if (replay == null) {
             // the camera is an input to the simulation: what's in view is simulated person by person
@@ -1235,7 +1351,11 @@ public final class Game {
         }
         if (alertOf != w) takeAlerts();
         // step the simulation, within a time budget
-        if (!paused && screen == S_PLAY && dt > 0) {
+        if (replay != null && (seekLoading || seekTarget >= 0)) {
+            // going somewhere in the replay: no time passes as usual until it gets there
+            seekStep();
+            acc = 0;
+        } else if (!paused && screen == S_PLAY && dt > 0) {
             if (replay != null && replay.done()) {
                 replay = null;
                 w.director.replaying = false;
@@ -1261,6 +1381,7 @@ public final class Game {
                     stepDt = w.strategic ? World.STRATEGIC_DT : World.DT;
                 }
                 w.step();
+                if (replay != null) replay.afterStep(); // (a snapshot to seek back to, every so often)
                 acc -= stepDt;
                 simulated += stepDt;
                 steps++;
@@ -1351,11 +1472,12 @@ public final class Game {
             paletteW = pal ? Math.min(ui.dp(210), W * 0.27f) : 0;
             sheetW = inspectorOpen() ? Math.min(ui.dp(340), W * 0.42f) : 0;
             left = railW + paletteW;
+            if (replayBarShown()) bottom = dir.replayBarH(true);
             right = sheetW;
         } else {
             railW = paletteW = sheetW = 0;
             toolbarH = ui.dp(60);
-            bottom = toolbarH + (inspectorOpen() ? inspectorH : pal ? paletteFixedH() : 0);
+            bottom = toolbarH + (inspectorOpen() ? inspectorH : pal ? paletteFixedH() : replayBarShown() ? dir.replayBarH(false) : 0);
         }
         freeL = left;
         freeT = topH;
@@ -1480,6 +1602,7 @@ public final class Game {
             ui.button("handover", freeL + m + ui.dp(44), y + m, ui.dp(64), ui.dp(34), "P" + (w.roles.current + 1) + " ▸", false, 12);
         }
         bottomBars(g);
+        if (replayBarShown()) dir.replayBar(g, freeL, freeB, freeR - freeL, dir.replayBarH(landscape));
         if (stickOn()) joystick(g);
         if (replay == null && (w.orders.possessing || w.orders.driven >= 0)) {
             // God's person or vehicle: the way back to watching, over the stick
@@ -2347,6 +2470,11 @@ public final class Game {
     // ------------------------------------------------------------------ the inspector
 
     private float inspectorH;
+
+    /** The replay's controls under the map (not while a sheet is open there). */
+    boolean replayBarShown() {
+        return replay != null && !inspectorOpen() && !hideUi;
+    }
 
     boolean inspectorOpen() {
         return inspEnt >= 0 || inspVeh >= 0 || inspFac >= 0 || inspSettle >= 0 || inspBuilding >= 0 || inspDistrict >= 0 || ((inspSquad != null || inspFormation != null) && !tool.equals("orders"));
@@ -4450,6 +4578,11 @@ public final class Game {
             if (screen != S_PLAY || w == null) {
                 if (isScrollScreen()) scroll = Math.max(0, Math.min(maxScroll, scroll - (y - oy)));
                 return;
+            }
+            if (replay != null && pathOn && replay.path.size() > 0 && moved) {
+                // the player takes the camera from the path (the Path button gives it back)
+                pathOn = false;
+                toast("Camera path off: the camera is yours");
             }
             if (pointers >= 2) {
                 pinch();
