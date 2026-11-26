@@ -1041,9 +1041,20 @@ public final class Vehicles implements ActiveSet.Paged {
 
     /** Is there room for v at (px, py) facing h, with a margin, clear of every road vehicle and every place being pulled in to? */
     private boolean freeAt(int v, float px, float py, float h, float margin) {
+        return freeAt(v, px, py, h, margin, null, top);
+    }
+
+    /**
+     * As above, looking only at the vehicles in `only` (the first n), when given: findSlot gathers once the vehicles
+     * that could stand in the way of any place it may try (within its reach), instead of every place it tries
+     * looking at every vehicle (with hundreds parked round the camera, a car arriving tried up to a hundred places
+     * against five hundred vehicles each). The answer is the same.
+     */
+    private boolean freeAt(int v, float px, float py, float h, float margin, int[] only, int n) {
         Content.VType t = type(v);
         float hl = t.length * 0.5f + margin, hw = t.width * 0.5f + margin;
-        for (int o = 0; o < top; o++) {
+        for (int i = 0; i < n; i++) {
+            int o = only != null ? only[i] : i;
             if (o == v || !onRoad(o)) continue;
             Content.VType to = type(o);
             float reach = hl + hw + to.length;
@@ -1091,6 +1102,23 @@ public final class Vehicles implements ActiveSet.Paged {
         float hl = t.length * 0.5f, hw = t.width * 0.5f;
         float best = maxDist * maxDist;
         boolean found = false;
+        // the vehicles that could be in the way of a place within reach (every place tried is within maxDist)
+        float reachAll = maxDist + hl + hw + 2 * 2 + maxLength() + 4;
+        int nearN = 0;
+        for (int o = 0; o < top; o++) {
+            if (o == v || !onRoad(o)) continue;
+            float dx = x[o] - px, dy = y[o] - py;
+            boolean in = dx * dx + dy * dy < reachAll * reachAll;
+            if (!in && (state[o] == V_PULLIN || state[o] == V_PARKING)) {
+                dx = slotX[o] - px;
+                dy = slotY[o] - py;
+                in = dx * dx + dy * dy < reachAll * reachAll;
+            }
+            if (!in) continue;
+            if (nearN == nearBuf.length) nearBuf = Arrays.copyOf(nearBuf, nearN * 2);
+            nearBuf[nearN++] = o;
+        }
+        int[] near = nearBuf;
         java.util.ArrayList<Integer> ring = new java.util.ArrayList<Integer>();
         java.util.HashSet<Integer> seen = new java.util.HashSet<Integer>();
         ring.add(n);
@@ -1128,7 +1156,7 @@ public final class Vehicles implements ActiveSet.Paged {
                             float dx = sx - px, dy = sy - py, score = dx * dx + dy * dy;
                             if (score >= best) continue;
                             float h = side > 0 ? (float) Math.atan2(uy, ux) : (float) Math.atan2(-uy, -ux);
-                            if (!standable(sx, sy, h, hl, hw) || !freeAt(v, sx, sy, h, 2)) continue;
+                            if (!standable(sx, sy, h, hl, hw) || !freeAt(v, sx, sy, h, 2, near, nearN)) continue;
                             best = score;
                             found = true;
                             slotX[v] = sx;
@@ -1140,6 +1168,16 @@ public final class Vehicles implements ActiveSet.Paged {
         }
         return found;
     }
+
+    private int[] nearBuf = new int[64];
+
+    /** The longest vehicle in the game's content (px). */
+    private float maxLength() {
+        if (maxLen < 0) for (Content.VType t : w.c.vtypes) maxLen = Math.max(maxLen, t.length);
+        return maxLen;
+    }
+
+    private float maxLen = -1;
 
     /** The last few metres from the road into a parking place. */
     private void park(int v, float dt) {
