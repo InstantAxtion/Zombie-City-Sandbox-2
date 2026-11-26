@@ -301,6 +301,8 @@ public final class Tests {
         Actions.strategic(w, false);
         camOver(w, Setup.originX, Setup.originY);
         for (int k = 0; k < 10 * 20; k++) w.step();
+        // and the player's tools: defences, building, orders, driving, possession, the rules, clearing
+        toolSession(w, Setup.originX, Setup.originY);
         check(w.director.events.size() > 5, "only " + w.director.events.size() + " inputs recorded");
         Replay r = Replay.of(content, w, 2);
         r.runTo(w.tick);
@@ -317,6 +319,128 @@ public final class Tests {
         w.shutdown();
         r.w.shutdown();
         r2.w.shutdown();
+    }
+
+    static void steps(World w, float seconds) {
+        for (int k = 0; k < (int) (seconds * 20); k++) w.step();
+    }
+
+    /** A spot near (x, y) with open ground for len px to the east (a field to fight in). */
+    static float[] openSpot(World w, float x, float y, float len) {
+        for (int ring = 0; ring < 60; ring++)
+            for (int a = 0; a < 16; a++) {
+                float px = x + (float) Math.cos(a * 0.3927) * ring * 120, py = y + (float) Math.sin(a * 0.3927) * ring * 120;
+                boolean ok = true;
+                for (float d = -60; d <= len + 60 && ok; d += 8)
+                    for (float o = -70; o <= 70 && ok; o += 14) ok = w.r.walkablePx(px + d, py + o) && w.r.tileAtPx(px + d, py + o) != Tile.ROAD;
+                if (ok && w.sp.livingNear(w.e, px, py, 900, 1) == 0) return new float[]{px, py};
+            }
+        return null;
+    }
+
+    /** Every one of the player's new verbs, in a session: placed, built, ordered, driven, possessed, cleared. */
+    static void toolSession(World w, float ox, float oy) {
+        Actions.rule(w, Rules.Z_SPEED, 3);
+        Actions.rule(w, Rules.INFECTION, 1);
+        Actions.rule(w, Rules.FORCE, 3);
+        Actions.rule(w, Rules.FLEE, 1);
+        Actions.rule(w, Rules.WEATHER, 3);
+        Actions.rule(w, Rules.TIME, 2);
+        Actions.rule(w, Rules.OUTSIDE, 0);
+        Actions.rule(w, Rules.CIVILIANS, 0);
+        steps(w, 2);
+        Actions.rule(w, Rules.CIVILIANS, 1);
+        Actions.paint(w, ox + 250, oy, 80, 120, -1);
+        int placed = 0, built = 0;
+        for (int k = 0; k < Defences.KINDS; k++) if (Actions.defence(w, k, ox - 150 + k * 60, oy + 60)) placed++;
+        for (int b = 0; b < Tools.BUILD_NAMES.length; b++) built += Actions.build(w, b, ox - 300 + b * 70, oy - 140);
+        check(placed >= 3 && built > 0, "placed " + placed + " defences, built " + built + " tiles");
+        Squads.Squad t = Actions.template(w, "rifle", ox - 120, oy + 140);
+        check(t != null && t.vehicle >= 0, "the rifle squad came without its vehicle");
+        Actions.people(w, "civilian", 5, ox + 100, oy + 150);
+        Actions.mass(w, ox + 2500, oy + 400, 20000, -1);
+        steps(w, 8);
+        Squads.Squad s2 = Actions.squad(w, "rifleman", 6, ox, oy - 60);
+        if (t != null && t.alive) {
+            Actions.stance(w, t, Squads.STANCE_HOLD);
+            Actions.route(w, t, new float[]{ox - 60, oy + 200, ox + 40, oy + 220, ox + 120, oy + 160});
+            Actions.mount(w, t, true);
+        }
+        if (s2 != null) Actions.cordon(w, s2, ox - 80, oy - 100, ox + 80, oy - 100);
+        int heli = Actions.vehicle(w, "gunship", ox, oy - 300);
+        if (heli >= 0) Actions.vehicleOrder(w, heli, Orders.VO_ORBIT, ox + 300, oy);
+        int tank = Actions.vehicle(w, "tank", ox - 200, oy);
+        check(heli >= 0 && tank >= 0, "vehicles not placed");
+        steps(w, 6);
+        if (tank >= 0) {
+            Actions.drive(w, tank);
+            Actions.joy(w, 1, 0.2f);
+            steps(w, 3);
+            Actions.joy(w, 0, 0);
+            Actions.drive(w, -1);
+            Actions.vehicleOrder(w, tank, Orders.VO_ATTACK, ox + 200, oy);
+        }
+        if (s2 != null && s2.alive) Actions.stance(w, s2, Squads.STANCE_AGGRESSIVE);
+        if (t != null && t.alive) Actions.mount(w, t, false);
+        steps(w, 5);
+        if (s2 != null && s2.alive) Actions.clearArea(w, s2, ox + 250, oy, 200);
+        if (heli >= 0) Actions.vehicleOrder(w, heli, Orders.VO_ATTACK, ox + 250, oy + 50);
+        if (t != null && t.alive) {
+            Actions.fallBack(w, t, ox - 200, oy + 200);
+            if (s2 != null && s2.alive && s2.n > 0) Actions.escort(w, t, s2.mem[0], false);
+        }
+        steps(w, 5);
+        // God takes over someone and walks them about
+        int who = -1;
+        if (s2 != null && s2.alive) who = s2.leader(w.e);
+        check(who < 0 || Actions.possess(w, who) && w.playerEnt == who, "couldn't take over " + who);
+        if (who >= 0) {
+            Actions.joy(w, -1, 0);
+            steps(w, 2);
+            Actions.joy(w, 0, 0);
+            Actions.possess(w, -1);
+        }
+        for (Forces.Formation f : w.forces.formations)
+            if (f.alive) {
+                Actions.posture(w, f, Orders.FP_DEFEND, f.hq.x + 300, f.hq.y);
+                Actions.posture(w, f, Orders.FP_DIGIN, f.hq.x, f.hq.y);
+                break;
+            }
+        if (heli >= 0) Actions.vehicleOrder(w, heli, Orders.VO_RETURN, 0, 0);
+        steps(w, 4);
+        Actions.clear(w, Tools.CLEAR_WRECKS, -1);
+        Actions.clear(w, Tools.CLEAR_BLOOD, -1);
+        Actions.clear(w, Tools.CLEAR_TOWN, Tools.settlementAt(w, ox, oy));
+        steps(w, 2);
+        Actions.clear(w, Tools.CLEAR_BARRICADES, -1);
+        Actions.clear(w, Tools.CLEAR_EVERYONE, -1);
+        steps(w, 3);
+    }
+
+    /** The player's tools, played and then replayed (and saved and loaded part way). */
+    static void toolsReplay(int size) throws Exception {
+        World w = Setup.newGame(content, size, RegionGen.COAST, 78, content.scenario("lab_leak"), 2, Roles.GOD, 60000);
+        camOver(w, Setup.originX, Setup.originY);
+        steps(w, 5);
+        toolSession(w, Setup.originX, Setup.originY);
+        check(w.director.events.size() > 40, "only " + w.director.events.size() + " inputs recorded");
+        check(Audit.check(w).isEmpty(), "audit: " + Audit.check(w));
+        Replay r = Replay.of(content, w, 1);
+        r.runTo(w.tick);
+        check(Audit.hash(r.w) == Audit.hash(w), "the replay of the player's tools came out different");
+        // and a save part way carries the defences and orders on exactly
+        ByteArrayOutputStream bo = new ByteArrayOutputStream();
+        SaveIO.save(w, bo);
+        World l = SaveIO.load(content, new ByteArrayInputStream(bo.toByteArray()), 2);
+        check(l.rules.v[Rules.Z_SPEED] == 3 && l.rules.v[Rules.TIME] == 2, "the rules didn't come back from the save");
+        for (int k = 0; k < 20 * 20; k++) {
+            w.step();
+            l.step();
+        }
+        check(Audit.hash(l) == Audit.hash(w), "diverged after loading");
+        w.shutdown();
+        l.shutdown();
+        r.w.shutdown();
     }
 
     /** Runs a test with every new world in sparse mode (ActiveSet: only the chunks the simulation needs are active). */
@@ -995,6 +1119,70 @@ public final class Tests {
         test("director: a replay rebuilds the same outbreak", new T() {
             public void run() throws Exception {
                 replayExact(768);
+            }
+        });
+        test("tools: every new action replays exactly, and saves", new T() {
+            public void run() throws Exception {
+                toolsReplay(768);
+            }
+        });
+        test("tools: a machine-gun nest kills the dead coming at it", new T() {
+            public void run() {
+                int[] kills = new int[2];
+                int nestKills = 0;
+                for (int pass = 0; pass < 2; pass++) {
+                    World w = game(41, 768, "sandbox", 2);
+                    Region.Settlement c = w.r.city();
+                    float[] p = openSpot(w, c.cx * 16f + 2500, c.cy * 16f, 260);
+                    check(p != null, "no open ground");
+                    camOver(w, p[0], p[1]);
+                    steps(w, 1);
+                    Actions.paint(w, p[0] + 230, p[1], 60, 40, w.c.ztype("walker").index);
+                    steps(w, 0.2f);
+                    int before = w.stats.zombieKills;
+                    // the same bait either way: one gunner. With the nest, the nest's gun fires too
+                    if (pass == 1) check(Actions.defence(w, Defences.MG, p[0], p[1]), "the nest wasn't placed");
+                    else Actions.squad(w, "gunner", 1, p[0], p[1]);
+                    steps(w, 25);
+                    kills[pass] = w.stats.zombieKills - before;
+                    if (pass == 1) for (Defences.Def d : w.defs.list) nestKills += d.kills;
+                    w.shutdown();
+                }
+                check(nestKills >= 10, "the nest killed only " + nestKills);
+                check(kills[1] >= kills[0] + 10, "the nest made no difference: " + kills[1] + " vs " + kills[0]);
+            }
+        });
+        test("tools: razor wire slows the dead and cuts them", new T() {
+            public void run() {
+                float[] dist = new float[2];
+                float[] hp = new float[2];
+                for (int pass = 0; pass < 2; pass++) {
+                    World w = game(42, 768, "sandbox", 2);
+                    Region.Settlement c = w.r.city();
+                    float[] p = openSpot(w, c.cx * 16f + 2500, c.cy * 16f, 300);
+                    check(p != null, "no open ground");
+                    camOver(w, p[0], p[1]);
+                    steps(w, 1);
+                    Squads.Squad bait = Actions.squad(w, "rifleman", 3, p[0], p[1]);
+                    Actions.stance(w, bait, Squads.STANCE_HOLD);
+                    Actions.paint(w, p[0] + 280, p[1], 40, 30, w.c.ztype("walker").index);
+                    if (pass == 1) for (int k = -2; k <= 2; k++) Actions.defence(w, Defences.WIRE, p[0] + 235, p[1] + k * 40);
+                    steps(w, 9);
+                    float sum = 0, h = 0;
+                    int n = 0;
+                    for (int i = 0; i < w.e.top; i++) {
+                        if (w.e.loc[i] != Ents.FREE || w.e.kind[i] != Ents.ZOMBIE) continue;
+                        sum += w.e.x[i] - p[0];
+                        h += w.e.hp[i];
+                        n++;
+                    }
+                    dist[pass] = sum / Math.max(1, n);
+                    hp[pass] = h / Math.max(1, n);
+                    w.shutdown();
+                }
+                check(dist[0] < 200, "the dead didn't come on without the wire: " + dist[0]);
+                check(dist[1] > dist[0] + 40, "the wire didn't hold them back: " + dist[1] + " vs " + dist[0]);
+                check(hp[1] < hp[0], "the wire didn't cut them: " + hp[1] + " vs " + hp[0]);
             }
         });
         test("roles: each role gets its own piece", new T() {
