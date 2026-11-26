@@ -279,8 +279,10 @@ companions' (`CivAI` hands anyone flagged `F_COMPANION` to `Survival.companionTh
 close, hides and barricades when too many come, takes a car and drives the roads to the nearest safe place. On the
 default map (2304, the survivor scenario, two days, seeds 1-6) it reached safety 6 times in 6, in 23-117 game
 seconds (always by car); standing still, the idle survivor reached safety 0 times in 6 (alive at the end in all
-six: the survivor starts well away from the outbreak). On the small test map (768, one day, seeds 1-8): 8 of 8
-against 0 of 8.
+six: the survivor starts well away from the outbreak). Walking only (`BOTNOCAR=1`), it still reached safety 6 of 6,
+in 135-1,339 game seconds. On the small test map (768, one day, seeds 1-8): 8 of 8 against 0 of 8. The scenario is
+forgiving at the start (the army base is a kilometre or two off); the needs, the dead inside and the mobbed cars bite
+over days.
 
 ## The player's tools
 
