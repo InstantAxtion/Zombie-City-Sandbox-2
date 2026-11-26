@@ -13,6 +13,8 @@ public final class UiShot {
     static Game game;
     static int W, H;
     static String out;
+    /** A mode's argument after it (national: the challenge code). */
+    static String extra;
 
     public static void main(String[] a) throws Exception {
         out = a.length > 0 ? a[0] : "build/uishots";
@@ -34,6 +36,7 @@ public final class UiShot {
             coop();
             return;
         }
+        extra = a.length > 5 ? a[5] : null;
         if (a.length > 4) {
             modeShots(a[4]);
             return;
@@ -305,7 +308,88 @@ public final class UiShot {
         System.exit(0);
     }
 
+    /**
+     * A running game on a national map, started the hidden developer's way (a challenge code with a real-scale size),
+     * at the five zooms, by night, and with a building's and a district's sheets open.
+     *   UiShot outDir w h density national [code]
+     */
+    static void nationalShots(String code) throws Exception {
+        tap("new");
+        frames(2);
+        if (!game.applyCode(code)) throw new IllegalStateException("code refused: " + code);
+        frames(2);
+        shot("n0-newgame");
+        tap("start");
+        long t0 = System.currentTimeMillis();
+        while (game.screen() != Game.S_PLAY) {
+            frames(1);
+            Thread.sleep(50);
+            if (System.currentTimeMillis() - t0 > 300000) throw new IllegalStateException("never started");
+        }
+        World w = game.world();
+        System.out.println("national game: " + w.r.name + ", " + w.r.W + " tiles, built in " + (System.currentTimeMillis() - t0) + " ms");
+        game.speedIdx = 2;
+        frames(600);
+        game.speedIdx = 0;
+        float ox = Setup.outbreakX, oy = Setup.outbreakY;
+        Region.Settlement cap = w.r.city();
+        float[][] zooms = {{0, w.r.px() / 2f, w.r.px() / 2f}, {0.0065f, ox, oy}, {0.035f, ox, oy}, {0.11f, ox, oy}, {0.5f, ox, oy}};
+        String[] names = {"n1-country", "n2-region", "n3-district", "n4-town", "n5-street"};
+        for (int i = 0; i < zooms.length; i++) {
+            look(zooms[i][0], zooms[i][1], zooms[i][2]);
+            shot(names[i]);
+            System.out.printf("%s: zoom %.4f, %d chunks active, cache %d%n", names[i], game.cam.zoom, w.act.activeCount(), w.r.cache.size());
+        }
+        // a building's sheet at the street zoom, a district's from the district zoom
+        look(0.5f, ox, oy);
+        int b = -1;
+        for (int k = 0; k < 400 && b < 0; k++) b = Game.buildingAt(w, ox + (k % 20 - 10) * 24, oy + (k / 20 - 10) * 24);
+        if (b >= 0) {
+            game.inspBuilding = b;
+            frames(3);
+            shot("n6-building");
+            game.closeInspector();
+        }
+        look(0.06f, cap.cx * 16f, cap.cy * 16f);
+        game.inspDistrict = w.sec.idx.district(w.r.sectorOfPx(cap.cx * 16f, cap.cy * 16f));
+        frames(3);
+        shot("n7-district");
+        game.closeInspector();
+        // night over the capital: windows, street lamps, towns glowing from high up
+        w.time += (22 - w.hour() + 24) % 24 * 60;
+        look(0.4f, cap.cx * 16f, cap.cy * 16f);
+        shot("n8-night-street");
+        look(0.02f, cap.cx * 16f, cap.cy * 16f);
+        shot("n9-night-region");
+        look(0, w.r.px() / 2f, w.r.px() / 2f);
+        shot("n10-night-country");
+        System.out.println("ok national: " + w.clock() + ", " + w.totalZombies() + " dead");
+        w.shutdown();
+        System.exit(0);
+    }
+
+    /** Puts the camera at a zoom (0: the whole map) and draws until the pictures and chunks in view are in. */
+    static void look(float z, float x, float y) throws Exception {
+        game.cam.follow = -1;
+        game.cam.zoom = z <= 0 ? game.cam.minZoom : Math.max(game.cam.minZoom, z);
+        game.cam.cx = x;
+        game.cam.cy = y;
+        for (int k = 0; k < 40; k++) {
+            frames(1);
+            game.world().r.cache.drain();
+            Thread.sleep(10);
+        }
+        game.cam.zoom = z <= 0 ? game.cam.minZoom : Math.max(game.cam.minZoom, z);
+        game.cam.cx = x;
+        game.cam.cy = y;
+        frames(30);
+    }
+
     static void modeShots(String mode) throws Exception {
+        if (mode.equals("national")) {
+            nationalShots(extra != null ? extra : "ZC2-28672-0-7-lab_leak");
+            return;
+        }
         tap("new");
         frames(2);
         tap(mode.equals("commander") ? "mode:1" : "mode:2");

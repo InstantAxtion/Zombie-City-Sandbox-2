@@ -34,6 +34,21 @@ public final class Game {
 
     // new game choices
     int ngMode, ngScenario, ngPreset, ngSize = 1;
+    /**
+     * A real-scale map size picked by a challenge code (a developer's way in until P10 puts them on the menu: e.g.
+     * ZC2-28672-0-7-lab_leak), or 0 for the menu's size.
+     */
+    int ngNational;
+
+    /** The map side the New Game screen will build. */
+    int ngMapSize() {
+        return ngNational > 0 ? ngNational : RegionGen.SIZES[ngSize];
+    }
+
+    String ngSizeName() {
+        if (ngNational > 0) for (int i = 0; i < Nation.SIZES.length; i++) if (Nation.SIZES[i] == ngNational) return Nation.SIZE_NAMES[i];
+        return ngNational > 0 ? "Nation" : RegionGen.SIZE_NAMES[ngSize];
+    }
     /** The role picked on the New Game screen (-1 = the scenario's own). */
     int ngRole = -1;
     /** A replay being watched (the world is fed its recorded inputs), or null. */
@@ -460,13 +475,13 @@ public final class Game {
     }
 
     String regionCode() {
-        return RegionGen.SIZES[ngSize] + "-" + ngPreset + "-" + ngSeed;
+        return ngMapSize() + "-" + ngPreset + "-" + ngSeed;
     }
 
     /** A challenge: the map, the scenario and the role, as a code to share. */
     String challengeCode() {
         Content.Scenario sc = chosenScenario();
-        return "ZC2-" + RegionGen.SIZES[ngSize] + "-" + ngPreset + "-" + ngSeed + "-" + (sc == null ? "sandbox" : sc.id) + "-" + Roles.IDS[chosenRole()];
+        return "ZC2-" + ngMapSize() + "-" + ngPreset + "-" + ngSeed + "-" + (sc == null ? "sandbox" : sc.id) + "-" + Roles.IDS[chosenRole()];
     }
 
     static String challengeCodeOf(World w) {
@@ -486,8 +501,11 @@ public final class Game {
             long seed = Long.parseLong(p[3]);
             int si = -1;
             for (int i = 0; i < RegionGen.SIZES.length; i++) if (RegionGen.SIZES[i] == size) si = i;
-            if (si < 0 || preset < 0 || preset >= RegionGen.PRESETS.length) return false;
-            ngSize = si;
+            // (a real-scale size isn't on the menu yet: a code is the hidden way to one)
+            boolean nat = national(size) || size == SMALL_NATIONAL;
+            if ((si < 0 && !nat) || preset < 0 || preset >= RegionGen.PRESETS.length) return false;
+            if (si >= 0) ngSize = si;
+            ngNational = nat ? size : 0;
             ngPreset = preset;
             ngSeed = seed;
             codeNote = null;
@@ -612,7 +630,7 @@ public final class Game {
         // the map
         float bw = (rightW - ui.dp(16)) / 3;
         ui.button("preset", rightX, ry, bw, ui.dp(40), RegionGen.PRESETS[ngPreset], false, 13);
-        ui.button("size", rightX + bw + ui.dp(8), ry, bw, ui.dp(40), RegionGen.SIZE_NAMES[ngSize], false, 13);
+        ui.button("size", rightX + bw + ui.dp(8), ry, bw, ui.dp(40), ngSizeName(), false, 13);
         ui.button("seed", rightX + (bw + ui.dp(8)) * 2, ry, bw, ui.dp(40), "New map", false, 13);
         ry += ui.dp(46);
         // the start, and the challenge code tucked above it
@@ -763,20 +781,22 @@ public final class Game {
     }
 
     long key() {
-        return ngSeed * 31 + ngPreset * 7 + ngSize;
+        return ngSeed * 31 + ngPreset * 7 + ngSize + ngNational * 131L;
     }
+
+    /** The small national map the tests use (8,192 tiles), also allowed in a code. */
+    static final int SMALL_NATIONAL = 8192;
 
     /** A real-scale map size (built by NationGen). */
     static boolean national(int size) {
-        for (int s : Nation.SIZES) if (s == size) return true;
-        return false;
+        return Setup.national(size); // (Nation.SIZES, and the small test nation)
     }
 
     private void requestPreview() {
         final long k = key();
         if (previewKey == k || previewBusy || previewFailed == k || screen == S_LOADING) return;
         previewBusy = true;
-        final int size = RegionGen.SIZES[ngSize], preset = ngPreset;
+        final int size = ngMapSize(), preset = ngPreset;
         final long seed = ngSeed;
         Thread t = new Thread(new Runnable() {
             public void run() {
@@ -810,7 +830,7 @@ public final class Game {
     private void start() {
         final List<Content.Scenario> list = scenariosFor(ngMode);
         final Content.Scenario sc = list.isEmpty() ? null : list.get(Math.min(ngScenario, list.size() - 1));
-        final int size = RegionGen.SIZES[ngSize], preset = ngPreset;
+        final int size = ngMapSize(), preset = ngPreset;
         final long seed = ngSeed;
         final int role = chosenRole();
         final long k = key();
@@ -820,7 +840,7 @@ public final class Game {
         closeWorld();
         loadingFrom = S_NEW;
         screen = S_LOADING;
-        loadingText = "Building " + RegionGen.SIZE_NAMES[ngSize].toLowerCase() + " (" + RegionGen.PRESETS[preset].toLowerCase() + ")...";
+        loadingText = "Building " + ngSizeName().toLowerCase() + " (" + RegionGen.PRESETS[preset].toLowerCase() + ")...";
         loaded = null;
         loadError = null;
         final int gen = ++loadGen;
@@ -831,6 +851,8 @@ public final class Game {
                     if (usePreview) {
                         if (pt != null) pt.join();
                         if (previewKey == k) pre = preview;
+                        // (a real-scale map: the nation the preview built, its game region made over it)
+                        if (previewKey == k && pre == null && previewNation != null && previewNation.size == size) pre = Region.national(previewNation, null);
                     }
                     // the game changes its region (rubble, blown bridges): the preview mustn't show it, or be reused
                     preview = null;
@@ -3089,7 +3111,7 @@ public final class Game {
                 return;
             case "start": start(); return;
             case "preset": ngPreset = (ngPreset + 1) % RegionGen.PRESETS.length; return;
-            case "size": ngSize = (ngSize + 1) % RegionGen.SIZES.length; return;
+            case "size": ngSize = (ngSize + 1) % RegionGen.SIZES.length; ngNational = 0; return;
             case "seed": ngSeed = (ngSeed * 1103515245L + 12345L + System.nanoTime()) % 1000000L; if (ngSeed < 0) ngSeed = -ngSeed; return;
             case "pause": screen = S_PAUSE; return;
             case "playpause": paused = !paused; return;

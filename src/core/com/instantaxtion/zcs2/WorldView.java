@@ -826,6 +826,8 @@ public final class WorldView {
             if (z >= 0.3f) {
                 streetLights(g, cam, night);
                 if (z >= 0.22f) lights(g, cam, night);
+            } else if (np != null) {
+                nationNightLights(g, cam, night);
             } else {
                 for (Region.Settlement s : w.r.settlements) {
                     if (s.kind == Region.S_HOLDOUT || s.kind == Region.S_CAMP) continue;
@@ -836,6 +838,39 @@ public final class WorldView {
                     glow(g, glowWarm, x, y, rad * 2, night * 0.7f);
                 }
             }
+        }
+    }
+
+    /**
+     * A national map by night from high up: each lived-in, powered sector glows by how many live there (the city as
+     * a carpet of light, dark where the power is gone); from the whole country, each town as one glow its own size.
+     */
+    private void nationNightLights(Gfx g, Camera cam, float night) {
+        float z = cam.zoom;
+        Sectors sec = w.sec;
+        float cs = w.r.sect * Tile.SIZE;
+        if (z >= 0.004f) {
+            int x0 = Math.max(0, (int) (cam.x0() / cs) - 1), y0 = Math.max(0, (int) (cam.y0() / cs) - 1);
+            int x1 = Math.min(sec.sw - 1, (int) (cam.x1() / cs) + 1), y1 = Math.min(sec.sh - 1, (int) (cam.y1() / cs) + 1);
+            int step = (x1 - x0 + 1) * (y1 - y0 + 1) > 6000 ? 2 : 1;
+            float size = cs * z * 1.5f * step;
+            for (int sy = y0; sy <= y1; sy += step)
+                for (int sx = x0; sx <= x1; sx += step) {
+                    int s = sy * sec.sw + sx;
+                    int home = sec.home[s];
+                    if (home < 60 || !w.strat.lit(s)) continue;
+                    float a = night * Math.min(0.55f, 0.12f + home / 9000f);
+                    glow(g, glowWarm, cam.toScreenX((sx + 0.5f) * cs), cam.toScreenY((sy + 0.5f) * cs), size, a);
+                }
+            return;
+        }
+        for (Region.Settlement s : w.r.settlements) {
+            if (s.kind == Region.S_HOLDOUT || s.kind == Region.S_CAMP) continue;
+            if (s.grid >= 0 && !w.strat.gridOn[s.grid]) continue;
+            float x = cam.toScreenX(s.cx * 16f), y = cam.toScreenY(s.cy * 16f);
+            float rad = Math.max(s.radius * 16f * z * 1.1f, 3 * dp);
+            if (x < -rad || y < -rad || x > cam.sw + rad || y > cam.sh + rad) continue;
+            glow(g, glowWarm, x, y, rad * 2, night * 0.55f);
         }
     }
 
