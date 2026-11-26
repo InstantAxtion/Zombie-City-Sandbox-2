@@ -68,7 +68,8 @@ public final class NationView {
             place(zooms[i][0], zooms[i][1], zooms[i][2]);
             int[] painted = settle();
             double ms = frameMs(20);
-            System.out.printf("%-10s %.4f  %6.1f ms   (district %d, street %d, chunks made %d)%n", names[i], cam.zoom, ms, painted[0], painted[1], painted[2]);
+            System.out.printf("%-10s %.4f  %6.1f ms, %5.1f ms without the full-screen vignette   (district %d, street %d, chunks made %d)%n", names[i], cam.zoom, ms,
+                    ms - vignetteMs(), painted[0], painted[1], painted[2]);
             save(out, names[i], frame(0));
         }
         // the smooth zoom: the whole country down to a street corner of the capital, every frame fully painted
@@ -166,6 +167,21 @@ public final class NationView {
         }
         java.util.Arrays.sort(t);
         return t[frames / 2];
+    }
+
+    /** What Java2D takes to lay the vignette over the whole screen (every view draws it, today's maps too). */
+    static double vignetteMs() {
+        double[] t = new double[20];
+        BufferedImage img = new BufferedImage(W, H, BufferedImage.TYPE_INT_ARGB);
+        for (int i = 0; i < t.length; i++) {
+            Graphics2D g = img.createGraphics();
+            long t0 = System.nanoTime();
+            new DesktopGfx(g, W, H).image(view.vignette, 0, 0, W, H);
+            t[i] = (System.nanoTime() - t0) / 1e6;
+            g.dispose();
+        }
+        java.util.Arrays.sort(t);
+        return t[t.length / 2];
     }
 
     static BufferedImage frame(float dt) {
