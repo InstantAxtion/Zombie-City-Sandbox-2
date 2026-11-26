@@ -172,9 +172,13 @@ public final class Command extends Module {
             // what reaches the authorities: a share of the truth (far less with the phones down); the panic online
             // inflates it a little
             float share = phones ? detectUp : detectDown;
+            // a drone over the town: the officials see what it sees
+            boolean drone = w.aai.seen(st);
+            if (drone) share = Math.max(share, 0.95f);
             float target = alerted[st] ? truth * share * (1 + 0.3f * w.media.social[st]) : 0;
             target = Math.max(target, calls[st] * (phones ? 1 : detectDown / detectUp));
             float lag = phones ? lagUp : lagDown;
+            if (drone) lag = Math.min(lag, lagUp * 0.5f);
             // bad news travels faster than good: officials are slow to believe it's over
             if (target < repZ[st]) lag *= clearLag;
             repZ[st] += (target - repZ[st]) * Math.min(1, dt / lag);

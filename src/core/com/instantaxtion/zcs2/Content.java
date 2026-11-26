@@ -16,12 +16,15 @@ public final class Content {
 
     public static final class Weapon {
         public String id, name, sound;
-        public float range, rof, dmg, head, blast, blastDmg;
-        public int ammo, index;
+        public float range, rof, dmg, head, blast, blastDmg, reload;
+        public int ammo, index, mag;
     }
 
     public static final class Unit {
         public String id, name, agency;
+        /** What this person does beyond fighting (medic, commander, marksman, k9, traffic, drone; "" for none),
+         *  and the training they fight by (police, army, swat). See ArmedAI. */
+        public String role, doctrine;
         public int kind, index, color;
         public float hp, walk, run, armor, infect, aim, nerve, radius;
         public Weapon weapon, grenade;
@@ -180,6 +183,9 @@ public final class Content {
         w.blast = f(b, "blast", 0);
         w.blastDmg = f(b, "blastDmg", 0);
         w.sound = s(b, "sound", "pistol");
+        // a magazine: rounds between reloads (0 = no reloading), and seconds to reload
+        w.mag = (int) f(b, "mag", 0);
+        w.reload = f(b, "reload", 2);
         w.index = weapons.size();
         weapons.add(w);
         weaponById.put(id, w);
@@ -204,6 +210,8 @@ public final class Content {
         u.grenade = weaponById.get(s(b, "grenade", ""));
         u.engineer = f(b, "engineer", 0) > 0;
         u.agency = s(b, "agency", u.kind == SOLDIER ? "Army" : "");
+        u.role = s(b, "role", "");
+        u.doctrine = s(b, "doctrine", u.kind == SOLDIER ? "army" : u.kind == COP ? "police" : "");
         u.index = units.size();
         units.add(u);
         unitById.put(id, u);

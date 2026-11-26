@@ -88,6 +88,29 @@ vehicle's crew list and its crew's `loc` are changed in the same call. `Audit.ch
 five seconds of every outbreak. The first game's "people listed twice" and "police lost off the map" can't happen
 silently here: they would fail the audit.
 
+## Police and soldiers on foot
+
+The squad says where; each officer or soldier (`ArmedAI`) decides how. About twice a second each one scores its
+options and takes the best: engage; move to cover or a better line of fire; fall back to the squad's fallback point
+(its vehicle, or behind its line) when the dead outnumber what the guns near can hold; pull back to a medic when
+wounded, while the others stand over them; reload in cover (weapons have magazines); search where the dead were
+last seen; rejoin the squad; or hold as the rear guard for a moment while the squad falls back. Whoever is too close
+backs away from all the dead round them, not just the nearest. Roles add their own job: a medic treats the wounded
+and holds off the turning of the bitten for a minute; a commander steadies and sharpens everyone near; a marksman
+takes a rooftop for overwatch (better aim and reach); a K9 handler's dog finds the hidden bitten among people near,
+who are reported and taken off the street; a traffic officer holds the junction by the squad's post; a drone over the
+squad shows the authorities what it sees (`Command` believes nearly all of it, sooner) and shows the squad where to
+search.
+
+Nerve is per person: their training, rank (from kills) and role, a commander or the command post near, the losses
+their squad has taken, the odds, their wounds and their ammunition. When it runs out they break and run for the
+fallback point, and rally once clear and steady; the squad holds longer when its people are steady
+(`squadNerve`). Doctrine is per agency: police hit harder up close (stopping power stops a bite, aimed headshots)
+and seek cover; the army suppresses packs with sustained fire and bounds forward, half moving while half covers;
+SWAT clear buildings where the dead are inside faster than anyone. All of it is decided in the parallel think (each
+writes only its own state) and what touches others (treatment, the dog, the drone, breaching) once a second on one
+thread; the state is saved with the game.
+
 ## Vehicles on a graph
 
 Roads are a graph built during generation (junctions and the streets, avenues and highways between them, with

@@ -470,7 +470,7 @@ public final class Squads {
                     }
                 }
                 Content.Unit lu = w.unitOf(lead);
-                float limit = s.n * (3.5f + lu.nerve * 4);
+                float limit = s.n * (3.5f + w.aai.squadNerve(s, lu.nerve) * 4);
                 // contact on the way: stop and fight here rather than walk on into them
                 if (s.fallT <= 0 && dist(e.x[lead], e.y[lead], s.gx, s.gy) > 60 && w.sp.zombiesNear(e, e.x[lead], e.y[lead], 150, 12) >= 12) {
                     s.gx = e.x[lead];

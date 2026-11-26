@@ -87,6 +87,48 @@ public final class Tests {
         return true;
     }
 
+    static float dist(float ax, float ay, float bx, float by) {
+        float dx = ax - bx, dy = ay - by;
+        return (float) Math.sqrt(dx * dx + dy * dy);
+    }
+
+    /** A squad of the given people standing at (x, y), holding there. */
+    static Squads.Squad squadAt(World w, int faction, float x, float y, String... units) {
+        Squads.Squad s = w.sq.create(faction, -1, "Test");
+        for (int k = 0; k < units.length; k++) {
+            float[] p = w.r.openGroundNear(x + (k % 3) * 8, y + (k / 3) * 8, false);
+            int i = w.spawnUnit(w.c.unit(units[k]), p[0], p[1]);
+            w.sq.add(s, i);
+        }
+        w.sq.order(s, Squads.O_HOLD, x, y);
+        return s;
+    }
+
+    /** Open street about d px from (x, y), along whichever way the street runs. */
+    static float[] packNear(World w, float x, float y, float d) {
+        for (int k = 0; k < 16; k++) {
+            double a = k * Math.PI / 8;
+            float px = x + (float) Math.cos(a) * d, py = y + (float) Math.sin(a) * d;
+            boolean clear = true;
+            for (int t = 1; t <= 8 && clear; t++) clear = w.r.walkablePx(x + (px - x) * t / 8, y + (py - y) * t / 8);
+            if (clear) return new float[]{px, py};
+        }
+        return new float[]{x + d, y};
+    }
+
+    /** A hash of the armed people's own state (what they're doing, their nerve and magazines). */
+    static long armedHash(World w) {
+        long h = 1469598103934665603L;
+        for (int i = 0; i < w.e.top; i++) {
+            if (!w.aai.has(i) || w.e.loc[i] == Ents.NONE) continue;
+            h = (h ^ w.aai.act[i]) * 1099511628211L;
+            h = (h ^ Float.floatToIntBits(w.aai.nerve[i])) * 1099511628211L;
+            h = (h ^ w.aai.mag[i]) * 1099511628211L;
+            h = (h ^ w.aai.bits[i]) * 1099511628211L;
+        }
+        return h;
+    }
+
     public static void main(String[] args) throws Exception {
         content = Content.load(new FileInputStream("assets/content.ini"));
         define();
@@ -1679,6 +1721,139 @@ public final class Tests {
                 check(a.e.top == b.e.top && ha == hb && a.rng.state() == b.rng.state(), "listening changed the world");
                 a.shutdown();
                 b.shutdown();
+            }
+        });
+        test("armed: the wounded fall back while the others cover", new T() {
+            public void run() {
+                World w = game(41, 768, "sandbox", 2);
+                Region.Settlement c = w.r.city();
+                float[] at = w.r.openGroundNear(c.cx * 16f, c.cy * 16f, true);
+                camOver(w, at[0], at[1]);
+                Squads.Squad s = squadAt(w, Ents.SOLDIER, at[0], at[1], "rifleman", "rifleman", "rifleman", "rifleman");
+                int hurt = s.mem[0];
+                w.e.hp[hurt] = w.e.maxHp[hurt] * 0.3f;
+                play(w, 1, false);
+                // a pack coming up the street
+                float[] zp = packNear(w, at[0], at[1], 150);
+                Tools.paintZombies(w, zp[0], zp[1], 30, 30, w.c.ztype("walker").index);
+                float d0 = dist(w.e.x[hurt], w.e.y[hurt], zp[0], zp[1]);
+                boolean pulledBack = false, covered = false;
+                for (int k = 0; k < 8 * 20; k++) {
+                    w.step();
+                    if (w.e.loc[hurt] == Ents.FREE && w.aai.act[hurt] == ArmedAI.A_WOUNDED) pulledBack = true;
+                    for (int m = 1; m < s.n; m++) {
+                        int o = s.mem[m];
+                        if (o != hurt && w.aai.has(o) && (w.aai.act[o] == ArmedAI.A_COVER || w.aai.act[o] == ArmedAI.A_ENGAGE)) covered = true;
+                    }
+                    if (k == 3 * 20) check(dist(w.e.x[hurt], w.e.y[hurt], zp[0], zp[1]) > d0 + 20, "the wounded man didn't get back from the dead: "
+                            + dist(w.e.x[hurt], w.e.y[hurt], zp[0], zp[1]) + " vs " + d0);
+                }
+                check(pulledBack, "the wounded never pulled back");
+                check(covered, "nobody covered him");
+                check(w.e.loc[hurt] == Ents.FREE, "the wounded man died");
+                check(Audit.check(w).isEmpty(), Audit.check(w));
+                w.shutdown();
+            }
+        });
+        test("armed: medics heal the wounded and hold off the turning", new T() {
+            public void run() {
+                World w = game(42, 768, "sandbox", 2);
+                Region.Settlement c = w.r.city();
+                float[] at = w.r.openGroundNear(c.cx * 16f, c.cy * 16f, true);
+                camOver(w, at[0], at[1]);
+                Squads.Squad s = squadAt(w, Ents.SOLDIER, at[0], at[1], "medic", "rifleman", "rifleman");
+                int hurt = s.mem[1], bitten = s.mem[2];
+                w.e.hp[hurt] = w.e.maxHp[hurt] * 0.35f;
+                w.e.flags[bitten] |= Ents.F_INFECTED;
+                w.e.infT[bitten] = 20;
+                float hp0 = w.e.hp[hurt];
+                play(w, 15, true);
+                // resting alone gives back 0.6 a second: the medic does far more
+                check(w.e.hp[hurt] > hp0 + 30, "the medic didn't heal: " + hp0 + " -> " + w.e.hp[hurt]);
+                check(w.aai.healed > 0, "no treatment counted");
+                check((w.e.flags[bitten] & ArmedAI.F_STABILISED) != 0, "the bitten man wasn't treated");
+                check(w.e.loc[bitten] == Ents.FREE && w.e.infT[bitten] > 30, "the bitten man turned anyway (" + w.e.infT[bitten] + ")");
+                w.shutdown();
+            }
+        });
+        test("armed: with no ammunition they don't walk into the dead", new T() {
+            public void run() {
+                World w = game(43, 768, "sandbox", 2);
+                Region.Settlement c = w.r.city();
+                float[] at = w.r.openGroundNear(c.cx * 16f, c.cy * 16f, true);
+                camOver(w, at[0], at[1]);
+                Squads.Squad s = squadAt(w, Ents.COP, at[0], at[1], "patrol", "patrol");
+                for (int k = 0; k < s.n; k++) w.e.ammo[s.mem[k]] = 0;
+                // the pack sits between them and where they're sent
+                float[] zp = packNear(w, at[0], at[1], 220);
+                float gx = at[0] + (zp[0] - at[0]) * 2, gy = at[1] + (zp[1] - at[1]) * 2;
+                float[] goal = w.r.openGroundNear(gx, gy, true);
+                Tools.paintZombies(w, zp[0], zp[1], 20, 35, w.c.ztype("walker").index);
+                w.sq.order(s, Squads.O_MOVE, goal[0], goal[1]);
+                float closest = Float.MAX_VALUE;
+                int[] mem = java.util.Arrays.copyOf(s.mem, s.n);
+                for (int k = 0; k < 40 * 20; k++) {
+                    w.step();
+                    for (int m : mem) {
+                        if (w.e.loc[m] != Ents.FREE || w.e.kind[m] != Ents.COP) continue;
+                        int z = w.sp.nearestZombie(w.e, w.e.x[m], w.e.y[m], 200);
+                        if (z >= 0) closest = Math.min(closest, dist(w.e.x[m], w.e.y[m], w.e.x[z], w.e.y[z]));
+                    }
+                }
+                for (int m : mem) check(w.e.kind[m] == Ents.COP && w.e.loc[m] == Ents.FREE, "an officer with no ammunition was lost");
+                check(closest > 20, "an officer with no ammunition got within " + closest + " px of the dead");
+                w.shutdown();
+            }
+        });
+        test("armed: the new behaviours are the same on 1 and 2 threads, and after a save", new T() {
+            public void run() throws Exception {
+                World a = game(44, 768, "sandbox", 1), b = game(44, 768, "sandbox", 2);
+                for (World w : new World[]{a, b}) {
+                    Region.Settlement c = w.r.city();
+                    float[] at = w.r.openGroundNear(c.cx * 16f, c.cy * 16f, true);
+                    camOver(w, at[0], at[1]);
+                    Squads.Squad r = squadAt(w, Ents.SOLDIER, at[0], at[1], "rifleman", "rifleman", "commander", "gunner", "grenadier", "medic", "sniper", "drone");
+                    Squads.Squad k = squadAt(w, Ents.COP, at[0] + 60, at[1], "patrol", "patrol", "k9", "traffic", "swat", "marksman");
+                    w.e.hp[r.mem[0]] = 30;
+                    w.sq.order(k, Squads.O_HOLD, at[0] + 60, at[1]);
+                    // a few of the people about are bitten and hiding it
+                    for (int n = 0; n < 6; n++) {
+                        float[] p = w.r.openGroundNear(at[0] + 40 + n * 6, at[1] + 10, false);
+                        int i = w.spawnCiv(p[0], p[1], w.c.unit("civilian"));
+                        w.e.flags[i] |= Ents.F_INFECTED;
+                        w.e.infT[i] = 200;
+                        w.e.timer[i] = 60;
+                    }
+                    float[] zp = packNear(w, at[0], at[1], 260);
+                    Tools.paintZombies(w, zp[0], zp[1], 300, 140, -1);
+                }
+                World l = null;
+                for (int k = 0; k < 60 * 20; k++) {
+                    a.step();
+                    b.step();
+                    if (l != null) l.step();
+                    if (k % 100 == 0) {
+                        check(Audit.hash(a) == Audit.hash(b) && armedHash(a) == armedHash(b), "1 and 2 threads diverged at step " + k);
+                        if (l != null) check(Audit.hash(l) == Audit.hash(a) && armedHash(l) == armedHash(a), "the loaded game diverged " + k);
+                    }
+                    if (k == 30 * 20) {
+                        ByteArrayOutputStream bo = new ByteArrayOutputStream();
+                        SaveIO.save(a, bo);
+                        l = SaveIO.load(content, new ByteArrayInputStream(bo.toByteArray()), 2);
+                        check(Audit.hash(l) == Audit.hash(a) && armedHash(l) == armedHash(a), "different straight after loading");
+                    }
+                }
+                check(Audit.check(a).isEmpty(), Audit.check(a));
+                int[] acts = new int[ArmedAI.ACT_NAMES.length];
+                for (int i = 0; i < a.e.top; i++) if (a.aai.has(i) && a.e.armed(i)) acts[a.aai.act[i]]++;
+                int kinds = 0;
+                for (int n : acts) if (n > 0) kinds++;
+                check(a.aai.spotted > 0, "the dog found nobody");
+                check(a.aai.healed > 0, "the medic treated nobody");
+                check(kinds >= 2, "everyone doing the same thing");
+                a.shutdown();
+                b.shutdown();
+                l.shutdown();
             }
         });
         test("perf: 20,000 of the dead", new T() {

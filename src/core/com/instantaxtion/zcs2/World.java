@@ -87,7 +87,7 @@ public final class World {
 
     private final ZombieAI zai;
     private final CivAI cai;
-    private final ArmedAI aai;
+    final ArmedAI aai;
     final Combat combat;
 
     public World(Content c, Region r, long seed, int threads) {
@@ -141,6 +141,7 @@ public final class World {
         zai = new ZombieAI(this);
         cai = new CivAI(this);
         aai = new ArmedAI(this);
+        modules.add(aai.module);
         combat = new Combat(this);
         par = new Parallel(threads);
     }
@@ -232,6 +233,7 @@ public final class World {
         sp.build(e);
         if (tick % 10 == 1) flow.build(this);
         sq.update();
+        aai.prepare();
         par.run(thinkJob, e.top);
         applyIntents();
         par.run(moveJob, e.top);

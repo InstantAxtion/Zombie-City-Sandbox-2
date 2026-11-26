@@ -27,6 +27,11 @@ one person.
   moves as formations on the national map (infantry and armoured battalions, artillery batteries, marines,
   National Guard brigades) and holds ground; where nobody is watching, fights are settled by the numbers. Outside
   help arrives by the interstates as the alert level rises.
+- **Officers and soldiers who think.** Each one weighs fighting, cover, falling back, pulling back when wounded,
+  reloading in cover, searching and the rear guard, with their own nerve (training, rank, a commander near, losses,
+  the odds, ammunition): they break and run, and rally. Police, the army and SWAT fight by their own doctrine, and
+  squads bring combat medics, commanders, marksmen on the rooftops, K9 handlers whose dogs find the hidden bitten,
+  traffic officers on the junctions and drone operators.
 - **Time.** An hour passes every minute at 1x. Fast-forward at an hour, six hours or a day per second through
   weeks of a campaign. Seasons and weather: the cold slows the dead, the heat rots them, rain and fog shorten
   sight, snow lies on the ground.

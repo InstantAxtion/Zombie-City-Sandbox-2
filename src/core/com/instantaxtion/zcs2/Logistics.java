@@ -350,10 +350,10 @@ public final class Logistics extends Module {
     }
 
     static String goodsName(Convoy c) {
-        if (c.refugees > 0) return c.refugees + " refugees";
+        if (c.refugees > 0) return News.num(c.refugees) + " refugees";
         StringBuilder sb = new StringBuilder();
-        if (c.ammo > 0) sb.append((int) c.ammo).append(" rounds");
-        if (c.fuel > 0) sb.append(sb.length() > 0 ? ", " : "").append((int) c.fuel).append(" t of fuel");
+        if (c.ammo > 0) sb.append(News.num((int) c.ammo)).append(" rounds");
+        if (c.fuel > 0) sb.append(sb.length() > 0 ? ", " : "").append(News.num((int) c.fuel)).append(" t of fuel");
         if (c.food > 0) sb.append(sb.length() > 0 ? ", " : "").append("a day's food for ").append(News.num((int) c.food)).append(" people");
         if (c.med > 0) sb.append(sb.length() > 0 ? ", " : "").append((int) c.med).append(" doses of medicine");
         return sb.length() == 0 ? "nothing left" : sb.toString();
