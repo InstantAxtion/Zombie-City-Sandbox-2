@@ -1492,7 +1492,7 @@ public final class WorldView {
             float sx = cam.toScreenX(coX[k]), sy = cam.toScreenY(coY[k]) - (16 + 10 * Math.min(1, age / CALLOUT_LIFE)) * dp;
             String t = coCount[k] > 1 ? coText[k] + " ×" + coCount[k] : coText[k];
             float ts = 11.5f * dp, tw = g.textWidth(t, ts, true), ph = 18 * dp;
-            float x0 = sx - tw / 2 - 7 * dp, x1 = sx + tw / 2 + 7 * dp, y0 = sy - ph / 2, y1 = sy + ph / 2;
+            float x0 = sx - tw / 2 - 12 * dp, x1 = sx + tw / 2 + 8 * dp, y0 = sy - ph / 2, y1 = sy + ph / 2;
             if (x1 < 0 || x0 > cam.sw || y1 < 0 || y0 > cam.sh) continue;
             if (!place(x0, y0, x1, y1 + 5 * dp)) continue;
             shown++;
@@ -1500,10 +1500,10 @@ public final class WorldView {
             g.color(MapPainter.alpha(0xE0140C0C, a));
             g.fillRoundRect(x0, y0, x1 - x0, ph, ph / 2);
             g.color(MapPainter.alpha(col, a));
-            g.fillRoundRect(x0 + 3 * dp, y0 + 4 * dp, 3 * dp, ph - 8 * dp, 1.5f * dp);
+            g.fillRoundRect(x0 + 4 * dp, y0 + 4 * dp, 3 * dp, ph - 8 * dp, 1.5f * dp);
             // a tick down to the place
             g.line(sx, y1, sx, y1 + 5 * dp, 1.4f * dp);
-            labelAlways(g, t, sx + 1.5f * dp, sy + ts * 0.36f, 11.5f, MapPainter.alpha(0xFFFFFFFF, a), Gfx.ALIGN_CENTER, true);
+            labelAlways(g, t, sx - 2 * dp, sy + ts * 0.36f, 11.5f, MapPainter.alpha(0xFFFFFFFF, a), Gfx.ALIGN_CENTER, true);
         }
     }
 
@@ -1602,7 +1602,7 @@ public final class WorldView {
             xy[k * 2 + 1] = y + (float) Math.sin(a) * r;
         }
         g.color(col);
-        if (f > 0.02f) g.lines(xy, n + 1, 2.2f * dp);
+        if (f > 0.02f) for (int k = 1; k <= n; k++) g.line(xy[k * 2 - 2], xy[k * 2 - 1], xy[k * 2], xy[k * 2 + 1], 2.2f * dp);
         String t = (int) waited + "m";
         if (place(x - 12 * dp, y + r + 1 * dp, x + 12 * dp, y + r + 13 * dp)) labelAlways(g, t, x, y + r + 11 * dp, 10, col, Gfx.ALIGN_CENTER, true);
     }

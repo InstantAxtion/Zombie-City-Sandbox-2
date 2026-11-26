@@ -81,6 +81,8 @@ public final class Records extends Module {
     }
 
     public final List<Moment> moments = new ArrayList<Moment>();
+    /** People bitten in the streets, one by one (the counted losses indoors, on the roads... are in Stats.lossBy). */
+    public int streetLost;
     /** Police and soldiers at the start, all of them (in squads and waiting at stations and bases). */
     public int startPoliceAll = -1, startSoldiersAll = -1;
     private final float[] rateT = new float[32];
@@ -474,7 +476,8 @@ public final class Records extends Module {
         int st = t.id;
         List<String> why = new ArrayList<String>();
         int police = policeIn(st), p0 = Math.max(0, policeStart[st]);
-        if (w.command.isAbandoned(st) || p0 > 0 && police < p0 * 0.3f) why.add(p0 > 0 ? "lost its police (" + police + " of " + p0 + " left)" : "lost its police");
+        if (p0 > 0 && police < p0 * 0.3f) why.add("lost its police (" + police + " of " + p0 + " left)");
+        else if (w.command.isAbandoned(st)) why.add("the police pulled out" + (police > 0 ? " (" + police + " officers)" : ""));
         else if (p0 == 0) why.add("had no police of its own");
         if (!w.command.phonesUp(st)) why.add("the phones were down, so calls didn't get through");
         if (w.time - hordeAt[st] < 240) why.add("a horde of " + News.num(hordeSize[st]) + " arrived");
@@ -482,7 +485,9 @@ public final class Records extends Module {
         if (w.gov.evacuating(st)) why.add("the evacuation didn't get people out in time");
         if (t.grid >= 0 && t.grid < w.strat.gridOn.length && !w.strat.gridOn[t.grid]) why.add("the power was out");
         int z = w.stats.zBySettlement[st], pop = w.stats.popBySettlement[st];
-        if (why.isEmpty() || why.size() == 1 && pop > 0) why.add(pop > 0 ? "the dead outnumbered the living " + Math.max(1, z / Math.max(1, pop)) + " to 1" : "nobody was left to hold it");
+        if (pop <= 0) why.add("nobody was left to hold it");
+        else if (z > pop) why.add("the dead outnumbered the living " + Math.max(1, Math.round(z / (float) pop)) + " to 1");
+        else if (why.isEmpty()) why.add(News.num(z) + " of the dead got in among the people");
         StringBuilder sb = new StringBuilder();
         for (int k = 0; k < why.size(); k++) {
             if (k > 0) sb.append(k == why.size() - 1 ? " and " : ", ");
@@ -622,6 +627,7 @@ public final class Records extends Module {
             o.writeInt(s.tArmyAll[k]);
         }
         o.writeFloat(townT);
+        o.writeInt(streetLost);
     }
 
     @Override
@@ -671,6 +677,7 @@ public final class Records extends Module {
         // samples the save didn't hold (an older save): unknown
         for (int k = n; k < s.tN; k++) s.tPoliceAll[k] = s.tArmyAll[k] = -1;
         townT = in.readFloat();
+        if (in.available() >= 4) streetLost = in.readInt();
         // what is watched for changes starts from what's there now (nothing is announced twice)
         facOn = w.strat.online.clone();
         gridWasOn = w.strat.gridOn.clone();

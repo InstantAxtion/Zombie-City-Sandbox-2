@@ -2270,7 +2270,7 @@ public final class Game {
         g.color(Ui.TEXT);
         g.text(Ui.fit(g, title, pw - (tx - x) - pad - ui.dp(36), ui.dp(Ui.L + 1), true), tx, y + ui.dp(25), ui.dp(Ui.L + 1), Gfx.ALIGN_LEFT, true);
         g.color(Ui.DIM);
-        g.text(Ui.fit(g, sub, pw - (tx - x) - pad, ui.dp(12), false), tx, y + ui.dp(43), ui.dp(12), Gfx.ALIGN_LEFT, false);
+        g.text(Ui.fit(g, sub, pw - (tx - x) - pad - ui.dp(36), ui.dp(12), false), tx, y + ui.dp(43), ui.dp(12), Gfx.ALIGN_LEFT, false);
         ui.button("i:close", x + pw - ui.dp(40), y + ui.dp(8), ui.dp(32), ui.dp(32), "✕", false, 13);
         float yy = y + ui.dp(60);
         // the bars
@@ -2720,7 +2720,8 @@ public final class Game {
                 if (ticks % Math.max(1, (int) (span / stepMin / 6)) == 0) {
                     g.color(0xFF7A8490);
                     int hr = (int) ((World.START_HOUR + t / 60) % 24 + 0.01f);
-                    String lab = stepMin >= 60 * 24 || hr == 0 ? "Day " + (1 + (int) ((World.START_HOUR + t / 60 + 0.01f) / 24)) : (hr < 10 ? "0" : "") + hr + ":00";
+                    int mn = (int) (((World.START_HOUR * 60 + t) % 60 + 60.01f) % 60);
+                    String lab = stepMin >= 60 * 24 || hr == 0 && mn == 0 ? "Day " + (1 + (int) ((World.START_HOUR + t / 60 + 0.01f) / 24)) : (hr < 10 ? "0" : "") + hr + (mn < 10 ? ":0" : ":") + mn;
                     g.text(lab, tx, gy + gh2 + ui.dp(14), ui.dp(Ui.S - 1), Gfx.ALIGN_CENTER, false);
                 }
             }
@@ -2980,8 +2981,6 @@ public final class Game {
         ui.block(x, top, wdt, h);
         g.color(Ui.ACCENT);
         g.text("THE NUMBERS", x + pad, top + ui.dp(16), ui.dp(Ui.S), Gfx.ALIGN_LEFT, true);
-        g.color(Ui.DIM);
-        g.text(w.clock(), x + wdt - pad - ui.dp(22), top + ui.dp(16), ui.dp(Ui.S - 1), Gfx.ALIGN_RIGHT, false);
         ui.button("statsp", x + wdt - ui.dp(28), top + ui.dp(3), ui.dp(24), ui.dp(20), "▴", false, 11);
         // the sparkline: the dead over the timeline (the last 90 samples)
         float sx = x + pad, sw = wdt - pad * 2, sy = top + headH, sh = sparkH - ui.dp(4);
@@ -2997,7 +2996,7 @@ public final class Game {
                 pts[i * 2 + 1] = sy + sh - ui.dp(2) - (sh - ui.dp(6)) * s.tZombies[from + i] / (float) mx;
             }
             g.color(0xFFE84848);
-            g.lines(pts, cnt, ui.dp(1.5f));
+            for (int i = 1; i < cnt; i++) g.line(pts[i * 2 - 2], pts[i * 2 - 1], pts[i * 2], pts[i * 2 + 1], ui.dp(1.5f));
             g.fillCircle(pts[cnt * 2 - 2], pts[cnt * 2 - 1], ui.dp(2.2f));
         }
         g.color(0xFFFFD0C8);
@@ -3071,8 +3070,7 @@ public final class Game {
             }
         }
         if (last != null) {
-            String t = (last[0] >= 0 && last[0] < ArmedAI.ACT_NAMES.length ? ArmedAI.ACT_NAMES[last[0]] : "") + ", " + last[2] + " of the dead within reach, "
-                    + last[3] + " with them, " + last[4] + " rounds" + (last[5] >= 0 ? ", target " + last[5] / 16 + " m" : "");
+            String t = "Then: " + last[2] + " of the dead close, " + last[3] + " with them, " + last[4] + " rounds" + (last[5] >= 0 ? ", target " + last[5] / 16 + " m off" : ", no target");
             g.color(0xFFB0B8C4);
             g.text(Ui.fit(g, t, wdt, ui.dp(Ui.S - 0.5f), false), x, y + ui.dp(32), ui.dp(Ui.S - 0.5f), Gfx.ALIGN_LEFT, false);
         }
@@ -3258,17 +3256,21 @@ public final class Game {
             }
         });
         y += ui.dp(12);
-        int broke = 0;
-        for (Records.Unit u : us) if (u.how > 0) broke++;
+        int broke = 0, idle = 0;
+        for (Records.Unit u : us) {
+            if (u.how > 0) broke++;
+            else if (u.kills == 0 && u.losses == 0) idle++;
+        }
         g.color(Ui.ACCENT);
-        g.text("FORMATIONS (" + (us.size() - broke) + " held, " + broke + " broke)", m, y + ui.dp(12), ui.dp(13), Gfx.ALIGN_LEFT, true);
+        g.text("FORMATIONS (" + (us.size() - broke - idle) + " held, " + broke + " broke" + (idle > 0 ? ", " + idle + " not engaged" : "") + ")", m, y + ui.dp(12), ui.dp(13), Gfx.ALIGN_LEFT, true);
         y += ui.dp(20);
         int shown = 0;
         for (Records.Unit u : sorted) {
             if (shown++ >= 30) break;
-            String status = u.how == 2 ? "destroyed " + clockAt(u.goneAt).replace("  ", " ") : u.how == 1 ? "broke " + clockAt(u.brokeAt).replace("  ", " ") : "held";
+            boolean quiet = u.how == 0 && u.kills == 0 && u.losses == 0;
+            String status = u.how == 2 ? "destroyed " + clockAt(u.goneAt).replace("  ", " ") : u.how == 1 ? "broke " + clockAt(u.brokeAt).replace("  ", " ") : quiet ? "not engaged" : "held";
             String cost = fmt(u.kills) + " of the dead destroyed, " + fmt(u.losses) + " of " + fmt(u.start) + " lost" + (u.how > 0 ? ". Why: " + u.why + "." : ".");
-            y = townLine(g, u.name, status, u.how > 0 ? Ui.ACCENT : Ui.GOOD, cost, y, m, W);
+            y = townLine(g, u.name, status, u.how > 0 ? Ui.ACCENT : quiet ? Ui.DIM : Ui.GOOD, cost, y, m, W);
         }
         return y;
     }

@@ -396,7 +396,14 @@ public final class UiShot {
             frames(3);
             shot("L2-inspect-unit");
         }
-        // one who fell, and why
+        // one who fell, and why (if nobody has yet, one is left with no ammunition among the dead)
+        if (best >= 0 && w.stats.fallen.isEmpty()) {
+            w.e.ammo[best] = 0;
+            w.e.hp[best] = Math.min(w.e.hp[best], 10);
+            Tools.paintZombies(w, w.e.x[best], w.e.y[best], 30, 30, w.c.ztype("walker").index);
+            for (int k = 0; k < 600 && w.e.loc[best] == Ents.FREE; k++) w.step();
+            frames(2);
+        }
         int fell = -1;
         for (int i = 0; i < w.e.top; i++)
             if (w.e.loc[i] == Ents.BODY && (w.e.kind[i] == Ents.COP || w.e.kind[i] == Ents.SOLDIER) && rc.deathReason(w.e.uid[i]).length() > 0) fell = i;

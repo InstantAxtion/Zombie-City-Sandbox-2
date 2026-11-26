@@ -109,14 +109,17 @@ public final class Stats {
     /** Where people were lost, biggest first ("412,000 in their homes, 31,000 on the roads"), or "" if nobody was. */
     public String lossSummary() {
         StringBuilder sb = new StringBuilder();
-        boolean[] used = new boolean[lossBy.length];
-        for (int n = 0; n < lossBy.length; n++) {
+        // the counted causes, and those bitten in the streets one by one (kept by the records)
+        int[] by = java.util.Arrays.copyOf(lossBy, lossBy.length + 1);
+        by[lossBy.length] = rec.streetLost;
+        boolean[] used = new boolean[by.length];
+        for (int n = 0; n < by.length; n++) {
             int best = -1;
-            for (int i = 0; i < lossBy.length; i++) if (!used[i] && lossBy[i] > 0 && (best < 0 || lossBy[i] > lossBy[best])) best = i;
+            for (int i = 0; i < by.length; i++) if (!used[i] && by[i] > 0 && (best < 0 || by[i] > by[best])) best = i;
             if (best < 0) break;
             used[best] = true;
             if (sb.length() > 0) sb.append(", ");
-            sb.append(News.num(lossBy[best])).append(' ').append(LOSS_CAUSES[best]);
+            sb.append(News.num(by[best])).append(' ').append(best < LOSS_CAUSES.length ? LOSS_CAUSES[best] : "in the streets");
         }
         return sb.toString();
     }
