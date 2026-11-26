@@ -1263,7 +1263,7 @@ public final class Game {
                 {"set:threads", "Simulation threads", s.threads == 0 ? "Auto (" + s.simThreads() + ")" : "" + s.threads},
                 {"set:ui", "Button size", new String[]{"Small", "Normal", "Large"}[s.uiSize]},
                 {"set:vibrate", "Vibration", s.vibrate ? "On" : "Off"},
-                {"set:gpu", "Renderer (next start)", s.gpu ? "GPU" : "Canvas"}};
+                {"set:gpu", "Renderer (next start)", s.gpu ? "GPU (experimental)" : "Canvas"}};
         float y = ui.dp(60), rh = ui.dp(48);
         for (String[] r : rows) {
             g.color(Ui.TEXT);
