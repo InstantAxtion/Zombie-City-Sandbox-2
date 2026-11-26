@@ -23,6 +23,13 @@ one person.
 - **Millions of people, simulated two ways.** Everyone indoors is counted by the sector (512 px squares). Where
   something is happening (the dead near the living, police and soldiers, or the camera), the counts come out as
   individuals; when it's quiet they fold back in. Every sector is simulated every second, watched or not.
+- **A normal day.** By day a town's people are at work, school and in the centre, at night at home, so an outbreak
+  at 3 pm hits the offices and one at 3 am the homes. Wherever you look at street level the city is going about its
+  day: cars driving between buildings and through (busiest in the centre and at the rush hours), parked cars along
+  the kerbs, city buses on their lines, passenger trains, police patrols round each station's district, officers
+  and patrol cars in the station yards, sentries, fence patrols and drill at the bases, and people walking to work,
+  the shops or home, some in families and groups. When the dead come, cars flee, jam and are left in the road,
+  alarms go off and draw the dead, crowds trample. All of it is drawn from the counts and folded back into them.
 - **Forces at every level.** Police wait at their stations as numbers and come out as squads when sent. The army
   moves as formations on the national map (infantry and armoured battalions, artillery batteries, marines,
   National Guard brigades) and holds ground; where nobody is watching, fights are settled by the numbers. Outside

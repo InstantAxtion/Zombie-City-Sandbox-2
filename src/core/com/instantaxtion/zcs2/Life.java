@@ -89,9 +89,28 @@ public final class Life extends Module {
                 && vh.state[v] != Vehicles.V_NONE && vh.uid[v] == vuid[v];
     }
 
+    /** Vehicles put down this second (the vehicle grid only has them from the next step). */
+    private int[] fresh = new int[32];
+    private int freshN;
+
+    /** Room for a footprint here: clear of every road vehicle in the grid and of those put down this second. */
+    private boolean room(float x, float y, float h, float hl, float hw) {
+        Vehicles vh = w.veh;
+        if (!vh.clearAt(x, y, h, hl, hw)) return false;
+        for (int k = 0; k < freshN; k++) {
+            int o = fresh[k];
+            if (vh.state[o] == Vehicles.V_NONE) continue;
+            Content.VType t = vh.type(o);
+            if (Vehicles.boxesOverlap(x, y, h, hl, hw, vh.x[o], vh.y[o], vh.head[o], t.length * 0.5f, t.width * 0.5f)) return false;
+        }
+        return true;
+    }
+
     private int take(Content.VType t, float x, float y, float h, byte k) {
         Vehicles vh = w.veh;
         int v = vh.addLife(t, x, y, h);
+        if (freshN == fresh.length) fresh = Arrays.copyOf(fresh, freshN * 2);
+        fresh[freshN++] = v;
         ensure(vh.top);
         kind[v] = k;
         vuid[v] = vh.uid[v];
@@ -110,7 +129,6 @@ public final class Life extends Module {
         vh.route[v] = null;
         vh.state[v] = Vehicles.V_NONE;
         kind[v] = K_NONE;
-        if (v < vh.lifeFree) vh.lifeFree = v;
     }
 
     // ------------------------------------------------------------------ once a second
@@ -121,7 +139,6 @@ public final class Life extends Module {
         if (!on) return;
         Vehicles vh = w.veh;
         ensure(vh.top);
-        while (vh.lifeFree < vh.top && vh.state[vh.lifeFree] != Vehicles.V_NONE) vh.lifeFree++;
         boolean was = has;
         has = !w.strategic && w.camDetail;
         if (!has) {
@@ -130,6 +147,7 @@ public final class Life extends Module {
         }
         area();
         tally();
+        freshN = 0;
         vehicles(dt);
         kerbs();
         traffic(dt);
@@ -316,8 +334,11 @@ public final class Life extends Module {
             for (int k = vh.crewN[v] - 1; k >= 0; k--) indoors(vh.crew[v][k], to);
             vh.crewN[v] = 0;
             folded++;
-            if (parked < w.rule("lifeParkedMax", 260)) {
+            // (parked only if it found a place at the kerb; else into a garage or a drive, out of the road)
+            boolean kerb = Math.abs(x - vh.slotX[v]) < 3 && Math.abs(y - vh.slotY[v]) < 3;
+            if (kerb && parked < w.rule("lifeParkedMax", 260)) {
                 kind[v] = K_PARKED;
+                vh.state[v] = Vehicles.V_PARKED;
                 parked++;
                 cars--;
             } else drop(v);
@@ -533,14 +554,18 @@ public final class Life extends Module {
             int o = g.other(e0, a);
             h0 = (float) Math.atan2(g.ny[o] - y, g.nx[o] - x);
         }
-        if (!vh.clearAt(x, y, h0, ct.length * 0.5f + 6, ct.width * 0.5f + 6)) return;
+        if (!room(x, y, h0, ct.length * 0.5f + 6, ct.width * 0.5f + 6)) return;
         int v = take(ct, x, y, h0, K_CAR);
-        if (!board(v, s, k)) {
+        // who drives: someone of these streets; through traffic (not fleeing) is someone of where it is going, on
+        // their way home, so watching a street doesn't drain it into the country round it
+        int to = w.r.sectorOfPx(tx, ty);
+        int from = through && !panic && sec.popIn[to] > 0 ? to : s;
+        if (!board(v, from, k)) {
             drop(v);
             return;
         }
-        if (Rng.unit(w.seed, salt, 12) < 0.25f) board(v, s, k + 7);
-        dest[v] = w.r.sectorOfPx(tx, ty);
+        if (Rng.unit(w.seed, salt, 12) < 0.25f) board(v, from, k + 7);
+        dest[v] = to;
         if (!vh.driveTo(v, tx, ty, 0)) {
             fold(v);
             return;
@@ -663,7 +688,7 @@ public final class Life extends Module {
                 if (gone.contains(key)) continue;
                 float hh = side > 0 ? (float) Math.atan2(uy, ux) : (float) Math.atan2(-uy, -ux);
                 if (!standable(sx, sy, hh, hl, hw)) continue;
-                if (!w.veh.clearAt(sx, sy, hh, hl + 1, hw + 1)) continue;
+                if (!room(sx, sy, hh, hl + 1, hw + 1)) continue;
                 if (sec.zIn[s] > 0 && w.sp.secZ[s] > 20) continue;
                 int v = take(ct, sx, sy, hh, K_PARKED);
                 spot[v] = key;
@@ -841,19 +866,37 @@ public final class Life extends Module {
             int n = Math.max(1, Math.min(10, Math.round(st.residents / per)));
             float cx = st.cx * Tile.SIZE, cy = st.cy * Tile.SIZE, rad = st.radius * Tile.SIZE;
             for (int l = 0; l < n; l++) {
-                float r = rad * (0.2f + 0.65f * Rng.unit(w.seed ^ 0xB05L, st.id, l * 3 + 1));
-                float ph = Rng.unit(w.seed ^ 0xB05L, st.id, l * 3 + 2) * 6.2831853f;
-                // a loop of stops round the centre, a little squashed so the lines differ
-                float sq = 0.6f + 0.4f * Rng.unit(w.seed ^ 0xB05L, st.id, l * 3 + 3);
-                int k = Math.max(6, Math.min(14, (int) (r * 6.28f / 900)));
-                int[] stops = new int[k];
+                float u1 = Rng.unit(w.seed ^ 0xB05L, st.id, l * 3 + 1), u2 = Rng.unit(w.seed ^ 0xB05L, st.id, l * 3 + 2);
+                float ph = u2 * 6.2831853f;
+                int[] stops;
                 int m = 0;
-                for (int i = 0; i < k; i++) {
-                    float a = ph + i * 6.2831853f / k;
-                    float px = cx + (float) Math.cos(a) * r, py = cy + (float) Math.sin(a) * r * sq;
-                    int nd = g.nearestNode(px, py, 700);
-                    if (nd < 0 || m > 0 && stops[m - 1] == nd || highwayOnly(nd)) continue;
-                    stops[m++] = nd;
+                if ((l & 1) == 0) {
+                    // across town through (or near) the centre, and back: a stop every 800 px or so
+                    float r = rad * 0.8f, off = (u1 - 0.5f) * rad * 0.25f;
+                    float ux = (float) Math.cos(ph), uy = (float) Math.sin(ph);
+                    int k = Math.max(4, Math.min(24, (int) (2 * r / 800)));
+                    stops = new int[2 * k];
+                    for (int i = 0; i < 2 * k; i++) {
+                        int j = i < k ? i : 2 * k - 1 - i;
+                        float d = -r + 2 * r * j / (k - 1);
+                        float px = cx + ux * d - uy * off, py = cy + uy * d + ux * off;
+                        int nd = g.nearestNode(px, py, 600);
+                        if (nd < 0 || m > 0 && stops[m - 1] == nd || highwayOnly(nd)) continue;
+                        stops[m++] = nd;
+                    }
+                } else {
+                    // a loop round the centre, a little squashed so the lines differ
+                    float r = rad * (0.15f + 0.45f * u1);
+                    float sq = 0.6f + 0.4f * Rng.unit(w.seed ^ 0xB05L, st.id, l * 3 + 3);
+                    int k = Math.max(6, Math.min(24, (int) (r * 6.28f / 900)));
+                    stops = new int[k];
+                    for (int i = 0; i < k; i++) {
+                        float a = ph + i * 6.2831853f / k;
+                        float px = cx + (float) Math.cos(a) * r, py = cy + (float) Math.sin(a) * r * sq;
+                        int nd = g.nearestNode(px, py, 700);
+                        if (nd < 0 || m > 0 && stops[m - 1] == nd || highwayOnly(nd)) continue;
+                        stops[m++] = nd;
+                    }
                 }
                 if (m >= 4 && stops[0] == stops[m - 1]) m--;
                 if (m < 4) continue;
@@ -919,7 +962,7 @@ public final class Life extends Module {
             float x = g.nx[nd], y = g.ny[nd];
             int nx = st[(at + 1) % st.length];
             float h0 = (float) Math.atan2(g.ny[nx] - y, g.nx[nx] - x);
-            if (!vh.clearAt(x, y, h0, bt.length * 0.5f + 6, bt.width * 0.5f + 6)) continue;
+            if (!room(x, y, h0, bt.length * 0.5f + 6, bt.width * 0.5f + 6)) continue;
             int v = take(bt, x, y, h0, K_BUS);
             line[v] = l;
             int s = w.r.sectorOfPx(x, y);
@@ -998,7 +1041,7 @@ public final class Life extends Module {
         return n;
     }
 
-    private int[] railNodes = new int[64];
+    private int[] railNodes = new int[64]; // (rail edges through the area)
     private int railN;
     /** Each rail junction's station (facility id), or -1; worked out once. */
     private int[] stationOf;
@@ -1018,26 +1061,37 @@ public final class Life extends Module {
         RoadGraph g = w.r.rails;
         if (g == null || g.nodeCount < 2 || g.adjStart == null) return;
         if (w.time < trainNext || trainN >= 2 || w.gov.streetsClosed()) return;
-        int P = ActiveSet.PX;
-        int[] nc = g.nodeChunks(P);
-        railN = 0;
-        for (int py = (int) (ay0 / P); py <= (int) (ay1 / P); py++)
-            for (int px = (int) (ax0 / P); px <= (int) (ax1 / P); px++)
-                for (int k = g.nodeChunkFrom(px, py), e = g.nodeChunkTo(px, py); k < e; k++) {
-                    int n = nc[k];
-                    if (!inArea(g.nx[n], g.ny[n]) || onScreen(g.nx[n], g.ny[n], 80) || !g.nodeLive(n)) continue;
-                    if (railN == railNodes.length) railNodes = Arrays.copyOf(railNodes, railN * 2);
-                    railNodes[railN++] = n;
-                }
         trainNext = (float) w.time + w.rule("lifeTrainEvery", 90) * (0.6f + 0.8f * Rng.unit(w.seed, w.tick, 77));
+        // the lines through the area (rail junctions are far apart: a line is found by its segments), and a place on
+        // one, in the area but off the screen, to come in from
+        railN = 0;
+        for (int e = 0; e < g.edgeCount; e++) {
+            if (!g.ealive[e]) continue;
+            float x0 = g.nx[g.ea[e]], y0 = g.ny[g.ea[e]], x1 = g.nx[g.eb[e]], y1 = g.ny[g.eb[e]];
+            if (Math.max(x0, x1) < ax0 || Math.min(x0, x1) > ax1 || Math.max(y0, y1) < ay0 || Math.min(y0, y1) > ay1) continue;
+            if (railN == railNodes.length) railNodes = Arrays.copyOf(railNodes, railN * 2);
+            railNodes[railN++] = e;
+        }
         if (railN == 0) return;
-        int a = railNodes[Rng.hashInt(w.seed, w.tick, 78, railN)];
-        // to a station at least 8 km off (else the farthest one)
+        int e = railNodes[Rng.hashInt(w.seed, w.tick, 78, railN)];
+        boolean fwd = Rng.unit(w.seed, w.tick, 79) < 0.5f;
+        int a = fwd ? g.ea[e] : g.eb[e], b = g.other(e, a);
+        float sx = -1, sy = -1;
+        for (int i = 0; i <= 100; i++) {
+            float t = i / 100f, x = g.nx[a] + (g.nx[b] - g.nx[a]) * t, y = g.ny[a] + (g.ny[b] - g.ny[a]) * t;
+            if (inArea(x, y) && !onScreen(x, y, 80)) {
+                sx = x;
+                sy = y;
+                break;
+            }
+        }
+        if (sx < 0) return;
+        // to a station at least 8 km on (else the farthest one)
         Region.Facility to = null;
         float best = -1;
         for (Region.Facility f : w.r.facilities) {
             if (f.kind != Region.F_STATION || f.railNode < 0 || f.railNode >= g.nodeCount) continue;
-            float d = (float) Math.hypot(g.nx[f.railNode] - g.nx[a], g.ny[f.railNode] - g.ny[a]);
+            float d = (float) Math.hypot(g.nx[f.railNode] - sx, g.ny[f.railNode] - sy);
             float score = d >= 8000 ? 1e6f - Rng.unit(w.seed, f.id, w.tick) * 1e5f : d;
             if (score > best) {
                 best = score;
@@ -1045,20 +1099,24 @@ public final class Life extends Module {
             }
         }
         if (to == null) return;
-        int[] rt = g.route(a, to.railNode);
-        if (rt == null || rt.length < 2) return;
+        int[] on = to.railNode == b ? new int[]{b} : g.route(b, to.railNode);
+        if (on == null || on.length < 1) return;
+        int[] rt = new int[on.length + 1];
+        rt[0] = a;
+        System.arraycopy(on, 0, rt, 1, on.length);
         if (trainN == tRoute.length) growTrains();
         int k = trainN++;
         tRoute[k] = rt;
         tRi[k] = 0;
-        tX[k] = g.nx[a];
-        tY[k] = g.ny[a];
-        tHead[k] = (float) Math.atan2(g.ny[rt[1]] - tY[k], g.nx[rt[1]] - tX[k]);
+        tX[k] = sx;
+        tY[k] = sy;
+        tHead[k] = (float) Math.atan2(g.ny[b] - sy, g.nx[b] - sx);
         tSpd[k] = 220;
         tDest[k] = w.r.sectorOfPx(to.x, to.y);
         tDwell[k] = 0;
-        // already carrying people from where it came from (they boarded in the streets round where it comes in)
-        int s = w.r.sectorOfPx(tX[k], tY[k]);
+        // already carrying people: some from where it is going, on their way home (so the trains don't drain one
+        // town into another)
+        int s = tDest[k];
         int n = (int) (40 + rush(w.hour()) * 120);
         int took = Math.max(0, Math.min(n, w.sec.popIn[s] / 4));
         if (took > 0) w.sec.popIn[w.sec.touch(s)] -= took;
@@ -1200,7 +1258,9 @@ public final class Life extends Module {
                 continue;
             }
             float[] at = w.sq.where(s);
-            boolean seen = at[0] > ax0 - reach && at[0] < ax1 + reach && at[1] > ay0 - reach && at[1] < ay1 + reach;
+            // (out of sight: beyond the reach of a station in view, as when it was sent)
+            float far = fs.get(pFac[k]).kind == Region.F_POLICE ? 4500 : reach;
+            boolean seen = at[0] > ax0 - far && at[0] < ax1 + far && at[1] > ay0 - far && at[1] < ay1 + far;
             if (!seen && w.sp.zombiesNear(w.e, at[0], at[1], 300, 1) == 0) {
                 w.forces.standDown(s);
                 dropPatrol(k);
@@ -1214,17 +1274,29 @@ public final class Life extends Module {
             Region.Facility f = fs.get(fi);
             boolean police = f.kind == Region.F_POLICE, base = f.kind == Region.F_BASE;
             if (!police && !base) continue;
-            if (!inArea(f.x, f.y) || w.time < facNext[fi] || !w.strat.online(f.id)) continue;
+            // (a station's district reaches a few km: its cars come through wherever the camera is in it)
+            float far = police ? 4000 : reach;
+            boolean near = f.x > ax0 - far && f.x < ax1 + far && f.y > ay0 - far && f.y < ay1 + far;
+            if (!near || w.time < facNext[fi] || !w.strat.online(f.id)) continue;
             int want = (int) w.rule(police ? "lifePatrols" : "lifeBasePatrols", police ? 2 : 1);
             if (night && police) want = Math.max(1, want - 1);
             int out = 0;
             for (int k = 0; k < pN; k++) if (pFac[k] == fi) out++;
             if (out >= want) continue;
-            Content.SquadT t = w.c.squadT(police ? "patrol" : "fireteam");
-            if (t == null || t.vehicle == null || f.pool == null || f.vpool == null || f.vpool[t.vehicle.index] <= 0) continue;
-            boolean enough = true;
-            for (Content.Unit u : t.units) if (f.pool[u.index] <= 0) enough = false;
-            if (!enough) continue;
+            // police: a patrol car; the army: a humvee if the base has one, else a truck
+            Content.SquadT t = null;
+            for (String id : police ? new String[]{"patrol"} : new String[]{"fireteam", "rifle"}) {
+                Content.SquadT c = w.c.squadT(id);
+                if (c == null || c.vehicle == null || f.pool == null || f.vpool == null || f.vpool[c.vehicle.index] <= 0) continue;
+                int[] need = new int[f.pool.length];
+                boolean enough = true;
+                for (Content.Unit u : c.units) if (++need[u.index] > f.pool[u.index]) enough = false;
+                if (enough) {
+                    t = c;
+                    break;
+                }
+            }
+            if (t == null) continue;
             facNext[fi] = (float) w.time + 25;
             Squads.Squad s = w.forces.deploy(f, t);
             if (s == null) continue;
@@ -1254,6 +1326,12 @@ public final class Life extends Module {
         RoadGraph g = w.r.roads;
         boolean base = f.kind == Region.F_BASE;
         float r = base ? Math.max((f.bx1 - f.bx0), (f.by1 - f.by0)) * Tile.SIZE * 0.7f + 300 : 2200;
+        // a police car mostly round the streets of its district that are in view
+        if (!base && nodeN > 0 && Rng.unit(w.seed, salt, 99) < 0.75f)
+            for (int a = 0; a < 8; a++) {
+                int n = nodes[Rng.hashInt(w.seed, salt, a + 100, nodeN)];
+                if (Math.hypot(g.nx[n] - f.x, g.ny[n] - f.y) < 6000 && !highwayOnly(n)) return new float[]{g.nx[n], g.ny[n]};
+            }
         for (int a = 0; a < 16; a++) {
             float ang = Rng.unit(w.seed, salt, a) * 6.2831853f, d = r * (base ? 1f : 0.35f + 0.65f * Rng.unit(w.seed, salt, a + 20));
             int n = g.nearestNode(f.x + (float) Math.cos(ang) * d, f.y + (float) Math.sin(ang) * d, 500);
@@ -1396,8 +1474,10 @@ public final class Life extends Module {
         trampled = in.readInt();
         commute.load(in);
         if (has) {
+            // (what the second worked out from the camera, as it was when saved: the junctions in view)
             area();
             tally();
+            gatherNodes();
         }
     }
 

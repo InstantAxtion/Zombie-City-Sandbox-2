@@ -253,8 +253,8 @@ public final class ScaleProbe {
                 else if (w.e.kind[i] == Ents.COP) cops++;
                 else if (w.e.kind[i] == Ents.SOLDIER) sol++;
             }
-            System.out.printf("%s  %s: step %.3f ms (worst %.1f)  cars %d parked %d buses %d abandoned %d trains %d  on foot %d  police %d  soldiers %d  vehicles %d  active chunks %d  moved by commute %d  ledger %d  %s%n",
-                    k == 0 ? "life on " : "life off", w.clock(), ns[k] / 1e6 / n, worst[k] / 1e6, l.cars, l.parked, l.buses, l.abandoned, l.trains(), civ, cops, sol,
+            System.out.printf("%s  %s: step %.3f ms (worst %.1f)  cars %d parked %d buses %d abandoned %d trains %d  on foot %d  police %d  soldiers %d  patrols %d  vehicles %d  active chunks %d  moved by commute %d  ledger %d  %s%n",
+                    k == 0 ? "life on " : "life off", w.clock(), ns[k] / 1e6 / n, worst[k] / 1e6, l.cars, l.parked, l.buses, l.abandoned, l.trains(), civ, cops, sol, UiShot.patrols(w),
                     w.veh.top, w.act.activeCount(), l.commute.moved, Audit.ledger(w), Audit.check(w).isEmpty() ? "audit ok" : "AUDIT " + Audit.check(w));
         }
         System.out.printf("extra per step: %.3f ms%n", (ns[0] - ns[1]) / 1e6 / n);
@@ -272,7 +272,10 @@ public final class ScaleProbe {
             if (sec.settlement[s] != c.id || sec.home[s] <= 0) continue;
             float d = (float) Math.hypot(sec.cx(s) - x, sec.cy(s) - y);
             float want = w.national ? 12000 : 2500;
-            float score = -Math.abs(d - want) + (w.life.commute.busy(s) < 0.45f ? 4000 : 0);
+            // houses in gardens: a suburb on a national map, else plenty of homes and little work
+            boolean sub = w.r.nation != null ? w.r.nation.district[s] == Nation.D_SUBURB
+                    : w.life.commute.jobs(s) < 0.15f * sec.home[s] && w.life.commute.busy(s) < 0.6f;
+            float score = -Math.abs(d - want) + (sub ? 6000 : 0) + Math.min(sec.home[s], 3000) * 0.3f;
             if (score > best) {
                 best = score;
                 bx = sec.cx(s);

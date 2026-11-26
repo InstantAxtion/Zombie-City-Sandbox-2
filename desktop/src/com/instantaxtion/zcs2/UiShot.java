@@ -413,7 +413,7 @@ public final class UiShot {
         World w = game.world();
         System.out.println("game: " + w.r.name + ", " + w.r.W + " tiles");
         game.speedIdx = 0;
-        Region.Settlement cap = w.r.city();
+        game.tool = "look";
         float[] centre = ScaleProbe.lifeSpot(w, "centre"), suburb = ScaleProbe.lifeSpot(w, "suburb");
         String[] names = {"l1-morning-centre", "l2-morning-suburb", "l3-rush-centre", "l4-rush-suburb"};
         float[] hours = {9.5f, 9.6f, 17.5f, 17.6f};
@@ -422,18 +422,19 @@ public final class UiShot {
             toHour(w, hours[k]);
             w.weather.state = Weather.CLEAR;
             look(0.5f, at[0], at[1]);
-            frames(900);
+            run(w, 40);
             shot(names[k]);
             lifeLine(names[k], w);
         }
         // the outbreak's first minutes in the centre, at the evening rush
+        toHour(w, 17.3f);
         look(0.5f, centre[0], centre[1]);
-        frames(300);
+        run(w, 20);
         Tools.paintZombies(w, centre[0] + 300, centre[1] - 900, 300, 260, -1);
-        frames(450);
+        run(w, 30);
         shot("l5-outbreak-1min");
         lifeLine("l5-outbreak-1min", w);
-        frames(900);
+        run(w, 60);
         shot("l6-outbreak-2min");
         lifeLine("l6-outbreak-2min", w);
         look(0.32f, centre[0], centre[1] - 400);
@@ -441,6 +442,19 @@ public final class UiShot {
         lifeLine("l7-outbreak-wide", w);
         w.shutdown();
         System.exit(0);
+    }
+
+    /** Game seconds at 1x with the camera where it is (stepped without drawing), then a few frames drawn. */
+    static void run(World w, float secs) {
+        for (int k = 0; k < secs * 20; k++) w.step();
+        frames(4);
+    }
+
+    /** Squads out on patrol (in their cars or on foot). */
+    static int patrols(World w) {
+        int n = 0;
+        for (Squads.Squad s : w.sq.list) if (s.alive && s.order == Squads.O_PATROL) n++;
+        return n;
     }
 
     static void toHour(World w, float h) {
@@ -456,8 +470,8 @@ public final class UiShot {
                 else if (w.e.kind[i] == Ents.COP) cops++;
                 else if (w.e.kind[i] == Ents.SOLDIER) sol++;
             }
-        System.out.printf("%s: %s cars %d parked %d buses %d abandoned %d trains %d, on foot %d, police %d, soldiers %d, dead %d, ledger %d%n", name, w.clock(), l.cars,
-                l.parked, l.buses, l.abandoned, l.trains(), civ, cops, sol, w.totalZombies(), Audit.ledger(w));
+        System.out.printf("%s: %s cars %d parked %d buses %d abandoned %d trains %d, on foot %d, police %d, soldiers %d, patrols %d, dead %d, ledger %d%n", name, w.clock(), l.cars,
+                l.parked, l.buses, l.abandoned, l.trains(), civ, cops, sol, patrols(w), w.totalZombies(), Audit.ledger(w));
     }
 
     static void modeShots(String mode) throws Exception {

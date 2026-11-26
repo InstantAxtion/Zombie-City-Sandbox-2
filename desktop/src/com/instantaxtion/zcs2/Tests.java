@@ -2212,7 +2212,7 @@ public final class Tests {
                 check(out == 0, out + " squads still out ten minutes after it began (the dead were gone long before)");
                 int parked = 0;
                 for (int v = 0; v < w.veh.top; v++)
-                    if (w.veh.state[v] == Vehicles.V_ARRIVED && w.veh.squad[v] < 0 && w.veh.type(v).seats > 0 && !w.veh.type(v).flies) parked++;
+                    if (w.veh.state[v] == Vehicles.V_ARRIVED && w.veh.squad[v] < 0 && w.veh.type(v).seats > 0 && !w.veh.type(v).flies && w.veh.role[v] != Vehicles.R_LIFE) parked++;
                 check(parked == 0, parked + " abandoned squad vehicles left in the streets");
                 check(Audit.check(w).isEmpty(), Audit.check(w));
                 w.shutdown();
@@ -3019,6 +3019,7 @@ public final class Tests {
         scaleTests();
         sparseTests();
         nationalTests();
+        lifeTests();
     }
 
     // ------------------------------------------------------------------ active-area paging (docs/SCALE_PLAN.md P2)
@@ -3082,7 +3083,10 @@ public final class Tests {
                         check(most < w.act.pages / 2, "most of the map active: " + most + " of " + w.act.pages);
                         check(w.act.left > 0, "no chunk ever left the set");
                         check(w.veh.transitSteps > 0, "no vehicle went into transit");
-                        check(Audit.people(w) == before, "people " + Audit.people(w) + " vs " + before);
+                        // (nobody lost to the paging: everyone alive, or counted killed or turned; with the day's
+                        // life on the streets a passer-by may be bitten)
+                        check(Audit.ledger(w) == 0 && Audit.people(w) + w.stats.civDeaths + w.stats.civTurned == before,
+                                "people " + Audit.people(w) + " vs " + before + ", ledger " + Audit.ledger(w) + ", killed " + w.stats.civDeaths + ", turned " + w.stats.civTurned);
                         // the scent and the foot paths stop at the active chunks
                         for (int p = 0; p < w.act.pages; p++) {
                             if (w.act.active(p)) continue;
@@ -3110,6 +3114,201 @@ public final class Tests {
         } finally {
             World.strictParallel = was;
         }
+    }
+
+    /** The game clock moved on to hour h (today or tomorrow). */
+    static void toHour(World w, float h) {
+        w.time += ((h - w.hour()) % 24 + 24) % 24 * 60;
+    }
+
+    /** The city's vehicles Life has out, and people aboard any vehicle that aren't police or soldiers. */
+    static int[] lifeOut(World w) {
+        int mine = 0, aboard = 0;
+        for (int v = 0; v < w.veh.top; v++) if (w.life.mine(v)) mine++;
+        for (int i = 0; i < w.e.top; i++) if (w.e.loc[i] == Ents.ABOARD && w.e.kind[i] == Ents.CIV) aboard++;
+        return new int[]{mine, aboard};
+    }
+
+    /** Police and soldiers kept in every facility's pools, and out on the map. */
+    static long armedEverywhere(World w) {
+        long n = 0;
+        for (Region.Facility f : w.r.facilities) n += w.forces.armedAt(f, Ents.COP) + w.forces.armedAt(f, Ents.SOLDIER);
+        for (int i = 0; i < w.e.top; i++) if ((w.e.loc[i] == Ents.FREE || w.e.loc[i] == Ents.ABOARD) && w.e.armed(i)) n++;
+        return n;
+    }
+
+    /**
+     * A normal day round the camera on a map: traffic, parked cars, buses, patrols, people going places at 09:30;
+     * everyone counted the same throughout; and when the camera leaves, everything folds back exactly.
+     */
+    static void lifeFolds(int size) {
+        World w = game(5, size, "sandbox", 2);
+        check(w.life.on && w.life.flowOn, "life rules off");
+        Region.Settlement c = w.r.city();
+        toHour(w, 9.5f);
+        long before = Audit.people(w), armed = armedEverywhere(w);
+        int[] police = new int[w.r.facilities.size()];
+        for (int k = 0; k < police.length; k++) police[k] = w.forces.armedAt(w.r.facilities.get(k), Ents.COP);
+        int maxCars = 0, maxParked = 0, maxBuses = 0, maxWalkers = 0, errands = 0, patrolCars = 0;
+        long trainsSeen = 0;
+        for (int k = 0; k < 6; k++) {
+            camOver(w, c.cx * 16f + (k - 2) * 500, c.cy * 16f + (k % 2) * 400);
+            for (int t = 0; t < 10; t++) {
+                play(w, 2, t % 5 == 0);
+                maxCars = Math.max(maxCars, w.life.cars);
+                maxParked = Math.max(maxParked, w.life.parked);
+                maxBuses = Math.max(maxBuses, w.life.buses);
+                trainsSeen += w.life.trains();
+                int walkers = 0;
+                for (int i = 0; i < w.e.top; i++)
+                    if (w.e.loc[i] == Ents.FREE && w.e.kind[i] == Ents.CIV) {
+                        walkers++;
+                        if (w.e.state[i] == CivAI.S_ERRAND) errands++;
+                    }
+                maxWalkers = Math.max(maxWalkers, walkers);
+                for (Squads.Squad q : w.sq.list) if (q.alive && q.order == Squads.O_PATROL && q.vehicle >= 0 && w.veh.state[q.vehicle] == Vehicles.V_DRIVE) patrolCars++;
+                check(Audit.people(w) == before, "people " + Audit.people(w) + " vs " + before + " at " + w.clock());
+                check(Audit.ledger(w) == 0, "ledger " + Audit.ledger(w));
+                check(armedEverywhere(w) == armed, "police and soldiers " + armedEverywhere(w) + " vs " + armed);
+            }
+        }
+        System.out.printf("        %d tiles at %s: up to %d cars, %d parked, %d buses, %d on foot (%d errand-steps), patrol-car checks %d, train-seconds %d, %d spawned, %d folded%n",
+                size, w.clock(), maxCars, maxParked, maxBuses, maxWalkers, errands, patrolCars, trainsSeen, w.life.spawned, w.life.folded);
+        check(maxCars >= 15, "only " + maxCars + " cars driving at the morning rush");
+        check(maxParked >= 30, "only " + maxParked + " parked cars");
+        check(maxWalkers >= 20 && errands > 0, "nobody walking anywhere: " + maxWalkers + ", errands " + errands);
+        check(patrolCars > 0, "no patrol car out of the stations in view");
+        // over a railway, if the map has one: passenger trains come through, their people counted aboard
+        RoadGraph rl = w.r.rails;
+        if (rl.edgeCount > 0) {
+            int e = rl.edgeCount / 2;
+            float rx = (rl.nx[rl.ea[e]] + rl.nx[rl.eb[e]]) / 2, ry = (rl.ny[rl.ea[e]] + rl.ny[rl.eb[e]]) / 2;
+            camOver(w, rx, ry);
+            long carried = 0;
+            int seen = 0;
+            for (int t = 0; t < 120; t++) {
+                play(w, 1, t % 20 == 0);
+                seen += w.life.trains();
+                carried = Math.max(carried, w.life.carried());
+                check(Audit.people(w) == before, "people " + Audit.people(w) + " vs " + before + " with a train about");
+            }
+            System.out.printf("        a railway: train-seconds %d, up to %d people aboard%n", seen, carried);
+            check(seen > 0, "no train came along the line in two minutes");
+        }
+        w.camDetail = false;
+        play(w, 3, true);
+        int[] out = lifeOut(w);
+        check(out[0] == 0 && out[1] == 0 && w.life.trains() == 0, "after the camera left: " + out[0] + " vehicles, " + out[1] + " aboard, " + w.life.trains() + " trains");
+        check(Audit.people(w) == before, "people after the camera left: " + Audit.people(w) + " vs " + before);
+        for (int k = 0; k < police.length; k++)
+            check(w.forces.armedAt(w.r.facilities.get(k), Ents.COP) == police[k], "station " + k + " has " + w.forces.armedAt(w.r.facilities.get(k), Ents.COP) + " officers, had " + police[k]);
+        check(Audit.check(w).isEmpty(), Audit.check(w));
+        w.shutdown();
+    }
+
+    /** With an outbreak among the traffic: the same on 1 and 2 threads, and after a save and a load. */
+    static void lifeExact(int size) throws Exception {
+        World a = game(11, size, "sandbox", 1), b = game(11, size, "sandbox", 2);
+        Region.Settlement c = a.r.city();
+        float x = c.cx * 16f, y = c.cy * 16f;
+        for (World w : new World[]{a, b}) {
+            toHour(w, 17.4f);
+            camOver(w, x, y);
+        }
+        int fled = 0;
+        for (int k = 0; k < 60 * 20; k++) {
+            if (k == 20 * 20) {
+                Tools.paintZombies(a, x + 200, y - 300, 120, 200, -1);
+                Tools.paintZombies(b, x + 200, y - 300, 120, 200, -1);
+            }
+            a.step();
+            b.step();
+            if (k % 100 == 0) check(Audit.hash(a) == Audit.hash(b), "1 and 2 threads differ at step " + k);
+            if (k % 20 == 0) for (int v = 0; v < a.veh.top; v++) if (a.life.mine(v) && a.life.flee[v]) fled++;
+        }
+        check(Audit.check(a).isEmpty(), Audit.check(a));
+        System.out.printf("        %d tiles: car-seconds fleeing %d, abandoned %d, trampled %d, cars %d, parked %d%n", size, fled, a.life.abandoned, a.life.trampled, a.life.cars, a.life.parked);
+        check(fled > 0, "no car fled the dead");
+        ByteArrayOutputStream bo = new ByteArrayOutputStream();
+        SaveIO.save(a, bo);
+        World l = SaveIO.load(content, new ByteArrayInputStream(bo.toByteArray()), 2);
+        check(Audit.hash(l) == Audit.hash(a), "different straight after loading");
+        check(Audit.check(l).isEmpty(), "loaded game fails the audit: " + Audit.check(l));
+        check(Audit.people(l) == Audit.people(a), "people differ after loading");
+        for (int k = 0; k < 30 * 20; k++) {
+            a.step();
+            l.step();
+            if (k % 100 == 0) check(Audit.hash(l) == Audit.hash(a), "diverged " + k + " steps after loading");
+        }
+        check(Audit.ledger(a) == 0, "ledger " + Audit.ledger(a));
+        a.shutdown();
+        b.shutdown();
+        l.shutdown();
+    }
+
+    private static void lifeTests() {
+        test("life: a normal morning round the camera, everyone counted, all folded back when it leaves (1024)", new T() {
+            public void run() {
+                lifeFolds(1024);
+            }
+        });
+        test("life: a normal morning in a national capital folds back exactly (8192)", new T() {
+            public void run() throws Exception {
+                strict(new T() {
+                    public void run() {
+                        lifeFolds(NAT);
+                    }
+                });
+            }
+        });
+        test("life: traffic fleeing an outbreak is the same on 1 and 2 threads and after a load (1024)", new T() {
+            public void run() throws Exception {
+                lifeExact(1024);
+            }
+        });
+        test("life: traffic fleeing an outbreak is the same on 1 and 2 threads and after a load (8192)", new T() {
+            public void run() throws Exception {
+                strict(new T() {
+                    public void run() throws Exception {
+                        lifeExact(NAT);
+                    }
+                });
+            }
+        });
+        test("life: by day the town's people are at work, by night at home, and nobody is lost (1536, 8192)", new T() {
+            public void run() {
+                for (int size : new int[]{1536, NAT}) {
+                    World w = game(3, size, "sandbox", 2);
+                    SectorIndex.paranoid = true;
+                    try {
+                        Sectors sec = w.sec;
+                        long people = Audit.people(w);
+                        int st = w.r.city().id;
+                        // the sectors with more work than homes, and their people at 03:00 and 13:00
+                        long[] atWork = new long[2];
+                        for (int k = 0; k < 2; k++) {
+                            toHour(w, k == 0 ? 3f : 13f);
+                            w.setStrategic(true);
+                            for (int t = 0; t < 12; t++) w.step();
+                            w.setStrategic(false);
+                            double J = 0, H = 0;
+                            for (int s : sec.idx.bySettlement[st]) {
+                                J += w.life.commute.jobs(s);
+                                H += sec.home[s];
+                            }
+                            for (int s : sec.idx.bySettlement[st]) if (w.life.commute.jobs(s) / J > sec.home[s] / H * 1.5) atWork[k] += sec.popIn[s];
+                            check(Audit.people(w) == people, "people " + Audit.people(w) + " vs " + people);
+                        }
+                        System.out.printf("        %d tiles: people in the places of work at 03:00 %d, at 13:00 %d; %d moved%n", size, atWork[0], atWork[1], w.life.commute.moved);
+                        check(atWork[1] > atWork[0] * 1.3f, "the places of work don't fill by day: " + atWork[0] + " -> " + atWork[1]);
+                        check(Audit.ledger(w) == 0, "ledger " + Audit.ledger(w));
+                    } finally {
+                        SectorIndex.paranoid = false;
+                    }
+                    w.shutdown();
+                }
+            }
+        });
     }
 
     private static void nationalTests() {

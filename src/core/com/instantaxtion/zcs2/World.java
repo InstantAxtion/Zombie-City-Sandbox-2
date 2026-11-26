@@ -425,6 +425,7 @@ public final class World {
         if (on == strategic) return;
         if (on) {
             if (playerEnt >= 0) return; // someone you play as can't be fast-forwarded past
+            if (life.on) life.foldAll(); // (the city's traffic and the people in it, first)
             forces.enterStrategic();
             sec.demoteAll();
             sp.build(e);

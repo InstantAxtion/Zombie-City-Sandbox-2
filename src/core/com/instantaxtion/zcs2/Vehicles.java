@@ -154,7 +154,7 @@ public final class Vehicles implements ActiveSet.Paged {
      */
     int addLife(Content.VType t, float px, float py, float heading) {
         int v = -1;
-        for (int i = lifeFree; i < top; i++) if (state[i] == V_NONE) { v = i; break; }
+        for (int i = 0; i < top; i++) if (state[i] == V_NONE) { v = i; break; }
         if (v < 0) {
             if (top == x.length) grow(top * 2);
             v = top++;
@@ -189,9 +189,6 @@ public final class Vehicles implements ActiveSet.Paged {
         slotX[v] = slotY[v] = slotH[v] = wait[v] = 0;
         return v;
     }
-
-    /** Where Life's search for a free slot starts (slots below are all taken; reset by Life when it frees one). */
-    int lifeFree;
 
     /** Is the footprint (half sizes hl, hw) at (px, py) facing h clear of every road vehicle in the grid (as of the last step)? */
     boolean clearAt(float px, float py, float h, float hl, float hw) {
