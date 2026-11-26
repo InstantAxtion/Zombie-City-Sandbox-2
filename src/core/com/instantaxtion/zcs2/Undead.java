@@ -325,7 +325,7 @@ public final class Undead extends Module {
     void smash(int z, int ti) {
         Region r = w.r;
         Ents e = w.e;
-        int t = r.tile[ti];
+        int t = r.t(ti % r.W, ti / r.W);
         if (!Tile.smashable(t)) {
             damage.remove(ti);
             return;
@@ -517,7 +517,7 @@ public final class Undead extends Module {
         Region r = w.r;
         float ts = Tile.SIZE * cam.zoom;
         for (Map.Entry<Integer, Float> en : damage.entrySet()) {
-            int ti = en.getKey(), t = r.tile[ti];
+            int ti = en.getKey(), t = r.t(ti % r.W, ti / r.W);
             float f = Math.min(1, en.getValue() / Math.max(1, tileHp(t)));
             float x = cam.toScreenX((ti % r.W) * Tile.SIZE), y = cam.toScreenY((ti / r.W) * Tile.SIZE);
             if (x < -ts || y < -ts || x > cam.sw || y > cam.sh) continue;

@@ -2265,7 +2265,7 @@ public final class Tests {
                     if (s % 100 == 0) check(Audit.hash(l) == Audit.hash(w), "diverged " + s + " steps after loading");
                 }
                 check(l.undead.damage.equals(w.undead.damage) && l.undead.broken == w.undead.broken, "barricade damage diverged");
-                check(java.util.Arrays.equals(l.r.tile, w.r.tile) && java.util.Arrays.equals(l.r.nav, w.r.nav), "the map diverged");
+                check(l.r.checksum() == w.r.checksum() && java.util.Arrays.equals(l.r.nav, w.r.nav), "the map diverged");
                 check(Audit.check(l).isEmpty(), Audit.check(l));
                 w.shutdown();
                 l.shutdown();
