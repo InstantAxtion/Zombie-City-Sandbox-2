@@ -107,6 +107,8 @@ public final class Content {
     private final Map<String, SquadT> squadById = new HashMap<String, SquadT>();
     private final Map<String, FormationT> formationById = new HashMap<String, FormationT>();
     private final Map<String, Float> rules = new HashMap<String, Float>();
+    /** Rules written key@national in content.ini: they replace the plain value on national (real-scale) maps. */
+    private final Map<String, Float> nationalRules = new HashMap<String, Float>();
     private final Map<String, Weapon> weaponById = new HashMap<String, Weapon>();
     private final Map<String, Unit> unitById = new HashMap<String, Unit>();
     private final Map<String, ZType> zById = new HashMap<String, ZType>();
@@ -150,7 +152,13 @@ public final class Content {
             else if (kind.equals("vehicle")) c.addVehicle(id, b);
             else if (kind.equals("scenario")) c.addScenario(id, b);
             else if (kind.equals("rules")) {
-                for (Map.Entry<String, String> en : b.entrySet()) c.rules.put(en.getKey(), Float.parseFloat(en.getValue()));
+                for (Map.Entry<String, String> en : b.entrySet()) {
+                    String k = en.getKey();
+                    float v = ruleValue(en.getValue());
+                    if (k.endsWith(NATIONAL)) c.nationalRules.put(k.substring(0, k.length() - NATIONAL.length()), v);
+                    else if (k.indexOf('@') >= 0) throw new IOException("bad rule key: " + k);
+                    else c.rules.put(k, v);
+                }
             } else if (!kind.equals("weapon") && !kind.equals("squad") && !kind.equals("formation"))
                 throw new IOException("unknown section kind: " + kind);
         }
@@ -359,10 +367,61 @@ public final class Content {
         rules.put(key, value);
     }
 
-    /** A number from the [rules] section. */
+    /** A number from the [rules] section, as on today's maps (World.rule picks the national value on a national map). */
     public float rule(String key, float def) {
         Float v = rules.get(key);
         return v == null ? def : v;
+    }
+
+    /**
+     * A number from the [rules] section for a map of either kind: on a national map key@national if content.ini has
+     * it, else the plain key; def when neither is there. World.rule passes the world's own flag.
+     */
+    public float rule(String key, float def, boolean national) {
+        if (national) {
+            Float v = nationalRules.get(key);
+            if (v != null) return v;
+        }
+        Float v = rules.get(key);
+        return v == null ? def : v;
+    }
+
+    /** The plain value of a rule, or null if content.ini has none (only a national one, or neither). */
+    public Float plainRule(String key) {
+        return rules.get(key);
+    }
+
+    /** The keys that have an @national override, sorted. */
+    public List<String> nationalRuleKeys() {
+        List<String> k = new ArrayList<String>(nationalRules.keySet());
+        java.util.Collections.sort(k);
+        return k;
+    }
+
+    /** The suffix of a rule that applies only on national maps: indoorDensity@national = 40000. */
+    public static final String NATIONAL = "@national";
+    /** Pixels in a kilometre: a tile is 16 px and 4 m. */
+    public static final float PX_PER_KM = 1000f / 4f * Tile.SIZE;
+    /** Game seconds (simulated seconds) in a game hour. */
+    public static final float SECONDS_PER_HOUR = 60f;
+
+    /** A speed in km per game hour as px per game second (1 km/h = 66.7 px/s). */
+    public static float kmh(float kmPerHour) {
+        return kmPerHour * PX_PER_KM / SECONDS_PER_HOUR;
+    }
+
+    /** A distance in km as px (1 km = 4,000 px). */
+    public static float km(float km) {
+        return km * PX_PER_KM;
+    }
+
+    /** A rule's value: a number, or a number and a unit ("2 km/h", "20 km", "500 m"), converted to px/s or px. */
+    static float ruleValue(String v) {
+        v = v.trim();
+        if (v.endsWith("km/h")) return kmh(Float.parseFloat(v.substring(0, v.length() - 4).trim()));
+        if (v.endsWith("km")) return km(Float.parseFloat(v.substring(0, v.length() - 2).trim()));
+        if (v.endsWith(" m")) return km(Float.parseFloat(v.substring(0, v.length() - 2).trim()) / 1000f);
+        return Float.parseFloat(v);
     }
 
     /** Reads extra scenarios (custom ones, or one from a replay). Only [scenario] sections; returns them. */

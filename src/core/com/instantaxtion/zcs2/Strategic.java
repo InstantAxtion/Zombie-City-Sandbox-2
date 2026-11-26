@@ -359,13 +359,13 @@ public final class Strategic {
             // choose (and now and then rethink) where to go: the most attractive place within reach
             if (h.keepT > 0) h.keepT -= dt;
             if (h.target < 0 || (w.tick % 600 == 0 && h.keepT <= 0)) {
-                float best = 0;
+                float best = 0, sense = w.rule("hordeSense", 12288) / (Tile.SIZE * w.r.sect);
                 int sx = s % sec.sw, sy = s / sec.sw;
                 for (int t = 0; t < sec.n; t++) {
                     if (sec.popIn[t] == 0 && w.sp.secCiv[t] == 0) continue;
                     int dx = t % sec.sw - sx, dy = t / sec.sw - sy;
                     float d = (float) Math.sqrt(dx * dx + dy * dy);
-                    if (d > 24) continue;
+                    if (d > sense) continue;
                     float a = (sec.popIn[t] + 50 + (w.night() && lit(t) ? 200 : 0)) / (1 + d * d);
                     // (streets the dead already crowd draw them less: they go where the people are still many)
                     a /= 1 + sec.zIn[t] / (sec.popIn[t] + 50f);
@@ -402,7 +402,7 @@ public final class Strategic {
                 continue;
             }
             float dx = gx - h.x, dy = gy - h.y, d = (float) Math.sqrt(dx * dx + dy * dy) + 0.01f;
-            float speed = 11 * dt * w.weather.zombieSpeed();
+            float speed = w.rule("hordeSpeed", 11) * dt * w.weather.zombieSpeed();
             h.x += dx / d * Math.min(d, speed);
             h.y += dy / d * Math.min(d, speed);
         }
@@ -412,7 +412,7 @@ public final class Strategic {
             if (!A.alive) continue;
             for (int b = a + 1; b < hordes.size(); b++) {
                 Horde B = hordes.get(b);
-                if (B.alive && dist(A.x, A.y, B.x, B.y) < 200 && (A.keepT <= 0 || A.target == B.target)) {
+                if (B.alive && dist(A.x, A.y, B.x, B.y) < w.rule("hordeMerge", 200) && (A.keepT <= 0 || A.target == B.target)) {
                     w.ecology.hordesMerged(A, B);
                     A.count += B.count;
                     B.alive = false;
@@ -865,7 +865,7 @@ public final class Strategic {
                     w.news.count("turnHome:" + c.from, "A refugee column turns round and heads home to " + home.name + "|%d more refugee column{s} turned round for home", 1, c.x, c.y);
                 }
             }
-            float budget = 28 * dt; // px per second: people on foot, cars, buses
+            float budget = w.rule("refugeeSpeed", 28) * dt; // px per second: people on foot, cars, buses
             while (budget > 0 && c.ri < c.route.length - 1) {
                 int nn = c.route[c.ri + 1];
                 int e = g.edgeBetween(c.route[c.ri], nn);

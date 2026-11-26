@@ -392,6 +392,36 @@ Every phase merges with `./test.sh` green and a working APK. National maps stay 
 - **P9a:** `Content.java` (rule lookup with `@national` overrides, km/h and km helpers), `assets/content.ini`, speed lookups in `Forces.java` and `Logistics.java`.
 - **P9b:** after P7: vehicle transit in `Vehicles.java`; horde and refugee speeds and distances in `Strategic.java`; `Navy.java`; per-area rules in `Sectors.java` and `Ecology.java`.
 - Verify: today's maps unchanged; Balance on national maps over 6 seeds × 3 outbreak sizes.
+- As built (P9a, with the literals of the P9b files turned into rules too, so P9b is tuning and the remaining mechanics):
+  - **`Content`:** a `[rules]` key written `key@national` goes to a second map; `rule(key, def, national)` returns it on a national map, else the plain key, else `def`. `rule(key, def)` is unchanged (plain). Any other `@` suffix is refused. A value may carry a unit: `"2 km/h"` → `Content.kmh` (× 4,000 / 60 = 66.7 px/s), `"20 km"` → `Content.km` (× 4,000 px), `"500 m"`. `plainRule(key)` and `nationalRuleKeys()` are for tests. `rulesHash` still hashes every line, so it changed (a save from before P9a loads with the "different game rules" notice).
+  - **`World.national`** (final) is `r.sect != Region.SECT`, so a Region built with chunk-sized sectors is national without P7 setting anything; `World.rule(key, def)` is `c.rule(key, def, national)`. Every lookup below goes through `w.rule`.
+  - **Rules** (plain value = the old literal, code default the same; national from section 2.8):
+
+    | Rule | Where | Today | National |
+    |---|---|---|---|
+    | `hordeSpeed` | Strategic (was 11) | 11 px/s | 2 km/h (133) |
+    | `hordeSense` | Strategic (was 24 sectors), px ÷ `Tile.SIZE * r.sect` | 12,288 px | 6 km |
+    | `hordeMerge` | Strategic (was 200) | 200 px | 500 m |
+    | `refugeeSpeed` | Strategic column (was 28) | 28 px/s | 3 km/h |
+    | `refugeeCarSpeed` | not read yet (P9b splits columns) | 28 | 8 km/h |
+    | `convoySpeed`, `trainSpeed` | Logistics, Forces | 35, 90 | 30, 60 km/h |
+    | `planeSpeed`, `shipSpeed` | Logistics | 500, 25 | 400, 25 km/h |
+    | `transitSpeed` | Vehicles (was `TRANSIT_SPEED`, kept as the default) | 1,667 | 25 km/h (1,666.7) |
+    | `trainOver`, `troopTrainOver`, `airliftDistance` | Logistics, Forces, Navy | 2,500, 4,000, 7,000 px | 20, 30, 60 km |
+    | `indoorDensity`, `sectorSpill` | Sectors | 10,000, 3,000 | ×4 |
+    | `hordeSize`, `nestMin` | Ecology | 300, 400 | ×4 |
+    | `biteFloor` (bites per 10 s) | Sectors (was `0.5f * dt / 10f`) | 0.5 | 2 |
+    | `emergeDead`, `emergeFleeing`, `emergeStreet` | Sectors (were 40/12/28) | 40, 12, 28 | 160, 48, 112 |
+    | `migrateRate`, `shambleRate` | Sectors (were 0.02/0.003) | 0.02, 0.003 | halved |
+    | `formationSpeed` | Forces road march; default `f.t.speed` | national only | 20 km/h |
+    | `formationTactical` | not read yet (no tactical move exists) | national only | 4 km/h |
+    | `warshipSpeed` | Navy; default the destroyer's speed | national only | 25 km/h |
+    | `airliftSpeed` | Navy; default the transport plane's speed | national only | 400 km/h |
+    | `evacPerHourPerExit` | not read yet (P9b, per highway exit) | national only | 4,000 |
+
+  - The code edits are line-local (`w.c.rule` → `w.rule`, a literal → `w.rule("…", literal)`), so P3 and P4 merge easily; float expressions keep their order (`0.5f * dt / 10f` became `rule * dt / 10f`, `d > 24` became `d > 12288f / 512`, exactly 24).
+  - Still in code for P9b: the `nearestNode` search radii (Forces 700/2500, Navy airfield 5000/4000), the Strategic horde rethink scan (O(sectors), P3), and refugees split into foot and car.
+  - **Evidence:** `Audit.hash` identical before and after at every checkpoint of: 768 lab_leak 1,200 steps; 1024 with 3,000 dead 1,500 steps; sparse 1024 with 2,500 dead 2,400 steps (cars in transit); 1536 hold_city, evacuate and protect, 3 days of fast-forward (hordes moving and merging); 2304 retake and hold_city, 9 days of fast-forward (22 formations, airlifts, 275 supply runs). `Balance.play` on 1536 (2,000 and 20,000 dead, seeds 1-2): identical results. Test "content: national rules override only on national maps, and today's values are the old literals": for every `@national` rule the plain value equals the old literal and the national one differs; national-only rules have no plain value; unit conversions; a 768 World is not national and reads today's values.
 
 **P10. The switch** (medium risk)
 - Done: new sizes in `RegionGen.SIZES` and the New Game screen, challenge codes, README and DESIGN; tests move to national sizes (balance band on the small national map); today's sizes kept as hidden test maps.

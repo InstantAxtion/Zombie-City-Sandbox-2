@@ -715,7 +715,7 @@ public final class Vehicles implements ActiveSet.Paged {
         int[] rt = route[v];
         timer[v] += dt;
         transitSteps++;
-        float left = TRANSIT_SPEED * dt;
+        float left = w.rule("transitSpeed", TRANSIT_SPEED) * dt;
         while (rt != null && ri[v] < rt.length - 1 && left > 0) {
             int a = rt[ri[v]], b = rt[ri[v] + 1];
             int e = g.edgeBetween(a, b);
@@ -739,9 +739,9 @@ public final class Vehicles implements ActiveSet.Paged {
                 left = 0;
             }
         }
-        spd[v] = TRANSIT_SPEED;
+        spd[v] = w.rule("transitSpeed", TRANSIT_SPEED);
         stuck[v] = wait[v] = ghost[v] = 0;
-        fuel[v] = Math.max(0, fuel[v] - (TRANSIT_SPEED * dt - left) / 400000f);
+        fuel[v] = Math.max(0, fuel[v] - (w.rule("transitSpeed", TRANSIT_SPEED) * dt - left) / 400000f);
         if (rt == null || ri[v] >= rt.length - 1) {
             w.act.touchPx(x[v], y[v]);
             arrive(v);
