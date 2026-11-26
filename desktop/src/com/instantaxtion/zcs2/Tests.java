@@ -2872,6 +2872,22 @@ public final class Tests {
                                 }
                         }
                         check(chunkB > 50, "only " + chunkB + " chunk buildings in active sectors");
+                        // a tap on a building opens that building (chunk buildings and national ones)
+                        int tapped = 0;
+                        for (int p = 0; p < w.act.pages && tapped < 40; p++) {
+                            if (!w.act.active(p)) continue;
+                            for (int b : w.secBuildings[p]) {
+                                float bx = (w.r.bx(b) + w.r.bw(b) / 2f) * Tile.SIZE, by = (w.r.by(b) + w.r.bh(b) / 2f) * Tile.SIZE;
+                                if (w.r.bfloors(b) <= 0 || w.r.building((int) (bx / Tile.SIZE), (int) (by / Tile.SIZE)) != b) continue;
+                                check(Game.buildingAt(w, bx, by) == b, "a tap on building " + Integer.toHexString(b) + " found " + Integer.toHexString(Game.buildingAt(w, bx, by)));
+                                String[] d = Game.describeBuilding(w, b);
+                                check(d != null && d[0].equals(Region.BNAMES[w.r.bkind(b)]), "the sheet of building " + b + " names it " + (d == null ? null : d[0]));
+                                tapped++;
+                            }
+                        }
+                        check(tapped >= 40, "only " + tapped + " buildings tapped");
+                        int d0 = w.sec.idx.district(w.r.sectorOfPx(Setup.outbreakX, Setup.outbreakY));
+                        check(Game.districtName(w, d0).length() > 3 && Game.districtCounts(w, d0)[3] > 0, "the district's sheet: " + Game.districtName(w, d0));
                         // an edit on a page not in memory takes it in first, and the overlay keeps it
                         Region.Settlement far = null;
                         for (Region.Settlement st : w.r.settlements)

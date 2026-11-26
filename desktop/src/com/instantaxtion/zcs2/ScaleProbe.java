@@ -71,7 +71,7 @@ public final class ScaleProbe {
         int newsSeen = 0;
         long stepNs = 0, worst = 0, peakMem = 0;
         int stepN = 0;
-        java.util.Map<Integer, String> squadSeen = new java.util.HashMap<Integer, String>();
+        java.util.Map<Integer, Integer> squadSeen = new java.util.HashMap<Integer, Integer>();
         for (int k = 1; k <= 2 * 60 * 20; k++) {
             long s0 = System.nanoTime();
             w.step();
@@ -86,7 +86,7 @@ public final class ScaleProbe {
                 if (s.alive && s.home >= 0 && !squadSeen.containsKey(s.id)) {
                     Region.Facility f = r.facilities.get(s.home);
                     float km = (float) Math.hypot(f.x - Setup.outbreakX, f.y - Setup.outbreakY) / 4000f;
-                    squadSeen.put(s.id, f.name);
+                    squadSeen.put(s.id, f.id);
                     if (squadSeen.size() <= 12) System.out.printf("  %s  %s sent from %s, %.1f km from the start%n", w.clock(), s.name, f.name, km);
                 }
             if (k % 1200 == 0) {
@@ -100,20 +100,21 @@ public final class ScaleProbe {
                 newsSeen = story(w, newsSeen, 14);
             }
         }
-        java.util.Map<String, Integer> byStation = new java.util.TreeMap<String, Integer>();
-        for (String f : squadSeen.values()) byStation.put(f, (byStation.containsKey(f) ? byStation.get(f) : 0) + 1);
+        java.util.Map<Integer, Integer> byStation = new java.util.TreeMap<Integer, Integer>();
+        for (int f : squadSeen.values()) byStation.put(f, (byStation.containsKey(f) ? byStation.get(f) : 0) + 1);
         StringBuilder sb = new StringBuilder();
-        for (java.util.Map.Entry<String, Integer> en : byStation.entrySet()) {
-            Region.Facility f = null;
-            for (Region.Facility g : r.facilities) if (g.name.equals(en.getKey())) f = g;
-            float km = f == null ? -1 : (float) Math.hypot(f.x - Setup.outbreakX, f.y - Setup.outbreakY) / 4000f;
-            sb.append(String.format("%n    %3d from %s (%.1f km)", en.getValue(), en.getKey(), km));
+        for (java.util.Map.Entry<Integer, Integer> en : byStation.entrySet()) {
+            Region.Facility f = r.facilities.get(en.getKey());
+            float km = (float) Math.hypot(f.x - Setup.outbreakX, f.y - Setup.outbreakY) / 4000f;
+            sb.append(String.format("%n    %3d from %s #%d (%.1f km from the start)", en.getValue(), f.name, f.id, km));
         }
         System.out.printf("squads sent in two hours: %d, by station:%s%n", squadSeen.size(), sb);
         // fast-forward
         w.camDetail = false;
         w.setStrategic(true);
         java.util.Map<Integer, float[]> hordeAt = new java.util.HashMap<Integer, float[]>();
+        float hordeKmh = 0, hordeMax = 0, hordeKm = 0;
+        int hordeSteps = 0;
         long ffNs = 0, ffWorst = 0;
         int ffN = 0;
         for (int k = 1; k <= days * 144; k++) {
@@ -123,22 +124,26 @@ public final class ScaleProbe {
             ffNs += d;
             ffN++;
             ffWorst = Math.max(ffWorst, d);
+            // hordes on the move: their speed from one ten-second step to the next
+            for (Strategic.Horde h : w.strat.hordes) {
+                if (!h.alive) continue;
+                float[] p = hordeAt.get(h.id);
+                if (p != null && (p[0] != h.x || p[1] != h.y)) {
+                    float kmh = (float) Math.hypot(h.x - p[0], h.y - p[1]) / 4000f / (World.STRATEGIC_DT / 3600f * 60f);
+                    hordeKmh += kmh;
+                    hordeSteps++;
+                    hordeMax = Math.max(hordeMax, kmh);
+                    hordeKm += (float) Math.hypot(h.x - p[0], h.y - p[1]) / 4000f;
+                }
+                hordeAt.put(h.id, new float[]{h.x, h.y});
+            }
             if (k % 72 == 0) {
                 long mem = Mem.used() - base;
                 peakMem = Math.max(peakMem, mem);
-                // hordes: how far each moved in the last half day
-                StringBuilder hs = new StringBuilder();
-                int shown = 0;
-                for (Strategic.Horde h : w.strat.hordes) {
-                    if (!h.alive) continue;
-                    float[] p = hordeAt.get(h.id);
-                    if (p != null && shown < 4 && (p[0] != h.x || p[1] != h.y)) {
-                        float kmh = (float) Math.hypot(h.x - p[0], h.y - p[1]) / 4000f / 12f;
-                        hs.append(String.format(" [%d dead, %.2f km/h]", h.count, kmh));
-                        shown++;
-                    }
-                    hordeAt.put(h.id, new float[]{h.x, h.y});
-                }
+                // hordes: their mean and top speed on the move over the last half day, and how far they went
+                String hs = hordeSteps == 0 ? "" : String.format(" (on the move %.1f km/h, top %.1f, %.0f km walked)", hordeKmh / hordeSteps, hordeMax, hordeKm);
+                hordeKmh = hordeMax = hordeKm = 0;
+                hordeSteps = 0;
                 int cols = 0, colPeople = 0;
                 for (Strategic.Column cl : w.strat.columns)
                     if (cl.alive) {
