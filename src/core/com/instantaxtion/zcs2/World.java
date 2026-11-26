@@ -40,6 +40,10 @@ public final class World {
     public final Stats stats;
     public final Forces forces;
     public final Weather weather;
+    public final Ecology ecology;
+    public final Fires fires;
+    public final Navy navy;
+    public final Engineers engineers;
     /** Systems plugged in (updated, saved and drawn in this order). */
     public final List<Module> modules = new ArrayList<Module>();
     /** Strategic fast-forward: everything as numbers, ten game seconds a step. */
@@ -98,8 +102,16 @@ public final class World {
         stats = new Stats(this);
         forces = new Forces(this);
         weather = new Weather(this);
+        ecology = new Ecology(this);
+        fires = new Fires(this);
+        navy = new Navy(this);
+        engineers = new Engineers(this);
         modules.add(weather);
         modules.add(forces);
+        modules.add(ecology);
+        modules.add(fires);
+        modules.add(navy);
+        modules.add(engineers);
         zai = new ZombieAI(this);
         cai = new CivAI(this);
         aai = new ArmedAI(this);
@@ -311,22 +323,20 @@ public final class World {
     // ------------------------------------------------------------------ spawning and removing
 
     public Content.ZType pickZType(int ztypeHint, long salt) {
+        return pickZType(ztypeHint, salt, -1);
+    }
+
+    /** A type for one of the dead coming out in sector s: the strain of that place (Ecology), or the worst so far. */
+    public Content.ZType pickZType(int ztypeHint, long salt, int sector) {
         if (ztypeHint >= 0) return c.ztypes.get(ztypeHint);
         float total = 0;
-        for (Content.ZType z : c.ztypes) total += zWeight(z);
+        for (Content.ZType z : c.ztypes) total += ecology.weight(z, sector);
         float pick = Rng.unit(seed, tick, salt) * total;
         for (Content.ZType z : c.ztypes) {
-            pick -= zWeight(z);
+            pick -= ecology.weight(z, sector);
             if (pick <= 0) return z;
         }
         return c.ztypes.get(0);
-    }
-
-    private float zWeight(Content.ZType z) {
-        if (z.placedOnly) return 0;
-        if (z.strain > strat.strain) return z.weight;
-        if (z.strain > 0) return (z.night && !night()) ? 0 : 14;
-        return z.weight;
     }
 
     public int spawnZombie(float x, float y, Content.ZType t) {

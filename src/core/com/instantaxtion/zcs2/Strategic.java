@@ -14,6 +14,8 @@ public final class Strategic {
     public static final class Horde {
         public int id, count, target;
         public float x, y, tx, ty;
+        /** Seconds before it rethinks where it's going (after a split). */
+        public float keepT;
         public boolean alive = true;
     }
 
@@ -212,6 +214,7 @@ public final class Strategic {
         h.y = w.sec.cy(s);
         h.target = -1;
         hordes.add(h);
+        w.ecology.hordeFormed(h, s);
         if (count >= 500) w.news.radio("Recon: a horde of about " + round(count) + " is on the move", h.x, h.y, News.COMMAND);
         return h;
     }
@@ -250,13 +253,15 @@ public final class Strategic {
             }
             // reached people, a fight, or a watched place: break up into the sector
             if (sec.popIn[s] > 0 || sec.hot[s] > 0 || sec.cam[s] || w.sp.secCiv[s] + w.sp.secCop[s] + w.sp.secSol[s] > 0) {
+                w.ecology.hordeArrived(h, s, sec.zIn[s]);
                 sec.zIn[s] += h.count;
                 sec.hot[s] = Math.max(sec.hot[s], 10);
                 h.alive = false;
                 continue;
             }
             // choose (and now and then rethink) where to go: the most attractive place within reach
-            if (h.target < 0 || w.tick % 600 == 0) {
+            if (h.keepT > 0) h.keepT -= dt;
+            if (h.target < 0 || (w.tick % 600 == 0 && h.keepT <= 0)) {
                 float best = 0;
                 int sx = s % sec.sw, sy = s / sec.sw;
                 for (int t = 0; t < sec.n; t++) {
@@ -277,14 +282,17 @@ public final class Strategic {
             }
             if (h.target < 0) continue;
             // walk sector by sector, only where the land connects (rivers stop them where bridges are gone)
+            // (preferring easy ground: valleys, roads, rivers' banks; avoiding forest and mountains)
             int bd = -1;
-            float bdist = dist(sec.cx(s), sec.cy(s), h.tx, h.ty);
+            float here = dist(sec.cx(s), sec.cy(s), h.tx, h.ty), bscore = Float.MAX_VALUE;
             for (int d = 0; d < 8; d++) {
                 if ((sec.connect[s] & (1 << d)) == 0) continue;
                 int t = sec.neighbour(s, d);
                 float dd = dist(sec.cx(t), sec.cy(t), h.tx, h.ty);
-                if (dd < bdist - 1) {
-                    bdist = dd;
+                if (dd >= here - 1) continue;
+                float score = w.ecology.stepScore(t, dd);
+                if (score < bscore) {
+                    bscore = score;
                     bd = t;
                 }
             }
@@ -305,7 +313,8 @@ public final class Strategic {
             if (!A.alive) continue;
             for (int b = a + 1; b < hordes.size(); b++) {
                 Horde B = hordes.get(b);
-                if (B.alive && dist(A.x, A.y, B.x, B.y) < 200) {
+                if (B.alive && dist(A.x, A.y, B.x, B.y) < 200 && (A.keepT <= 0 || A.target == B.target)) {
+                    w.ecology.hordesMerged(A, B);
                     A.count += B.count;
                     B.alive = false;
                 }
@@ -606,12 +615,8 @@ public final class Strategic {
     // ------------------------------------------------------------------ strains
 
     private void strains() {
+        // strains now arise in nests and spread from there (Ecology); this keeps the clock for old saves
         if (w.totalZombies() > 50) strainClock += dt;
-        if (strain < 3 && strainClock > 2160 * (strain + 1)) {
-            strain++;
-            String[] what = {"", "RUNNERS: a fast strain of the dead is spreading", "ARMOURED: the dead in riot gear and helmets are shrugging off headshots", "STALKERS: a strain that hunts at night has appeared"};
-            w.news.headline("New strain. " + what[strain], -1, -1);
-        }
     }
 
     // ------------------------------------------------------------------ the player as a survivor

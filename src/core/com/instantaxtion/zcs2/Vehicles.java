@@ -306,6 +306,7 @@ public final class Vehicles {
         w.fx.add(Effects.BLAST, x[v], y[v], 30, 0, 0.6f);
         w.fx.sound("boom", x[v], y[v]);
         w.stats.vehiclesLost++;
+        w.fires.igniteNear(x[v], y[v], 0.5f);
         if (type(v).flies) {
             w.news.radio(type(v).name + " down!", x[v], y[v], News.LOSS);
             alt[v] = 0;
@@ -704,8 +705,13 @@ public final class Vehicles {
         Content.VType jt = w.c.vtype("jet");
         if (jt == null) return -1;
         float m = w.r.px();
-        // come in from the nearest edge
+        // from the air base if it's still working, else in from the nearest edge
         float sx = tx < m / 2 ? -300 : m + 300, sy = ty + (w.rng.nextFloat() - 0.5f) * 800;
+        float[] ab = w.navy.airBase();
+        if (ab != null) {
+            sx = ab[0];
+            sy = ab[1];
+        }
         int v = add(jt, sx, sy, 0, -1);
         role[v] = R_STRIKE;
         state[v] = V_STRIKE;

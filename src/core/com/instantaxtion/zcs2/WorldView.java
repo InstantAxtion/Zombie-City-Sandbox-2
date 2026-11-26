@@ -686,6 +686,8 @@ public final class WorldView {
             case Region.F_BASE: bg = 0xFF55663A; break;
             case Region.F_ARMORY: bg = 0xFF6E7A48; break;
             case Region.F_PRISON: bg = 0xFF706860; break;
+            case Region.F_FIRE: bg = 0xFFB83020; break;
+            case Region.F_FOB: bg = 0xFF6E8A48; break;
             default: bg = 0xFF808080;
         }
         if (!on) bg = 0xFF5A3030;

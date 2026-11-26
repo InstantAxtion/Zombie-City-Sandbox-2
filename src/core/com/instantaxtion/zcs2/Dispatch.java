@@ -242,7 +242,7 @@ public final class Dispatch {
             if (f.pool == null) continue;
             if (f.kind == Region.F_HQ) {
                 Forces.Formation fm = w.forces.formationOf(f);
-                if (fm == null || !fm.alive || fm.state == Forces.MOVING || fm.player) continue;
+                if (fm == null || !fm.alive || fm.state == Forces.MOVING || fm.state == Forces.AIRLIFT || fm.player) continue;
             }
             float dx = f.x - in.x, dy = f.y - in.y, d = dx * dx + dy * dy;
             if (faction == Ents.COP && in.settlement >= 0 && f.settlement != in.settlement && f.kind != Region.F_HQ) d *= 4;

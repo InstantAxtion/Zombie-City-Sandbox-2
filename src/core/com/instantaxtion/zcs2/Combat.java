@@ -153,6 +153,7 @@ final class Combat {
             }
         w.veh.blast(x, y, rad, dmg);
         w.strat.hordeBlast(x, y, rad);
+        w.fires.blast(x, y, rad);
         // big bombs bring buildings down, and the people sheltering in them
         if (rad > 90) {
             int tx0 = (int) ((x - rad * 0.45f) / Tile.SIZE), tx1 = (int) ((x + rad * 0.45f) / Tile.SIZE);
@@ -240,7 +241,7 @@ final class Combat {
                 if ((e.flags[i] & Ents.F_RISES) != 0 && w.r.walkablePx(e.x[i], e.y[i])) {
                     boolean wasArmed = e.armed(i);
                     Content.ZType zt = w.pickZType(wasArmed && w.c.ztype("armoured") != null && w.rng.chance(0.5f)
-                            ? w.c.ztype("armoured").index : -1, i);
+                            ? w.c.ztype("armoured").index : -1, i, w.r.sectorOfPx(e.x[i], e.y[i]));
                     e.rise(i, zt.index, zt.hp);
                     if (zt.helmet || wasArmed) e.flags[i] |= Ents.F_HELMET;
                     w.stats.zombiesMade++;

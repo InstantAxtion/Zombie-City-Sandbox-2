@@ -402,6 +402,167 @@ public final class Tests {
                 l.shutdown();
             }
         });
+        test("fires: they spread, burn out, and crews put them out", new T() {
+            public void run() {
+                World w = game(16, 768, "sandbox", 1);
+                Region r = w.r;
+                // a building with neighbours, far from any fire station; no crews anywhere for the first part
+                int b = -1;
+                for (int i = 0; i < r.bCount && b < 0; i++)
+                    if (r.bkind[i] == Region.B_APARTMENT && r.bset[i] == r.city().id) b = i;
+                check(b >= 0, "no apartments");
+                Content.Unit ff = w.c.unit("firefighter");
+                int[] saved = new int[r.facilities.size()];
+                for (Region.Facility f : r.facilities) if (f.kind == Region.F_FIRE) { saved[f.id] = f.pool[ff.index]; f.pool[ff.index] = 0; }
+                w.setStrategic(true);
+                w.fires.ignite(b, 0.5f);
+                for (int k = 0; k < 400; k++) {
+                    w.weather.state = Weather.CLEAR;
+                    w.step();
+                }
+                check(w.fires.collapsed >= 1, "nothing burned down");
+                check(r.bfloors[b] == 0, "the building is still standing");
+                check(w.fires.started >= 2, "the fire never spread: " + w.fires.started);
+                check(Audit.check(w).isEmpty(), Audit.check(w));
+                // crews back: a new fire next to a station gets put out
+                for (Region.Facility f : r.facilities) if (f.kind == Region.F_FIRE) f.pool[ff.index] = saved[f.id];
+                Region.Facility st = null;
+                for (Region.Facility f : r.facilities) if (f.kind == Region.F_FIRE) st = f;
+                check(st != null, "no fire station");
+                int near = -1;
+                float bd = Float.MAX_VALUE;
+                for (int i = 0; i < r.bCount; i++) {
+                    if (r.bfloors[i] <= 0 || w.fires.heat[i] > 0 || w.doorX[i] < 0) continue;
+                    float dx = w.doorX[i] - st.x, dy = w.doorY[i] - st.y, d = dx * dx + dy * dy;
+                    if (d < bd && d > 300 * 300) { bd = d; near = i; }
+                }
+                int before = w.fires.putOut;
+                w.fires.ignite(near, 0.2f);
+                for (int k = 0; k < 200 && w.fires.heat[near] > 0; k++) {
+                    w.weather.state = Weather.CLEAR;
+                    w.step();
+                }
+                check(w.fires.putOut > before || r.bfloors[near] == 0, "the crew never got there");
+                check(w.fires.heat[near] == 0 && r.bfloors[near] > 0, "the crew didn't save it");
+                w.shutdown();
+            }
+        });
+        test("ecology: hunger, nests, and strains that spread", new T() {
+            public void run() {
+                World w = game(17, 768, "sandbox", 1);
+                Sectors sec = w.sec;
+                // a village sector with people round it
+                int s = -1;
+                for (int k = 0; k < sec.n && s < 0; k++) {
+                    int st = sec.settlement[k];
+                    if (st >= 0 && w.r.settlements.get(st).kind == Region.S_VILLAGE && sec.home[k] > 0) s = k;
+                }
+                check(s >= 0, "no village");
+                // a fallen place: nobody left anywhere near, the dead everywhere
+                int sx = s % sec.sw, sy = s / sec.sw;
+                w.setStrategic(true);
+                for (int k = 0; k < 3 * 144 + 10; k++) {
+                    for (int dy = -2; dy <= 2; dy++)
+                        for (int dx = -2; dx <= 2; dx++) {
+                            int x = sx + dx, y = sy + dy;
+                            if (x < 0 || y < 0 || x >= sec.sw || y >= sec.sh) continue;
+                            sec.popIn[y * sec.sw + x] = 0;
+                            sec.inf[y * sec.sw + x] = 0;
+                        }
+                    if (sec.zIn[s] < 1000) sec.zIn[s] = 1000;
+                    w.step();
+                }
+                check(w.ecology.hunger[s] > 0.5f, "not hungry: " + w.ecology.hunger[s]);
+                check(w.ecology.nest[s], "no nest after three days");
+                // a strain where people still live nearby spreads as the dead move
+                int s2 = -1;
+                for (int k = 0; k < sec.n && s2 < 0; k++)
+                    if (sec.settlement[k] >= 0 && sec.home[k] > 0 && Math.abs(k % sec.sw - sx) + Math.abs(k / sec.sw - sy) > 6) s2 = k;
+                sec.popIn[s2] = 0;
+                sec.zIn[s2] = 800;
+                w.ecology.strain[s2] = 2;
+                w.ecology.strain[s] = 2;
+                for (int k = 0; k < 30; k++) w.step();
+                int spread = 0;
+                for (int k = 0; k < sec.n; k++) if (k != s && k != s2 && w.ecology.strain[k] == 2) spread++;
+                check(spread > 0, "the strain stayed put");
+                int armoured = 0;
+                for (int k = 0; k < 400; k++) if (w.pickZType(-1, k, s).strain == 2) armoured++;
+                check(armoured > 20, "the place's strain doesn't come out: " + armoured);
+                check(w.ecology.migrateFactor(s) < 0.5f, "a nest left alone should lie still");
+                check(Audit.check(w).isEmpty(), Audit.check(w));
+                w.shutdown();
+            }
+        });
+        test("sea and air: ships shell the shore, jets fly from the air base", new T() {
+            public void run() {
+                World w = Setup.newGame(content, 2304, RegionGen.COAST, 9, content.scenario("sandbox"), 2);
+                float[] ab = w.navy.airBase();
+                check(ab != null, "no working air base");
+                int v = w.veh.strike(ab[0] + 3000, ab[1]);
+                check(Math.abs(w.veh.x[v] - ab[0]) < 1 && Math.abs(w.veh.y[v] - ab[1]) < 1, "the jet didn't take off from the air base");
+                boolean port = false;
+                for (Region.Facility f : w.r.facilities) if (f.kind == Region.F_PORT) port = true;
+                if (port) {
+                    check(!w.navy.ships.isEmpty(), "a naval station with no ships");
+                    Navy.Ship sh = w.navy.ships.get(0);
+                    int best = -1;
+                    float bd = Float.MAX_VALUE;
+                    for (int k = 0; k < w.sec.n; k++) {
+                        if (w.sec.popIn[k] > 0 || !Tile.walkable(w.r.tileAtPx(w.sec.cx(k), w.sec.cy(k)))) continue;
+                        float dx = w.sec.cx(k) - sh.x, dy = w.sec.cy(k) - sh.y, d = dx * dx + dy * dy;
+                        // in range, and away from the soldiers who'd deal with it first
+                        boolean guarded = false;
+                        for (Forces.Formation f : w.forces.formations) {
+                            float ex = f.hq.x - w.sec.cx(k), ey = f.hq.y - w.sec.cy(k);
+                            if (ex * ex + ey * ey < 3500f * 3500f) guarded = true;
+                        }
+                        for (Region.Facility f : w.r.facilities) {
+                            if (f.pool == null) continue;
+                            float ex = f.x - w.sec.cx(k), ey = f.y - w.sec.cy(k);
+                            if (ex * ex + ey * ey < 2500f * 2500f) guarded = true;
+                        }
+                        if (guarded || d > 5000f * 5000f) continue;
+                        if (d < bd) { bd = d; best = k; }
+                    }
+                    check(best >= 0, "no unguarded shore in range");
+                    w.sec.zIn[best] = 600;
+                    w.setStrategic(true);
+                    for (int k = 0; k < 30; k++) w.step();
+                    check(sh.kills > 0, "the ship never fired");
+                }
+                check(Audit.check(w).isEmpty(), Audit.check(w));
+                w.shutdown();
+            }
+        });
+        test("engineers: a forward base, and it all survives a save", new T() {
+            public void run() throws Exception {
+                World w = game(18, 1024, "sandbox", 2);
+                RoadGraph g = w.r.roads;
+                Region.Settlement c = w.r.city();
+                int n = g.nearestNode(c.cx * 16f + 2500, c.cy * 16f, 3000);
+                Forces.Formation f = w.forces.createFormation(w.c.formationT("infantry"), g.nx[n], g.ny[n], false);
+                f.state = Forces.HOLDING;
+                f.player = true;
+                w.setStrategic(true);
+                w.fires.ignite(0, 0.6f);
+                for (int k = 0; k < 80; k++) w.step();
+                check(w.engineers.fobs >= 1, "no forward base after holding a while");
+                ByteArrayOutputStream bo = new ByteArrayOutputStream();
+                SaveIO.save(w, bo);
+                World l = SaveIO.load(content, new ByteArrayInputStream(bo.toByteArray()), 2);
+                check(Audit.hash(l) == Audit.hash(w), "different after loading");
+                for (int k = 0; k < 150; k++) {
+                    w.step();
+                    l.step();
+                }
+                check(Audit.hash(l) == Audit.hash(w), "diverged after loading");
+                check(l.engineers.fobs == w.engineers.fobs && l.fires.count() == w.fires.count(), "module state lost");
+                check(java.util.Arrays.equals(l.ecology.strain, w.ecology.strain), "strains differ");
+                w.shutdown();
+                l.shutdown();
+            }
+        });
         test("perf: 20,000 of the dead", new T() {
             public void run() {
                 World w = game(2, 1024, "sandbox", 4);
