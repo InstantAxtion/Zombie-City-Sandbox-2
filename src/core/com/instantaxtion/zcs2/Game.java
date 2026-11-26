@@ -838,6 +838,12 @@ public final class Game {
                         .append(w.forces.armedAt(f, Ents.COP) + w.forces.armedAt(f, Ents.SOLDIER));
             if (f.kind == Region.F_HOSPITAL) body.append(on ? "Taking in the bitten" : "The sick inside have turned");
             if (f.kind == Region.F_FUEL) body.append(on ? "Refuelling the town's vehicles" : "Vehicles here can't refuel");
+            if (f.food > 0 || f.fuel > 0 || f.med > 0) {
+                body.append(body.length() > 0 ? ". " : "").append("In store:");
+                if (f.food > 0) body.append(" food for ").append(fmt((int) f.food)).append(" person-days");
+                if (f.fuel > 0) body.append(f.food > 0 ? "," : "").append(" ").append((int) f.fuel).append(" t of fuel");
+                if (f.med > 0) body.append(f.food > 0 || f.fuel > 0 ? "," : "").append(" ").append((int) f.med).append(" doses of medicine");
+            }
             actions = new String[]{"i:close", "Close"};
         } else if (inspSettle >= 0) {
             Region.Settlement s = w.r.settlements.get(inspSettle);
@@ -1716,6 +1722,11 @@ public final class Game {
         }
         if (v >= 0) {
             inspVeh = v;
+            return;
+        }
+        Logistics.Convoy cv = w.logistics.convoyAt(x, y, Math.max(ui.dp(16) / cam.zoom, 30));
+        if (cv != null) {
+            toast(w.logistics.describe(cv));
             return;
         }
         for (Region.Facility f : w.r.facilities) {

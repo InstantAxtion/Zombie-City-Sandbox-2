@@ -402,6 +402,66 @@ public final class Tests {
                 l.shutdown();
             }
         });
+        test("infrastructure: no water empties a town, no phones slow the calls", new T() {
+            public void run() {
+                World w = game(16, 1024, "sandbox", 2);
+                Region.Settlement c = w.r.city();
+                play(w, 2, false);
+                int before = w.stats.popBySettlement[c.id];
+                for (Region.Facility f : w.r.facilities)
+                    if ((f.kind == Region.F_WATER || f.kind == Region.F_PHONE) && f.settlement == c.id) w.strat.online[f.id] = false;
+                check(w.infra.waterOut(c.id) && w.infra.phoneOut(c.id), "the networks didn't go down");
+                int s = -1;
+                for (int k = 0; k < w.sec.n; k++) if (w.sec.settlement[k] == c.id) { s = k; break; }
+                check(w.infra.callDelay(s) > 1, "calls are no slower with the phones down");
+                w.setStrategic(true);
+                for (int k = 0; k < 4 * 144; k++) w.step(); // four days
+                int after = w.stats.popBySettlement[c.id];
+                check(after < before * 0.8f, "people stayed with no water: " + after + " of " + before);
+                check(after > 0, "everyone left at once");
+                check(Audit.check(w).isEmpty(), Audit.check(w));
+                w.shutdown();
+            }
+        });
+        test("logistics: convoys refill what runs low, and save", new T() {
+            public void run() throws Exception {
+                World w = game(17, 1024, "sandbox", 2);
+                play(w, 2, false);
+                Region.Facility st = null, store = null;
+                for (Region.Facility f : w.r.facilities) {
+                    if (f.kind == Region.F_POLICE && st == null) st = f;
+                    if (f.kind == Region.F_FOODW && store == null) store = f;
+                }
+                check(st != null && store != null, "no station or food store");
+                st.ammo = 0;
+                store.food = 0;
+                w.setStrategic(true);
+                boolean saved = false;
+                for (int k = 0; k < 144 && !saved; k++) {
+                    w.step();
+                    if (!w.logistics.convoys.isEmpty() && k > 4) {
+                        ByteArrayOutputStream bo = new ByteArrayOutputStream();
+                        SaveIO.save(w, bo);
+                        World l = SaveIO.load(content, new ByteArrayInputStream(bo.toByteArray()), 2);
+                        check(l.logistics.convoys.size() == w.logistics.convoys.size(), "convoys lost in the save");
+                        for (int j = 0; j < 60; j++) {
+                            w.step();
+                            l.step();
+                        }
+                        check(Audit.hash(l) == Audit.hash(w), "diverged after loading with convoys on the road");
+                        l.shutdown();
+                        saved = true;
+                    }
+                }
+                check(saved, "no convoy ever set out");
+                for (int k = 0; k < 288; k++) w.step();
+                check(w.logistics.delivered > 0, "nothing delivered");
+                check(st.ammo > 0, "the station got no ammunition");
+                check(store.food > 0, "the food store is still empty");
+                check(Audit.check(w).isEmpty(), Audit.check(w));
+                w.shutdown();
+            }
+        });
         test("perf: 20,000 of the dead", new T() {
             public void run() {
                 World w = game(2, 1024, "sandbox", 4);

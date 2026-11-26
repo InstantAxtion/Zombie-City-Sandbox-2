@@ -189,7 +189,7 @@ public final class Sectors {
                 panic[s] = Math.min(1, panic[s] + 0.1f * Math.min(1, dt));
             }
             if (inf[s] > 0) {
-                float turn = Math.max(0.2f * dt, inf[s] / turnTime * dt);
+                float turn = Math.max(0.2f * dt, inf[s] / (turnTime * w.infra.turnSlow(settlement[s])) * dt);
                 int t = Math.min((int) Math.ceil(inf[s]), stoch(turn, s * 7L + 3));
                 inf[s] -= t;
                 if (inf[s] < 0) inf[s] = 0;

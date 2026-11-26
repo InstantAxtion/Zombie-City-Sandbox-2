@@ -83,10 +83,7 @@ public final class Military {
             if (!w.disp.perimeterMode(st)) armyCalled[st] = false;
         }
         if (w.gov.level >= 3 && strikeT <= 0 && !w.strategic) autoStrike();
-        if (supplyT <= 0 && !w.strategic) {
-            supply();
-            supplyT = 90;
-        }
+        // (supplies travel as convoys now: see Logistics)
         // outside help, growing with the crisis
         int dead = w.totalZombies();
         // outside help arrives as formations on the highways, growing with the crisis

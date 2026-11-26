@@ -164,6 +164,16 @@ public final class Ents {
         }
     }
 
+    /** The free slots in the order they'll be reused (saved, so a loaded game spawns into the same slots). */
+    int[] freeOrder() {
+        return java.util.Arrays.copyOf(freeList, freeN);
+    }
+
+    void setFreeOrder(int[] order) {
+        freeN = order.length;
+        System.arraycopy(order, 0, freeList, 0, freeN);
+    }
+
     public void ensure(int n) {
         if (n > cap) alloc(Math.max(n, cap * 2));
     }
