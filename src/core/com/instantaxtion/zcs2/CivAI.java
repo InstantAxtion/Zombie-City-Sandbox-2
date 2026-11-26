@@ -24,6 +24,12 @@ final class CivAI {
             w.services.crewThink(i, s, this);
             return;
         }
+        if ((e.flags[i] & Ents.F_PATIENT) != 0 && w.sp.nearestZombie(e, e.x[i], e.y[i], 150) < 0) {
+            // hurt, and an ambulance on its way: they wait for it
+            e.dvx[i] = 0;
+            e.dvy[i] = 0;
+            return;
+        }
         if ((e.flags[i] & Ents.F_COMPANION) != 0) {
             // with the survivor: by their orders (Survival)
             w.surv.companionThink(i, s);

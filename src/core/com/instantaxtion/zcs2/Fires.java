@@ -516,7 +516,7 @@ public final class Fires extends Module {
             if (dead) {
                 f.retreat = true;
                 f.retreatT = 0;
-                w.news.radio("fireback:" + b, "Fire crews pull back from a burning building" + placeOf(b) + ": the dead are on them", dx, dy, News.UNIT);
+                w.news.radio("Fire crews pull back from a burning building" + placeOf(b) + ": the dead are on them", dx, dy, News.UNIT);
             }
         }
         int spraying = 0, out = 0;

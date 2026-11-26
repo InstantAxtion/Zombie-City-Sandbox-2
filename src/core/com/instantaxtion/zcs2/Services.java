@@ -321,13 +321,13 @@ public final class Services extends Module {
             startAssault(a);
             air.add(a);
             assaults++;
-            w.news.radio("air:" + in.id, "Air assault: " + vh.type(v).name + " " + Names.callsign(Ents.SOLDIER, vh.uid[v]) + " is flying a squad in to the fight", lz[0], lz[1], News.COMMAND);
+            w.news.radio("Air assault: " + vh.type(v).name + " " + Names.callsign(Ents.SOLDIER, vh.uid[v]) + " is flying a squad in to the fight", lz[0], lz[1], News.COMMAND);
             return; // one a second
         }
-        // squads cut off (no vehicle, the dead round them, far from home, or out of rounds): pulled out by air
+        // soldiers cut off (no vehicle, the dead round them, far from home): pulled out by air
         for (int q = 0; q < w.sq.list.size(); q++) {
             Squads.Squad s = w.sq.list.get(q);
-            if (!s.alive || s.player || s.n == 0 || s.mode != Squads.M_FOOT) continue;
+            if (!s.alive || s.player || s.n == 0 || s.mode != Squads.M_FOOT || s.faction != Ents.SOLDIER || s.home < 0) continue;
             if (s.vehicle >= 0 && w.veh.usable(s.vehicle)) continue;
             int lead = s.leader(w.e);
             if (lead < 0 || w.e.loc[lead] != Ents.FREE) continue;
@@ -335,7 +335,7 @@ public final class Services extends Module {
             Region.Facility hf = s.home >= 0 ? w.r.facilities.get(s.home) : null;
             if (hf != null && dist(x, y, hf.x, hf.y) < 1500) continue;
             int press = w.sp.zombiesNear(w.e, x, y, 160, 40);
-            if (press < Math.max(6, s.n * 2) && w.sq.ammoShare(s) > 0.15f) continue;
+            if (press < Math.max(6, s.n * 2) || w.sq.ammoShare(s) > 0.3f && press < s.n * 4) continue;
             boolean taken = false;
             for (AirTask a : air) if (a.squad == s.id) taken = true;
             if (taken) continue;
@@ -357,7 +357,7 @@ public final class Services extends Module {
             vh.driveTo(v, a.px, a.py, 0);
             air.add(a);
             extractions++;
-            w.news.radio("extract:" + s.id, s.name + " is cut off: a helicopter is coming to pull them out", lz[0], lz[1], News.COMMAND);
+            w.news.radio(s.name + " is cut off: a helicopter is coming to pull them out", lz[0], lz[1], News.COMMAND);
             return;
         }
         // people trapped in streets the dead hold, where it's being watched: lifted out by air
@@ -381,7 +381,7 @@ public final class Services extends Module {
         a.phase = P_TO_PICKUP;
         vh.driveTo(v, a.px, a.py, 0);
         air.add(a);
-        w.news.radio("lift:" + s, "Rescue: a helicopter is going in for people trapped" + place(s), lz[0], lz[1], News.COMMAND);
+        w.news.radio("Rescue: a helicopter is going in for people trapped" + place(s), lz[0], lz[1], News.COMMAND);
     }
 
     /** A watched sector whose people are trapped by the dead (and no rescue on its way to it), or -1. */
@@ -569,7 +569,7 @@ public final class Services extends Module {
                 if (a.kind == T_ASSAULT) {
                     s.task = -1;
                     w.sq.order(s, Squads.O_HOLD, a.tx, a.ty);
-                    w.news.radio("drop:" + s.id, s.name + ": on the ground, moving to the fight", a.tx, a.ty, News.UNIT);
+                    w.news.radio(s.name + ": on the ground, moving to the fight", a.tx, a.ty, News.UNIT);
                 } else w.sq.goHome(s);
             }
         }
@@ -639,7 +639,8 @@ public final class Services extends Module {
             }
             if (best < 0) continue;
             f.vpool[vAmb]--;
-            float[] yard = w.r.openGroundNear(f.x, f.y, true);
+            int node = w.r.roads.nearestNode(f.x, f.y, 600);
+            float[] yard = node >= 0 ? new float[]{w.r.roads.nx[node], w.r.roads.ny[node]} : w.r.openGroundNear(f.x, f.y, true);
             int v = vh.add(w.c.vtypes.get(vAmb), yard[0], yard[1], 0, f.id);
             if (!vh.driveTo(v, e.x[best], e.y[best], 0)) {
                 vh.state[v] = Vehicles.V_NONE;
@@ -647,6 +648,7 @@ public final class Services extends Module {
                 continue;
             }
             vh.siren[v] = true;
+            e.flags[best] |= Ents.F_PATIENT;
             Ambulance a = new Ambulance();
             a.v = v;
             a.uid = vh.uid[v];
@@ -763,11 +765,14 @@ public final class Services extends Module {
                     break;
                 }
                 case A_BACK: {
-                    boolean home = dist(vh.x[v], vh.y[v], hf.x, hf.y) < 260 && (vh.state[v] != Vehicles.V_DRIVE);
+                    // at the hospital: where its road ends (the junction nearest it), or close by
+                    byte vs = vh.state[v];
+                    boolean stopped = vs != Vehicles.V_DRIVE && vs != Vehicles.V_PULLIN && vs != Vehicles.V_PARKING;
+                    boolean home = stopped && (a.t > 3 || dist(vh.x[v], vh.y[v], hf.x, hf.y) < 260);
                     if (home || a.t > 600) {
                         deliver(a);
                         ambs.remove(k);
-                    } else if (vh.state[v] == Vehicles.V_ARRIVED && a.t > 5 && dist(vh.x[v], vh.y[v], hf.x, hf.y) >= 260) vh.driveTo(v, hf.x, hf.y, 0);
+                    }
                     break;
                 }
                 default:
@@ -818,6 +823,7 @@ public final class Services extends Module {
         Region.Facility hf = w.r.facilities.get(a.hospital);
         a.phase = A_BACK;
         a.t = 0;
+        if (ent(a.patient, a.puid)) w.e.flags[a.patient] &= ~Ents.F_PATIENT;
         if (!withPatient) {
             vh.siren[a.v] = false;
             vh.goHome(a.v);
@@ -1139,7 +1145,7 @@ public final class Services extends Module {
         r.x = door[0];
         r.y = door[1];
         rescues.add(r);
-        w.news.radio("rescue:" + s, "Rescue: police and a bus are going in for people trapped" + place(s), door[0], door[1], News.COMMAND);
+        w.news.radio("Rescue: police and a bus are going in for people trapped" + place(s), door[0], door[1], News.COMMAND);
     }
 
     private void rescues(float dt) {
@@ -1154,6 +1160,11 @@ public final class Services extends Module {
                 if (sq != null && sq.alive && sq.task == TASK_RESCUE) {
                     sq.task = -1;
                     w.sq.goHome(sq);
+                }
+                if (bus) {
+                    // given up: whoever is aboard is set down in the street they were in, the bus towed back
+                    for (int j = vh.crewN[r.bus] - 1; j >= 0; j--) indoors(vh.crew[r.bus][j], w.r.sectorOfPx(vh.x[r.bus], vh.y[r.bus]));
+                    vh.state[r.bus] = Vehicles.V_NONE;
                 }
                 rescues.remove(k);
                 continue;
@@ -1188,7 +1199,7 @@ public final class Services extends Module {
                 }
             } else if (r.phase == 1) {
                 Region.Facility f = w.r.facilities.get(r.facility);
-                if (vh.state[v] != Vehicles.V_DRIVE && dist(vh.x[v], vh.y[v], f.x, f.y) < 400) {
+                if (vh.state[v] != Vehicles.V_DRIVE && vh.state[v] != Vehicles.V_PULLIN && vh.state[v] != Vehicles.V_PARKING) {
                     int s0 = w.r.sectorOfPx(f.x, f.y);
                     int n = 0;
                     for (int j = vh.crewN[v] - 1; j >= 0; j--) {
@@ -1202,7 +1213,9 @@ public final class Services extends Module {
                     r.phase = 2;
                 }
             } else {
-                if (vh.state[v] == Vehicles.V_PARKED || vh.state[v] == Vehicles.V_ARRIVED && dist(vh.x[v], vh.y[v], vh.homeX[v], vh.homeY[v]) < 200) {
+                // back at the depot (or as near as its road goes): parked away
+                byte vs = vh.state[v];
+                if (vs != Vehicles.V_DRIVE && vs != Vehicles.V_PULLIN && vs != Vehicles.V_PARKING) {
                     vh.state[v] = Vehicles.V_NONE;
                     rescues.remove(k);
                 }
@@ -1251,7 +1264,7 @@ public final class Services extends Module {
                     a.x = w.r.roads.nx[en];
                     a.y = w.r.roads.ny[en];
                     aid.add(a);
-                    w.news.radio("aid:" + best, "Aid agencies: a convoy of food and medicine is on its way to " + c.name, c.x, c.y, News.COMMAND);
+                    w.news.radio("Aid agencies: a convoy of food and medicine is on its way to " + c.name, c.x, c.y, News.COMMAND);
                 }
             }
         }
@@ -1304,7 +1317,7 @@ public final class Services extends Module {
                 if (f.food <= 0 && p > 200) {
                     w.sec.panic[w.sec.touch(c.sector)] = Math.min(1, w.sec.panic[c.sector] + 0.05f);
                     w.gov.trust = Math.max(0, w.gov.trust - 0.01f * campT / 60f);
-                    w.news.radio("hungry:" + c.facility, c.name + " has run out of food. Aid agencies are asking for convoys", c.x, c.y, News.COMMAND, 2880);
+                    w.news.radio(News.keyOf(c.name + " has run out of food. Aid agencies are asking for convoys"), c.name + " has run out of food. Aid agencies are asking for convoys", c.x, c.y, News.COMMAND, 2880);
                 }
             }
             campT = 0;

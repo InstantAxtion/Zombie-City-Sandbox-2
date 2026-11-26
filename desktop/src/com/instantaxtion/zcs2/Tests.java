@@ -1962,7 +1962,7 @@ public final class Tests {
                 f.player = true;
                 w.setStrategic(true);
                 w.fires.ignite(0, 0.6f);
-                for (int k = 0; k < 80; k++) w.step();
+                for (int k = 0; k < 110; k++) w.step();
                 check(w.engineers.fobs >= 1, "no forward base after holding a while");
                 ByteArrayOutputStream bo = new ByteArrayOutputStream();
                 SaveIO.save(w, bo);

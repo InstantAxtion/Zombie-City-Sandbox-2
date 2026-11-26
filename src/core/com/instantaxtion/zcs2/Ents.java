@@ -22,6 +22,8 @@ public final class Ents {
     public static final int F_COMPANION = 1 << 20;
     /** One of a service's crew on foot (a firefighter, a paramedic): not one of the people, never folded into the counts. */
     public static final int F_CREW = 1 << 21;
+    /** Waiting for the ambulance that is coming for them (they stay where they are unless the dead come). */
+    public static final int F_PATIENT = 1 << 22;
 
     public int cap, top, live;
     public float[] x, y, vx, vy, hp, maxHp, face, timer, aimT, infT, gx, gy, dvx, dvy;
