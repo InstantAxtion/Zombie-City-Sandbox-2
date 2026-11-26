@@ -116,6 +116,71 @@ public final class Tests {
         return new float[]{x + d, y};
     }
 
+    /** Checkpoint hashes of the golden games, recorded at 74a4ec5 (before P3). */
+    static final long[][] GOLDEN = {
+            {-3457355788978078644L, -1549714786010502967L, 2341165120373548744L, 5936672485666711866L, -8665896880060622553L, 2980489584102628701L, -5694460912998625661L},
+            {1247737180043349688L, -1897936398904318559L, 3029744908658837200L, 7527869163818481190L, -2967406521909247591L, 3443860974376534131L, -2408943682158270183L,
+                    4353128960234585427L, 4567398096660548914L},
+            {-1721982705396361131L, 9219531030924546278L, 4412387060594296491L, -865739393895964551L, 3803384062503442605L, -7342890733388141648L, 3566668564866714374L,
+                    -2951662884326940493L, -7072163388537179399L, -7727612019171383751L, 5614533364594415527L},
+    };
+
+    /**
+     * One golden game: a few street checkpoints, then days of fast-forward with one each game day. Each checkpoint
+     * is Audit.hash mixed with a hash of the whole save (sector drift left out: it is only read where the dead walk).
+     */
+    static long[] golden(int which) throws Exception {
+        World w;
+        int streetSecs, days;
+        if (which == 0) {
+            w = game(21, 1024, "sandbox", 2);
+            Region.Settlement c = w.r.city();
+            camOver(w, c.cx * 16f, c.cy * 16f);
+            Tools.paintZombies(w, c.cx * 16f, c.cy * 16f, 2500, 700, -1);
+            streetSecs = 90;
+            days = 4;
+        } else if (which == 1) {
+            w = game(10, 1536, "lab_leak", 2);
+            camOver(w, Setup.originX, Setup.originY);
+            streetSecs = 60;
+            days = 6;
+        } else {
+            w = game(7, 2304, "sandbox", 2);
+            Tools.paintZombies(w, Setup.originX, Setup.originY, 4000, 900, -1);
+            camOver(w, Setup.originX + 2000, Setup.originY);
+            streetSecs = 30;
+            days = 8;
+        }
+        java.util.List<Long> out = new java.util.ArrayList<Long>();
+        for (int k = 0; k < 3; k++) {
+            play(w, streetSecs / 3f, false);
+            out.add(deepHash(w));
+        }
+        w.camDetail = false;
+        w.setStrategic(true);
+        for (int d = 0; d < days; d++) {
+            for (int k = 0; k < 144; k++) w.step();
+            out.add(deepHash(w));
+        }
+        w.shutdown();
+        long[] a = new long[out.size()];
+        for (int k = 0; k < a.length; k++) a[k] = out.get(k);
+        return a;
+    }
+
+    static long deepHash(World w) throws Exception {
+        float[] dx = w.sec.driftX.clone(), dy = w.sec.driftY.clone();
+        java.util.Arrays.fill(w.sec.driftX, 0);
+        java.util.Arrays.fill(w.sec.driftY, 0);
+        ByteArrayOutputStream bo = new ByteArrayOutputStream();
+        SaveIO.save(w, bo);
+        System.arraycopy(dx, 0, w.sec.driftX, 0, dx.length);
+        System.arraycopy(dy, 0, w.sec.driftY, 0, dy.length);
+        long h = Audit.hash(w);
+        for (byte b : bo.toByteArray()) h = (h ^ (b & 0xff)) * 1099511628211L;
+        return h;
+    }
+
     /** A hash of the armed people's own state (what they're doing, their nerve and magazines). */
     static long armedHash(World w) {
         long h = 1469598103934665603L;
@@ -318,6 +383,21 @@ public final class Tests {
                 check(Audit.hash(a) == Audit.hash(b), "different after a minute");
                 a.shutdown();
                 b.shutdown();
+            }
+        });
+        test("golden: fixed seeds play out exactly as recorded", new T() {
+            public void run() throws Exception {
+                // recorded before the sectors learned to sleep (docs/SCALE_PLAN.md, P3): skipping quiet sectors
+                // and districts must not change a single outcome on today's maps
+                StringBuilder bad = new StringBuilder();
+                for (int k = 0; k < GOLDEN.length; k++) {
+                    long[] got = golden(k);
+                    StringBuilder sb = new StringBuilder();
+                    for (long v : got) sb.append(sb.length() > 0 ? ", " : "").append(v).append('L');
+                    if (System.getenv("GOLDEN_PRINT") != null) System.out.println("golden " + k + ": {" + sb + "}");
+                    if (!java.util.Arrays.equals(got, GOLDEN[k])) bad.append("\n  scenario ").append(k).append(" now {").append(sb).append('}');
+                }
+                check(bad.length() == 0, "outcomes changed:" + bad);
             }
         });
         test("sim: everyone accounted for with no dead about", new T() {
