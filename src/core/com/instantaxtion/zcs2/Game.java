@@ -1513,7 +1513,7 @@ public final class Game {
         boolean pal = palette() != null && !inspectorOpen();
         if (landscape) {
             railW = ui.dp(60);
-            paletteW = pal ? Math.min(ui.dp(210), W * 0.27f) : 0;
+            paletteW = pal ? sideFit(palette(), W, H) : 0;
             sheetW = inspectorOpen() ? Math.min(ui.dp(340), W * 0.42f) : 0;
             left = railW + paletteW;
             if (replayBarShown()) bottom = dir.replayBarH(true);
@@ -2507,7 +2507,47 @@ public final class Game {
         else ui.button(id, x, y, bw, h, label, paletteOn(id), 12.5f);
     }
 
-    /** The options as a panel beside the rail (landscape): two columns. */
+    /** The side palette's columns and button height, worked out by sideFit for this frame. */
+    private int sideCols = 2;
+    private float sideBh;
+
+    /**
+     * Sideways, the options sit in a panel beside the rail. Its width and columns are chosen so that every label is
+     * whole and every option fits the screen's height: two columns as wide as the longest label (never narrower than
+     * the old panel), lower buttons if they don't fit, then three or four columns, up to half the screen.
+     */
+    private float sideFit(String[][] rows, int W, int H) {
+        float base = Math.min(ui.dp(210), W * 0.27f);
+        Gfx g = lastG;
+        sideCols = 2;
+        sideBh = ui.dp(40);
+        if (rows == null || g == null) return base;
+        float ts = ui.dp(12.5f), labelW = ui.dp(44);
+        for (String[] row : rows)
+            for (int i = 0; i + 1 < row.length; i += 2)
+                if (row.length > 2) labelW = Math.max(labelW, g.textWidth(row[i + 1], ts, true) + ui.dp(18));
+        float availH = H - topH - ui.dp(8) - ui.dp(22) - ui.dp(10);
+        String cap = paletteCaption();
+        float best = base;
+        for (int cols = 2; cols <= 4; cols++) {
+            float wdt = Math.max(cols == 2 ? base : 0, cols * labelW + (cols - 1) * ui.dp(8) + ui.dp(16));
+            if (wdt > W * 0.5f && cols > 2) break;
+            float capH = cap == null ? 0 : Math.min(3, Ui.lines(g, cap, wdt - ui.dp(20), ui.dp(Ui.S + 0.5f))) * ui.dp(Ui.S + 0.5f) * 1.3f + ui.dp(6);
+            int lines = 0;
+            for (String[] row : rows) lines += (row.length / 2 + cols - 1) / cols;
+            for (int hi = 0; hi < 2; hi++) {
+                float bh = ui.dp(hi == 0 ? 40 : 34), gap = ui.dp(hi == 0 ? 6 : 4);
+                // the last that still fits across is kept if nothing fits down
+                sideCols = cols;
+                sideBh = bh;
+                best = Math.min(wdt, W * 0.5f);
+                if (capH + lines * (bh + gap) <= availH) return best;
+            }
+        }
+        return best;
+    }
+
+    /** The options as a panel beside the rail (landscape): two columns or more, every label whole. */
     private void sidePalette(Gfx g, String[][] rows, float x, float y, float wdt, float h) {
         g.color(0xEC121820);
         g.fillRect(x, y, wdt, h);
@@ -2521,16 +2561,19 @@ public final class Game {
         g.text(toolName(tool), x + ui.dp(10), yy + ui.dp(16), ui.dp(Ui.L), Gfx.ALIGN_LEFT, true);
         yy += ui.dp(22);
         if (cap != null) yy += ui.wrap(cap, x + ui.dp(10), yy + ui.dp(10), wdt - ui.dp(20), ui.dp(Ui.S + 0.5f), Ui.DIM, 3) + ui.dp(6);
-        float bw = (wdt - ui.dp(24)) / 2, bh = ui.dp(40);
+        int cols = Math.max(2, sideCols);
+        float bh = sideBh > 0 ? sideBh : ui.dp(40), gap = bh < ui.dp(40) ? ui.dp(4) : ui.dp(6);
+        float bw = (wdt - ui.dp(16) - (cols - 1) * ui.dp(8)) / cols;
         int k = 0;
         for (String[] row : rows) {
             for (int i = 0; i < row.length / 2; i++) {
+                // a lone option, or a label longer than a column, takes the whole line
                 boolean wide = row.length == 2 || g.textWidth(row[i * 2 + 1], ui.dp(12.5f), true) > bw - ui.dp(12);
-                if (wide && k % 2 == 1) k++;
-                option(row[i * 2], row[i * 2 + 1], x + ui.dp(8) + (k % 2) * (bw + ui.dp(8)), yy + (k / 2) * (bh + ui.dp(6)), wide ? bw * 2 + ui.dp(8) : bw, bh);
-                k += wide ? 2 : 1;
+                if (wide && k % cols != 0) k += cols - k % cols;
+                option(row[i * 2], row[i * 2 + 1], x + ui.dp(8) + (k % cols) * (bw + ui.dp(8)), yy + (k / cols) * (bh + gap), wide ? wdt - ui.dp(16) : bw, bh);
+                k += wide ? cols : 1;
             }
-            if (k % 2 == 1) k++;
+            if (k % cols != 0) k += cols - k % cols;
         }
     }
 
