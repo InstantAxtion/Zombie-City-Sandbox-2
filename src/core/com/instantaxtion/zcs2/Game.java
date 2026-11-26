@@ -1330,8 +1330,20 @@ public final class Game {
 
     /** The palette's height: a caption and its rows (the same for a tool whichever option is picked). */
     private float paletteFixedH() {
-        String[][] p = palette();
-        int rows = wrapped(p, (lastG != null ? lastG.width() : 0) - ui.dp(8)).size();
+        float wdt = (lastG != null ? lastG.width() : 0) - ui.dp(8);
+        int rows = wrapped(palette(), wdt).size();
+        // a tool with categories keeps the height of its tallest, so the map doesn't jump between them
+        String t = tool;
+        if (t.equals("police") || t.equals("army") || t.equals("build") && w.roles.role == Roles.GOD) {
+            String keep = palCat.get(t);
+            String[] cats = t.equals("build") ? new String[]{"def", "ground", "people"} : new String[]{"units", "veh", "sq"};
+            for (String c : cats) {
+                palCat.put(t, c);
+                rows = Math.max(rows, wrapped(palette(), wdt).size());
+            }
+            if (keep == null) palCat.remove(t);
+            else palCat.put(t, keep);
+        }
         return ui.dp(rows == 0 ? 30 : 22) + ui.dp(46) * rows + ui.dp(rows == 0 ? 0 : 8);
     }
 
@@ -1426,9 +1438,9 @@ public final class Game {
         bottomBars(g);
         if (stickOn()) joystick(g);
         if (replay == null && (w.orders.possessing || w.orders.driven >= 0)) {
-            // God's person or vehicle: the way back to watching
-            float bw = ui.dp(96), bh = ui.dp(36);
-            ui.bigButton("letgo", freeR - bw - ui.dp(10), freeB - bh - ui.dp(12), bw, bh, w.orders.possessing ? "Release" : "Let go", 0xE0B05010);
+            // God's person or vehicle: the way back to watching, over the stick
+            float bw = ui.dp(108), bh = ui.dp(36);
+            ui.bigButton("letgo", joyCX - bw / 2, joyCY - ui.dp(54) - bh - ui.dp(12), bw, bh, w.orders.possessing ? "Release" : "Let go", 0xE0B05010);
         }
         // the bottom of the map, stacked upwards: the radio, a note, the way to the outbreak
         float top = radioFeed(g, W);
@@ -2009,7 +2021,7 @@ public final class Game {
             for (Content.SquadT q : content.squads)
                 if (q.faction.equals(police ? "police" : "army")) {
                     items.add("t:" + q.id);
-                    items.add(q.name + (q.vehicle != null && !q.vehicle.flies ? " +" : ""));
+                    items.add(q.name);
                 }
         } else {
             for (Content.Unit u : content.units)
@@ -2095,18 +2107,41 @@ public final class Game {
                 out.add(row);
                 continue;
             }
+            int n = row.length / 2;
+            float[] bw = new float[n];
+            for (int i = 0; i < n; i++) bw[i] = Math.max(min, g.textWidth(row[i * 2 + 1], ts, true) + ui.dp(18));
+            // the fewest rows that hold them, greedily; then as even a split over that many rows as fits
+            java.util.List<Integer> cuts = new java.util.ArrayList<Integer>();
             int start = 0;
             float used = 0;
-            for (int i = 0; i < row.length / 2; i++) {
-                float bw = Math.max(min, g.textWidth(row[i * 2 + 1], ts, true) + ui.dp(18));
-                if (i > start && used + gap + bw > wdt) {
-                    out.add(java.util.Arrays.copyOfRange(row, start * 2, i * 2));
+            for (int i = 0; i < n; i++) {
+                if (i > start && used + gap + bw[i] > wdt) {
+                    cuts.add(i);
                     start = i;
                     used = 0;
                 }
-                used += (used > 0 ? gap : 0) + bw;
+                used += (used > 0 ? gap : 0) + bw[i];
             }
-            out.add(java.util.Arrays.copyOfRange(row, start * 2, row.length));
+            int rowsN = cuts.size() + 1;
+            if (rowsN > 1) {
+                int per = (n + rowsN - 1) / rowsN;
+                boolean fits = true;
+                for (int a = 0; a < n && fits; a += per) {
+                    float u = 0;
+                    for (int i = a; i < Math.min(n, a + per); i++) u += (i > a ? gap : 0) + bw[i];
+                    if (u > wdt) fits = false;
+                }
+                if (fits) {
+                    cuts.clear();
+                    for (int a = per; a < n; a += per) cuts.add(a);
+                }
+            }
+            int from = 0;
+            for (int c : cuts) {
+                out.add(java.util.Arrays.copyOfRange(row, from * 2, c * 2));
+                from = c;
+            }
+            out.add(java.util.Arrays.copyOfRange(row, from * 2, row.length));
         }
         return out;
     }

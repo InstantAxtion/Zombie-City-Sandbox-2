@@ -350,14 +350,13 @@ public final class Defences extends Module {
                     break;
                 case WIRE: {
                     float r = Math.max(8 * dp, REACH[WIRE] * z);
-                    g.color(0x60000000);
-                    g.strokeCircle(sx, sy, r, 2.4f * dp);
-                    g.color(0xFFC8CCD0);
-                    for (int a = 0; a < 12; a++) {
-                        double t0 = a * Math.PI / 6, t1 = (a + 1) * Math.PI / 6;
-                        float ra = a % 2 == 0 ? r * 0.85f : r;
-                        g.line(sx + (float) Math.cos(t0) * ra, sy + (float) Math.sin(t0) * ra,
-                                sx + (float) Math.cos(t1) * (a % 2 == 0 ? r : r * 0.85f), sy + (float) Math.sin(t1) * (a % 2 == 0 ? r : r * 0.85f), 1.2f * dp);
+                    // a coil of concertina wire: loops round the ring
+                    for (int pass = 0; pass < 2; pass++) {
+                        g.color(pass == 0 ? 0x70000000 : 0xFFD0D4D8);
+                        for (int q = 0; q < 10; q++) {
+                            double t = q * Math.PI / 5;
+                            g.strokeCircle(sx + (float) Math.cos(t) * r * 0.72f, sy + (float) Math.sin(t) * r * 0.72f, r * 0.3f, (pass == 0 ? 2.2f : 1f) * dp);
+                        }
                     }
                     break;
                 }
@@ -365,7 +364,7 @@ public final class Defences extends Module {
                     // the arc it covers, faint, then the nest
                     float r = REACH[MG] * z;
                     if (r > 30 * dp) {
-                        g.color(d.gunner >= 0 ? 0x30FFD040 : 0x18FFFFFF);
+                        g.color(d.gunner >= 0 ? 0x1CFFD040 : 0x10FFFFFF);
                         float a0 = (float) Math.atan2(d.fy, d.fx);
                         float[] p = new float[2 * 10];
                         p[0] = sx;
