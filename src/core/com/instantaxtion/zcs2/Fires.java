@@ -225,7 +225,7 @@ public final class Fires extends Module {
     /** It burned out: the building comes down, with the people still in it. */
     private void collapse(int b, int s) {
         Region r = w.r;
-        int lost = Math.min(w.sec.popIn[s], Math.max(0, r.bres[b] / 4));
+        int lost = Math.min(w.sec.popIn[s], Math.max(0, r.bres[b] / 20));
         w.sec.popIn[s] -= lost;
         w.stats.civDeaths += lost;
         w.stats.lossBy[4] += lost;

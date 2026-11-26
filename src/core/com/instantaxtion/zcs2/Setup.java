@@ -419,7 +419,7 @@ public final class Setup {
                 // in waves, a couple of days apart
                 h.waitT = (wave++) * 1440 * 2.2f;
             }
-            w.gov.level = 3;
+            w.gov.level = 2;
             originX = r.city().cx * 16f;
             originY = r.city().cy * 16f;
         }

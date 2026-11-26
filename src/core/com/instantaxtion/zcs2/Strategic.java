@@ -729,7 +729,7 @@ public final class Strategic {
             int z = w.sp.secZ[s] + w.sec.zIn[s];
             if (z >= 20) {
                 // the dead on the road catch some of them (a column keeps moving: only those at its edges)
-                float want = Math.min(z, c.count) * 0.004f * dt;
+                float want = Math.min(z, c.count) * 0.002f * dt;
                 int lost = Math.min(c.count, (int) want + (Rng.unit(w.seed, w.tick, k * 3L + 2) < want % 1f ? 1 : 0));
                 c.count -= lost;
                 int hadInf = Math.min(lost, c.infected);
