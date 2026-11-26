@@ -114,9 +114,20 @@ final class AndroidPlatform implements Platform {
         }
     }
 
+    /** (The game may run on the GL thread: anything that touches the UI goes to the UI thread.) */
     public void shareImage(GImage img) {
+        final android.graphics.Bitmap shot = ((AndroidImage) img).bitmap;
+        if (shot == null) return;
+        act.runOnUiThread(new Runnable() {
+            public void run() {
+                share(shot);
+            }
+        });
+    }
+
+    private void share(android.graphics.Bitmap shot) {
         try {
-            String url = MediaStore.Images.Media.insertImage(act.getContentResolver(), ((AndroidImage) img).bitmap,
+            String url = MediaStore.Images.Media.insertImage(act.getContentResolver(), shot,
                     "Zombie City 2 " + System.currentTimeMillis(), "Zombie City Sandbox 2");
             if (url == null) throw new IllegalStateException();
             Intent send = new Intent(Intent.ACTION_SEND);
@@ -129,5 +140,11 @@ final class AndroidPlatform implements Platform {
         }
     }
 
-    public void exit() { act.finish(); }
+    public void exit() {
+        act.runOnUiThread(new Runnable() {
+            public void run() {
+                act.finish();
+            }
+        });
+    }
 }

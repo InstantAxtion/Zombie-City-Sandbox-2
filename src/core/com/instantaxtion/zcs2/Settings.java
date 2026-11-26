@@ -8,6 +8,8 @@ public final class Settings {
     public int threads = 0; // 0 = automatic
     public int uiSize = 1; // 0 small, 1 normal, 2 large
     public boolean realistic = true;
+    /** Draw with the GPU (OpenGL ES) rather than Canvas. Takes effect on the next start. */
+    public boolean gpu = true;
     public static final int[] MAX_OPTIONS = {20000, 40000, 60000, 100000};
 
     public void load(Platform p) {
@@ -24,6 +26,7 @@ public final class Settings {
         threads = i(p, "threads", threads);
         uiSize = i(p, "uiSize", uiSize);
         realistic = b(p, "realistic", realistic);
+        gpu = b(p, "gpu", gpu);
     }
 
     public void save(Platform p) {
@@ -40,6 +43,7 @@ public final class Settings {
         p.setPref("threads", "" + threads);
         p.setPref("uiSize", "" + uiSize);
         p.setPref("realistic", "" + realistic);
+        p.setPref("gpu", "" + gpu);
     }
 
     private static int i(Platform p, String k, int def) {

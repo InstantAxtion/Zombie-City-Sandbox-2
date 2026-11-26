@@ -15,9 +15,13 @@ import java.io.FileWriter;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 
-public class MainActivity extends Activity {
+public class MainActivity extends Activity implements GLGameView.Fallback {
+    private Game game;
+    /** The view in use: the GPU one, or the Canvas one (one of these is null). */
+    private GLGameView glView;
     private GameView view;
     private AndroidPlatform platform;
+    private boolean resumed;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -25,16 +29,50 @@ public class MainActivity extends Activity {
         recordCrashes();
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         platform = new AndroidPlatform(this);
-        view = new GameView(this, platform);
-        setContentView(view);
+        game = new Game(platform);
+        // the GPU renderer unless the player chose Canvas, or the GPU failed its test on this phone before
+        boolean gpu = Boolean.parseBoolean(platform.pref("gpu", "true")) && !Boolean.parseBoolean(platform.pref("gpuFailed", "false"));
+        if (gpu) {
+            glView = new GLGameView(this, game, this);
+            setContentView(glView);
+        } else {
+            view = new GameView(this, game);
+            setContentView(view);
+        }
         immersive();
         showLastCrash();
+    }
+
+    private View current() {
+        return glView != null ? glView : view;
+    }
+
+    /** The GPU renderer failed (on the GL thread): remember it, and carry on with Canvas. */
+    @Override
+    public void gpuFailed(final String why) {
+        platform.setPref("gpuFailed", "true");
+        platform.setPref("gpu", "false");
+        runOnUiThread(new Runnable() {
+            public void run() {
+                if (glView == null) return;
+                GLGameView old = glView;
+                glView = null;
+                // stop the GL thread before the game moves to this one
+                old.onPause();
+                view = new GameView(MainActivity.this, game);
+                setContentView(view);
+                immersive();
+                if (resumed) view.resume();
+                game.settings.gpu = false;
+                game.toast("Switched to the Canvas renderer (" + (why.length() > 40 ? why.substring(0, 40) : why) + ")");
+            }
+        });
     }
 
     @SuppressWarnings("deprecation")
     private void immersive() {
         if (Build.VERSION.SDK_INT >= 19) {
-            view.setSystemUiVisibility(View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY | View.SYSTEM_UI_FLAG_FULLSCREEN
+            current().setSystemUiVisibility(View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY | View.SYSTEM_UI_FLAG_FULLSCREEN
                     | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
                     | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
         }
@@ -49,22 +87,34 @@ public class MainActivity extends Activity {
     @Override
     protected void onPause() {
         super.onPause();
-        view.pause();
-        view.game.onPause();
+        resumed = false;
+        if (glView != null) glView.pauseGame(); // saves on the GL thread, then pauses it
+        else {
+            view.pause();
+            game.onPause();
+        }
         platform.stopAudio();
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        view.resume();
+        resumed = true;
+        if (glView != null) glView.resumeGame();
+        else view.resume();
         platform.startAudio();
     }
 
     @Override
     @SuppressWarnings("deprecation")
     public void onBackPressed() {
-        if (!view.game.back()) super.onBackPressed();
+        if (glView != null) {
+            glView.back(new Runnable() {
+                public void run() {
+                    finish();
+                }
+            });
+        } else if (!game.back()) super.onBackPressed();
     }
 
     private File crashFile() {
