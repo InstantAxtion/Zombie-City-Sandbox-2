@@ -313,7 +313,10 @@ public final class Game {
             cam.zoom = z;
             cam.cx = w.r.city().cx * 16f + (float) Math.cos(menuT * 0.05f) * rad;
             cam.cy = w.r.city().cy * 16f + (float) Math.sin(menuT * 0.04f) * rad;
+            boolean nm = view.names;
+            view.names = false;
             view.draw(g, cam, 0.016f);
+            view.names = nm;
         } else {
             requestPreview();
             if (previewRegion() != null) {
@@ -324,7 +327,7 @@ public final class Game {
             }
         }
         // darken towards the bottom where the buttons are, and a little at the top behind the title
-        g.color(0x900A0D12);
+        g.color(0xB00A0D12);
         g.fillRect(0, 0, W, H);
         boolean land = W > H * 1.15f;
         float cx = land ? W * 0.3f : W / 2f;
