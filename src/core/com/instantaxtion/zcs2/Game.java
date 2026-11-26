@@ -149,16 +149,31 @@ public final class Game {
         settings.load(pf);
         audio = new AudioDirector(pf);
         try {
-            // a content.ini in the app's own files replaces the built-in one (modding)
-            InputStream in;
-            if (pf.exists("content.ini")) {
-                in = pf.openRead("content.ini");
-                customContent = true;
-            } else in = pf.openAsset("content.ini");
+            // the built-in content first (its data sections stay in use where a mod has none of its own)...
+            InputStream in = pf.openAsset("content.ini");
             content = Content.load(in);
             in.close();
         } catch (Exception e) {
-            error = "Couldn't read the game's content" + (customContent ? " (your content.ini)" : "") + ": " + e;
+            error = "Couldn't read the game's content: " + e;
+        }
+        if (content != null && pf.exists("content.ini")) {
+            // ...then a content.ini in the app's own files replaces it (modding); one that can't be read is left out,
+            // and Settings says why
+            try {
+                InputStream in = pf.openRead("content.ini");
+                Content mod = Content.load(in);
+                in.close();
+                content = mod;
+                customContent = true;
+            } catch (Exception e) {
+                dir.modMsg = "Your content.ini couldn't be read, so the built-in one is in use. " + e.getMessage();
+                try {
+                    InputStream in = pf.openAsset("content.ini");
+                    content = Content.load(in);
+                    in.close();
+                } catch (Exception ignored) {
+                }
+            }
         }
         loadCustomScenarios();
         ngSeed = System.currentTimeMillis() % 1000000;
@@ -2946,7 +2961,11 @@ public final class Game {
                 {"#", "The simulation"},
                 {"set:max", "People in detail", WorldView.fmt(s.maxIndividuals)},
                 {"set:threads", "Threads", s.threads == 0 ? "Auto (" + s.simThreads() + ")" : "" + s.threads},
-                {"set:gpu", "Renderer (next start)", s.gpu ? "GPU (test)" : "Canvas"}};
+                {"set:gpu", "Renderer (next start)", s.gpu ? "GPU (test)" : "Canvas"},
+                {"#", "Mods"},
+                {"mod:import", "Import a content.ini", "Import"},
+                {"mod:share", "Share the content.ini in use", "Share"},
+                {"mod:builtin", "Content in use", customContent ? "Yours (reset)" : "Built-in"}};
         boolean land = W > H * 1.15f;
         float colW = land ? (W - m * 3) / 2 : W - m * 2;
         float top = ui.dp(60), rh = ui.dp(46), sh = ui.dp(34);
@@ -2979,6 +2998,7 @@ public final class Game {
         }
         y += ui.dp(6);
         float ny = ui.wrap("More people in detail look better and cost more on a slow phone. The rest are still simulated, as counts.", m, y + ui.dp(16), W - m * 2, ui.dp(12), Ui.DIM, 3);
+        if (dir.modMsg != null) ny += ui.dp(8) + ui.wrap(dir.modMsg, m, y + ny + ui.dp(30), W - m * 2, ui.dp(12.5f), dir.modOk ? Ui.GOOD : 0xFFFF8A70, 8);
         g.restore();
         maxScroll = Math.max(0, y + ny + ui.dp(30) + scroll - H);
         g.color(Ui.SCREEN);

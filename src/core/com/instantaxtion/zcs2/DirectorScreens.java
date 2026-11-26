@@ -992,11 +992,105 @@ final class DirectorScreens {
         }
         return true;
     }
+    // ------------------------------------------------------------------ mods: content.ini in and out
+
+    /** What became of the last import (shown under Settings' Mods), and whether it went well. */
+    String modMsg;
+    boolean modOk;
+
+    private boolean modButton(String id) {
+        final Platform pf = g0.pf;
+        switch (id) {
+            case "mod:import":
+                pf.pickFile("A content.ini to play with", new Platform.FileAnswer() {
+                    public void file(final String name, final byte[] data) {
+                        g0.post(new Runnable() {
+                            public void run() {
+                                importContent(name, data);
+                            }
+                        });
+                    }
+                });
+                return true;
+            case "mod:share":
+                try {
+                    InputStream in = g0.customContent ? pf.openRead("content.ini") : pf.openAsset("content.ini");
+                    java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream();
+                    byte[] buf = new byte[8192];
+                    int k;
+                    while ((k = in.read(buf)) > 0) bo.write(buf, 0, k);
+                    in.close();
+                    pf.shareText("content.ini", bo.toString("UTF-8"));
+                } catch (Exception e) {
+                    g0.toast("Couldn't share it: " + e.getMessage());
+                }
+                return true;
+            case "mod:builtin":
+                if (!g0.customContent) {
+                    g0.toast("The built-in content is in use");
+                    return true;
+                }
+                pf.delete("content.ini");
+                modOk = true;
+                modMsg = "Your content.ini was removed. " + use(null);
+                return true;
+            default:
+                return true;
+        }
+    }
+
+    /**
+     * Checks an imported content.ini (every section, its triggers and scenarios: a mistake is told by line) and, if
+     * it reads, keeps it as the app's content.ini.
+     */
+    void importContent(String name, byte[] data) {
+        Content c;
+        try {
+            c = Content.load(new java.io.ByteArrayInputStream(data), false);
+        } catch (Exception e) {
+            modOk = false;
+            modMsg = "\"" + name + "\" wasn't imported: " + e.getMessage();
+            g0.toast("That content.ini has a mistake: see Settings");
+            return;
+        }
+        try {
+            OutputStream out = g0.pf.openWrite("content.ini");
+            out.write(data);
+            out.close();
+        } catch (Exception e) {
+            modOk = false;
+            modMsg = "Couldn't keep \"" + name + "\": " + e.getMessage();
+            return;
+        }
+        modOk = true;
+        modMsg = "Imported \"" + name + "\": " + c.units.size() + " people, " + c.weapons.size() + " weapons, " + c.vtypes.size() + " vehicles, "
+                + c.ztypes.size() + " kinds of the dead, " + c.scenarios.size() + " scenarios. " + use(data);
+        g0.toast("content.ini imported");
+    }
+
+    /** Puts new content in use now if no game is open (else from the next start); data null = the built-in. */
+    private String use(byte[] data) {
+        if (g0.w != null) return "It's used from the next start of the app.";
+        try {
+            InputStream builtin = g0.pf.openAsset("content.ini");
+            Content c = Content.load(builtin);
+            builtin.close();
+            if (data != null) c = Content.load(new java.io.ByteArrayInputStream(data));
+            g0.content = c;
+            g0.customContent = data != null;
+            g0.loadCustomScenarios();
+            return "It's in use now.";
+        } catch (Exception e) {
+            return "It's used from the next start of the app.";
+        }
+    }
+
     // ------------------------------------------------------------------ buttons
 
     /** Handles this class's buttons; false if the id isn't one of them. */
     boolean onButton(String id) {
         if (id.startsWith("rb:")) return replayButton(id);
+        if (id.startsWith("mod:")) return modButton(id);
         if (id.startsWith("rp:")) {
             g0.playReplay(id.substring(3));
             return true;

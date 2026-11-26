@@ -1956,6 +1956,55 @@ public final class Tests {
                 w.shutdown();
             }
         });
+        test("mods: a content.ini is imported (checked first, mistakes by line), shared, and reset", new T() {
+            public void run() throws Exception {
+                java.io.File dir = new java.io.File("build/test-mods");
+                dir.mkdirs();
+                for (java.io.File f : dir.listFiles()) f.delete();
+                String ini = builtinIni();
+                try {
+                    DesktopPlatform pf = new DesktopPlatform(dir);
+                    Game g = new Game(pf);
+                    check(!g.customContent && g.dir.modMsg == null, "a fresh game uses the built-in content");
+                    // a broken one: told by line, nothing kept
+                    pf.files.add(new String[]{"broken.ini", ini + "\n[unit odd]\nhp = lots\n"});
+                    g.dir.onButton("mod:import");
+                    frames(g, 2);
+                    check(!g.dir.modOk && g.dir.modMsg.contains("line ") && g.dir.modMsg.contains("[unit odd]"), "the mistake: " + g.dir.modMsg);
+                    check(!pf.exists("content.ini"), "a broken content.ini was kept");
+                    check(Data.presetCount() == 4, "checking it put its data in use");
+                    // a good one with a new preset: kept, and in use at once (no game open)
+                    String mod = ini + "\n[preset dry]\nindex = 4\nname = Dry Coast\nterrain = coast\nlevel = 0.24\nrelief = 0.4\nfeature = 1.2\nfeatureAt = 0.18\nfeatureCap = 0.2\nnaval = 1\n";
+                    pf.files.add(new String[]{"mine.ini", mod});
+                    g.dir.onButton("mod:import");
+                    frames(g, 2);
+                    check(g.dir.modOk && pf.exists("content.ini") && g.customContent, "not imported: " + g.dir.modMsg);
+                    check(Data.presetCount() == 5, "its preset isn't in use");
+                    // shared as it is
+                    g.dir.onButton("mod:share");
+                    check(mod.equals(pf.sharedText) && "content.ini".equals(pf.sharedName), "shared something else");
+                    // the next start reads it; a mod without the data sections keeps the built-in ones
+                    Game g2 = new Game(pf);
+                    check(g2.customContent && Data.presetCount() == 5, "the next start didn't use it");
+                    java.io.FileOutputStream o = new java.io.FileOutputStream(new java.io.File(dir, "content.ini"));
+                    o.write(ini.replaceAll("(?s)# =+ data.*", "").getBytes("UTF-8"));
+                    o.close();
+                    Game g3 = new Game(pf);
+                    check(g3.customContent && Data.presetCount() == 4 && Data.names("first").length > 10, "a mod without data sections");
+                    // a damaged one at start: the built-in content, and Settings says why
+                    o = new java.io.FileOutputStream(new java.io.File(dir, "content.ini"));
+                    o.write("[weapon x]\nrange = far\n".getBytes("UTF-8"));
+                    o.close();
+                    Game g4 = new Game(pf);
+                    check(!g4.customContent && g4.content != null && g4.dir.modMsg != null && g4.dir.modMsg.contains("line 1"), "a damaged mod at start: " + g4.dir.modMsg);
+                    // reset
+                    g2.dir.onButton("mod:builtin");
+                    check(!pf.exists("content.ini") && !g2.customContent, "not reset");
+                } finally {
+                    Content.load(new ByteArrayInputStream(ini.getBytes("UTF-8")));
+                }
+            }
+        });
         test("shared: challenge codes and your own scenarios", new T() {
             public void run() throws Exception {
                 java.io.File dir = new java.io.File("build/test-game");

@@ -60,4 +60,18 @@ public interface Platform {
     interface TextAnswer {
         void answer(String text);
     }
+
+    /**
+     * Asks the player for a file from elsewhere on the device (a content.ini to import: Android's file picker, a
+     * file chooser on a desktop). Its name and bytes come back later, maybe on another thread, or never if
+     * cancelled.
+     */
+    void pickFile(String title, FileAnswer answer);
+
+    /** Offers a text file to other apps (to share a content.ini: Android's share sheet). */
+    void shareText(String fileName, String text);
+
+    interface FileAnswer {
+        void file(String name, byte[] data);
+    }
 }

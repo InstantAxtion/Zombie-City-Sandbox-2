@@ -134,6 +134,11 @@ public final class Content {
     public long rulesHash;
 
     public static Content load(InputStream in) throws IOException {
+        return load(in, true);
+    }
+
+    /** Reads a content.ini; install = false only checks it (its data sections aren't put in use: an import being checked). */
+    public static Content load(InputStream in, boolean install) throws IOException {
         BufferedReader r = new BufferedReader(new InputStreamReader(in, "UTF-8"));
         List<String[]> heads = new ArrayList<String[]>();
         List<Map<String, String>> bodies = new ArrayList<Map<String, String>>();
@@ -171,6 +176,7 @@ public final class Content {
         }
         Content c = new Content();
         c.rulesHash = h;
+        c.installs = install;
         try {
             c.build(heads, bodies, lines);
         } catch (NumberFormatException e) {
@@ -185,6 +191,7 @@ public final class Content {
 
     /** Where the loader is (a section and its line), for its error messages. */
     private String where = "content.ini";
+    private boolean installs = true;
 
     private void at(int line, String kind, String id) {
         where = "line " + line + " [" + kind + " " + id + "]";
@@ -243,7 +250,7 @@ public final class Content {
         c.data.check();
         // the tables the map makers and the names read (they have no Content of their own): each kind this file has
         // replaces the one in use, so a mod without them keeps the built-in ones
-        Data.install(c.data);
+        if (installs) Data.install(c.data);
     }
 
     /** This file's data sections (names, buildings, presets, origins, outside help). */
