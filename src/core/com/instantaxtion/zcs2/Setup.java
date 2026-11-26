@@ -131,7 +131,14 @@ public final class Setup {
                 int stations = 0;
                 for (Region.Facility g : r.facilities) if (g.kind == Region.F_POLICE && g.settlement == f.settlement) stations++;
                 int officers = (int) (st.residents * perRes / Math.max(1, stations)) + 8;
-                fo.addSquadToPool(f, w.c.squadT("patrol"), Math.max(2, officers / 4));
+                int patrols = Math.max(2, officers / 4);
+                // a station with a few cars has a K9 team and a traffic unit among them (same number of people)
+                for (String special : new String[]{"k9", "traffic"})
+                    if (patrols >= 4 && w.c.squadT(special) != null) {
+                        fo.addSquadToPool(f, w.c.squadT(special), 1);
+                        patrols--;
+                    }
+                fo.addSquadToPool(f, w.c.squadT("patrol"), patrols);
                 hq = (st.kind == Region.S_CITY) && hqDone.add(st.id);
                 if (hq) {
                     f.name = st.name + " Police HQ";

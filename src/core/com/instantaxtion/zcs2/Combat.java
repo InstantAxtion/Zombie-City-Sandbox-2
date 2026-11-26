@@ -72,13 +72,20 @@ final class Combat {
         if (wp == null) return;
         float x = e.x[i], y = e.y[i], tx = e.x[t], ty = e.y[t];
         float dx = tx - x, dy = ty - y, d = (float) Math.sqrt(dx * dx + dy * dy);
-        if (d > wp.range * 1.05f) return;
-        e.aimT[i] = (1f / wp.rof) * (0.85f + w.rng.nextFloat() * 0.3f);
+        boolean armed = e.armed(i);
+        ArmedAI ai = w.aai;
+        if (d > wp.range * 1.05f * (armed ? ai.rangeMul(i) : 1)) return;
+        float rof = wp.rof;
+        // rof is the sustained rate; between reloads a magazine fires faster, so the average comes out the same
+        if (armed && !grenade && wp.mag > 0 && ai.has(i)) rof *= 1 + wp.reload * wp.rof / wp.mag;
+        e.aimT[i] = (1f / rof) * (0.85f + w.rng.nextFloat() * 0.3f);
         e.face[i] = (float) Math.atan2(dy, dx);
         if (!grenade) {
             e.ammo[i]--;
             if (e.ammo[i] < 0) e.ammo[i] = 0;
-        } else e.infT[i] = 9;
+            if (armed) ai.fired(i);
+        } else if (armed) ai.threw(i);
+        else e.infT[i] = 9;
         w.fx.add(Effects.FLASH, x, y, (float) Math.atan2(dy, dx), 0, 0.06f);
         w.fx.sound(wp.sound, x, y);
         w.fx.noise(x, y, wp.blast > 0 ? 40 : 30, 6);
@@ -94,9 +101,10 @@ final class Combat {
             blast(tx, ty, wp.blast, wp.blastDmg, i, faction);
             return;
         }
-        float aim = u.aim * Ranks.aim(e.rank[i]);
-        float near = 1 - d / wp.range;
+        float aim = u.aim * Ranks.aim(e.rank[i]) * (armed ? ai.aimMul(i) : 1);
+        float near = Math.max(0, 1 - d / wp.range);
         float crowd = w.sp.zombiesNear(e, x, y, 50, 4) >= 3 ? 0.7f : 1f;
+        byte doc = armed ? ai.doctrine(i) : ArmedAI.D_NONE;
         float hit = Math.min(0.97f, (0.45f + 0.55f * aim) * (0.55f + 0.45f * near) * crowd);
         boolean hits = w.rng.chance(hit);
         float ex = tx, ey = ty;
@@ -105,8 +113,12 @@ final class Combat {
             ey += (w.rng.nextFloat() - 0.5f) * 24;
         }
         w.fx.add(Effects.TRACER, x, y, ex, ey, 0.08f);
+        // army doctrine: sustained fire suppresses a pack (they stumble and bunch where the rounds land)
+        if (doc == ArmedAI.D_ARMY && wp.rof >= 2.5f) suppress(ex, ey, t);
         if (!hits) return;
         float head = wp.head * aim * (0.5f + 0.5f * near) * massFactor() * crowd;
+        // police and SWAT training: aimed shots to the head up close
+        if ((doc == ArmedAI.D_POLICE || doc == ArmedAI.D_SWAT) && d < 60) head *= 1 + (doc == ArmedAI.D_SWAT ? 0.5f : 0.35f) * (1 - d / 60);
         if (w.rng.chance(head)) {
             if ((e.flags[t] & Ents.F_HELMET) != 0) {
                 e.flags[t] &= ~Ents.F_HELMET;
@@ -116,11 +128,28 @@ final class Combat {
             killZombie(t, i, faction, CAUSE_GUN);
         } else {
             e.hp[t] -= wp.dmg * 0.2f * (0.8f + w.rng.nextFloat() * 0.4f);
-            // a hit staggers
-            e.vx[t] *= 0.3f;
-            e.vy[t] *= 0.3f;
+            // a hit staggers (police rounds and training: stopping power, it can't bite for a moment)
+            boolean stop = doc == ArmedAI.D_POLICE || doc == ArmedAI.D_SWAT;
+            e.vx[t] *= stop ? 0.1f : 0.3f;
+            e.vy[t] *= stop ? 0.1f : 0.3f;
+            if (stop) e.aimT[t] = Math.max(e.aimT[t], 0.3f);
             if (e.hp[t] <= 0) killZombie(t, i, faction, CAUSE_GUN);
             else w.fx.blood(tx, ty, 1);
+        }
+    }
+
+    /** Rounds landing in a pack slow the dead round where they land (a few at most). */
+    private void suppress(float x, float y, int t) {
+        Ents e = w.e;
+        int c = w.sp.cellOf(x, y), n = 0;
+        for (int j = w.sp.zStart[c]; j < w.sp.zEnd[c] && n < 6; j++) {
+            int o = w.sp.zList[j];
+            if (o == t || e.loc[o] != Ents.FREE) continue;
+            float dx = e.x[o] - x, dy = e.y[o] - y;
+            if (dx * dx + dy * dy > 18 * 18) continue;
+            e.vx[o] *= 0.5f;
+            e.vy[o] *= 0.5f;
+            n++;
         }
     }
 
