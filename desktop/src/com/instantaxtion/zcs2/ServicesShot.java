@@ -259,7 +259,7 @@ public final class ServicesShot {
                 }
                 Navy.Boat bt = w.navy.boats.isEmpty() ? null : w.navy.boats.get(0);
                 System.out.println("  boats " + w.navy.boats.size() + " trips " + w.navy.boatTrips + " carried " + w.navy.boatCarried + " rescued " + w.navy.rescued);
-                shot(w, "boats_1_shore", bt != null ? bt.x : x, bt != null ? bt.y : y, 0.45f);
+                shot(w, "boats_1_shore", bt != null ? bt.x : x, bt != null ? bt.y : y, 0.9f);
                 break;
             }
             case "checkpoint": {
@@ -310,13 +310,25 @@ public final class ServicesShot {
                 break;
             }
             case "rescue": {
+                // (by road: the helicopters stay on their pads for this one)
+                c.setRule("airAssault", 0);
                 w = game(size, seed, "sandbox");
+                c.setRule("airAssault", 1);
                 Region.Settlement ct = w.r.city();
-                int s = w.r.sectorOfPx(ct.cx * 16f + 900, ct.cy * 16f + 400);
-                for (int k = 0; k < 30 && w.sec.popIn[s] < 50; k++) s = w.r.sectorOfPx(ct.cx * 16f + 900 - k * 120, ct.cy * 16f + 400);
+                // a street of a few hundred people in the city, the dead indoors among them
+                int s = -1;
+                float bd = Float.MAX_VALUE;
+                for (int k = 0; k < w.sec.n; k++) {
+                    if (w.sec.settlement[k] != ct.id || w.sec.popIn[k] < 120 || w.sec.popIn[k] > 1500) continue;
+                    float d = (float) Math.hypot(w.sec.cx(k) - ct.cx * 16f, w.sec.cy(k) - ct.cy * 16f);
+                    if (d < bd) {
+                        bd = d;
+                        s = k;
+                    }
+                }
                 float x = w.sec.cx(s), y = w.sec.cy(s);
                 steps(w, 20, x, y);
-                w.sec.zIn[w.sec.touch(s)] += Math.max(60, w.sec.popIn[s]);
+                w.sec.zIn[w.sec.touch(s)] += Math.max(40, w.sec.popIn[s] / 2);
                 boolean shotBus = false;
                 for (int k = 0; k < 20 * 300; k++) {
                     cam(w, x, y);
@@ -340,14 +352,18 @@ public final class ServicesShot {
             case "engineers": {
                 w = game(size, seed, "sandbox");
                 Region.Settlement ct = w.r.city();
-                int n = w.r.roads.nearestNode(ct.cx * 16f + 1200, ct.cy * 16f, 2000);
-                float x = w.r.roads.nx[n], y = w.r.roads.ny[n];
-                // along the street a little, off the junction
-                for (int a = 0; a < 8; a++) {
-                    float px = x + (float) Math.cos(a * 0.785f) * 64, py = y + (float) Math.sin(a * 0.785f) * 64;
-                    if (Tile.roadish(w.r.tileAtPx(px, py))) {
-                        x = px;
-                        y = py;
+                RoadGraph rg = w.r.roads;
+                int n = rg.nearestNode(ct.cx * 16f + 1200, ct.cy * 16f, 2000);
+                float x = rg.nx[n], y = rg.ny[n];
+                // half way along a street from that junction, off the junction itself
+                for (int k = rg.adjStart[n]; k < rg.adjStart[n + 1]; k++) {
+                    int ed = rg.adjEdge[k];
+                    if (rg.ebridge[ed]) continue;
+                    int o = rg.ea[ed] == n ? rg.eb[ed] : rg.ea[ed];
+                    float mx = (rg.nx[n] + rg.nx[o]) / 2, my = (rg.ny[n] + rg.ny[o]) / 2;
+                    if (Tile.roadish(w.r.tileAtPx(mx, my))) {
+                        x = mx;
+                        y = my;
                         break;
                     }
                 }
@@ -358,6 +374,7 @@ public final class ServicesShot {
                 for (int k = 0; k < 20 * 600 && !w.engineers.jobs.isEmpty(); k++) {
                     cam(w, x, y);
                     w.step();
+                    if (w.engineers.jobs.isEmpty()) break;
                     Engineers.Job j = w.engineers.jobs.get(0);
                     if (!shotWork && j.done > j.need * 0.4f) {
                         shotWork = true;
@@ -389,10 +406,10 @@ public final class ServicesShot {
                 for (int k = 0; k < 8 * 144 && w.services.aid.isEmpty(); k++) w.step();
                 System.out.println("  camps " + w.society.camps.size() + " aid convoys " + w.services.aid.size() + " at t=" + (int) w.time);
                 if (!w.services.aid.isEmpty()) {
-                    for (int k = 0; k < 6; k++) w.step();
+                    for (int k = 0; k < 6 && w.services.aid.size() > 0 && w.services.aid.get(0).ri < w.services.aid.get(0).route.length - 4; k++) w.step();
                     Services.Aid ad = w.services.aid.get(0);
-                    w.setStrategic(false);
-                    shot(w, "aid_1_convoy", ad.x, ad.y, 0.12f);
+                    System.out.println("  convoy at (" + (int) ad.x + ", " + (int) ad.y + "), " + w.services.aid.size() + " on the road");
+                    shot(w, "aid_1_convoy", ad.x, ad.y, 0.25f);
                 }
                 for (int k = 0; k < 4 * 144; k++) {
                     w.setStrategic(true);

@@ -987,6 +987,8 @@ public final class Services extends Module {
         public int settlement;
         public float ax, ay, bx, by, t;
         public int escorts;
+        /** The road it follows (x, y pairs, from the town's way out to the town it leads to). */
+        public float[] pts = new float[0];
     }
 
     public final List<Corridor> corridors = new ArrayList<Corridor>();
@@ -997,11 +999,35 @@ public final class Services extends Module {
         float width = w.rule("corridorWidth", 1500);
         for (Corridor c : corridors) {
             if (c.escorts <= 0) continue;
-            float dx = c.bx - c.ax, dy = c.by - c.ay, l2 = dx * dx + dy * dy + 1;
-            float u = Math.max(0, Math.min(1, ((x - c.ax) * dx + (y - c.ay) * dy) / l2));
-            if (dist(x, y, c.ax + dx * u, c.ay + dy * u) < width) return true;
+            float[] p = c.pts;
+            for (int k = 0; k + 3 < p.length; k += 2) {
+                float dx = p[k + 2] - p[k], dy = p[k + 3] - p[k + 1], l2 = dx * dx + dy * dy + 1;
+                float u = Math.max(0, Math.min(1, ((x - p[k]) * dx + (y - p[k + 1]) * dy) / l2));
+                if (dist(x, y, p[k] + dx * u, p[k + 1] + dy * u) < width) return true;
+            }
         }
         return false;
+    }
+
+    /** The road from (ax, ay) to town d, as at most 48 points (a straight line if there is no road). */
+    private float[] roadPts(float ax, float ay, Region.Settlement d) {
+        RoadGraph g = w.r.roads;
+        int a = g.nearestNode(ax, ay, w.reach(1500)), b = d.hubNode >= 0 ? d.hubNode : g.nearestNode(d.cx * 16f, d.cy * 16f, w.reach(1500));
+        int[] rt = a >= 0 && b >= 0 ? g.route(a, b) : null;
+        if (rt == null || rt.length < 2) return new float[]{ax, ay, d.cx * 16f, d.cy * 16f};
+        int step = Math.max(1, (rt.length + 46) / 47);
+        int n = (rt.length - 1) / step + 1 + ((rt.length - 1) % step != 0 ? 1 : 0);
+        float[] p = new float[n * 2];
+        int k = 0;
+        for (int i = 0; i < rt.length; i += step) {
+            p[k++] = g.nx[rt[i]];
+            p[k++] = g.ny[rt[i]];
+        }
+        if (k < p.length) {
+            p[k++] = g.nx[rt[rt.length - 1]];
+            p[k] = g.ny[rt[rt.length - 1]];
+        }
+        return p;
     }
 
     /** Opens an escorted corridor out of a town being evacuated (the mayor's, or the player's order). */
@@ -1041,6 +1067,7 @@ public final class Services extends Module {
         Region.Settlement d = w.r.settlements.get(dest);
         c.bx = d.cx * 16f;
         c.by = d.cy * 16f;
+        c.pts = roadPts(c.ax, c.ay, d);
         c.escorts = got;
         corridors.add(c);
         w.news.headline((player ? "Order" : "Police") + ": an escorted evacuation corridor is open from " + s.name + " to " + d.name + " (" + got + " officers on the road).", p[0], p[1]);
@@ -1097,18 +1124,20 @@ public final class Services extends Module {
         Sectors sec = w.sec;
         int st = sec.settlement[s];
         Content.VType bus = w.c.vtype("bus");
-        Content.SquadT t = w.c.squadT("riot");
-        if (t == null) t = w.c.squadT("patrol");
-        if (bus == null || t == null || st < 0) return;
+        Content.SquadT riot = w.c.squadT("riot"), patrol = w.c.squadT("patrol"), t = null;
+        if (bus == null || patrol == null || st < 0) return;
         Region.Facility police = null, depot = null;
         float bp = Float.MAX_VALUE, bd = Float.MAX_VALUE;
         float x = sec.cx(s), y = sec.cy(s);
         for (Region.Facility f : w.r.facilities) {
             if (f.settlement != st || !w.strat.online(f.id)) continue;
             float d = dist(f.x, f.y, x, y);
-            if (f.kind == Region.F_POLICE && f.pool != null && f.pool[t.units[0].index] >= 4 && d < bp) {
+            // riot police where the station has them, else a patrol
+            Content.SquadT ft = riot != null && f.pool != null && f.pool[riot.units[0].index] >= 4 ? riot : patrol;
+            if (f.kind == Region.F_POLICE && f.pool != null && f.pool[ft.units[0].index] >= 4 && d < bp) {
                 bp = d;
                 police = f;
+                t = ft;
             }
             if ((f.kind == Region.F_DEPOT || f.kind == Region.F_POLICE) && d < bd) {
                 bd = d;
@@ -1624,6 +1653,8 @@ public final class Services extends Module {
         o.writeInt(corridors.size());
         for (Corridor c : corridors) {
             o.writeInt(c.settlement); o.writeFloat(c.ax); o.writeFloat(c.ay); o.writeFloat(c.bx); o.writeFloat(c.by); o.writeFloat(c.t); o.writeInt(c.escorts);
+            o.writeInt(c.pts.length);
+            for (float f : c.pts) o.writeFloat(f);
         }
         o.writeInt(rescues.size());
         for (Rescue r : rescues) {
@@ -1686,6 +1717,8 @@ public final class Services extends Module {
         for (int k = 0; k < n; k++) {
             Corridor c = new Corridor();
             c.settlement = in.readInt(); c.ax = in.readFloat(); c.ay = in.readFloat(); c.bx = in.readFloat(); c.by = in.readFloat(); c.t = in.readFloat(); c.escorts = in.readInt();
+            c.pts = new float[in.readInt()];
+            for (int j = 0; j < c.pts.length; j++) c.pts[j] = in.readFloat();
             corridors.add(c);
         }
         rescues.clear();
@@ -1716,31 +1749,49 @@ public final class Services extends Module {
 
     // ================================================================== drawing
 
-    private final float[] tri = new float[6];
+    private final float[] tri = new float[6], plane = new float[12], wing = new float[8];
 
     @Override
     public void draw(Gfx g, Camera cam, WorldView view) {
         float z = cam.zoom, dp = cam.dp;
         // escorted corridors: a green road out, with the police along it
         for (Corridor c : corridors) {
-            float ax = cam.toScreenX(c.ax), ay = cam.toScreenY(c.ay), bx = cam.toScreenX(c.bx), by = cam.toScreenY(c.by);
-            if (Math.max(ax, bx) < -50 || Math.min(ax, bx) > cam.sw + 50 || Math.max(ay, by) < -50 || Math.min(ay, by) > cam.sh + 50) continue;
-            g.color(0x90000000);
-            g.line(ax, ay, bx, by, 6 * dp);
-            g.color(0xD040D070);
-            int dashes = Math.max(4, (int) (dist(ax, ay, bx, by) / (14 * dp)));
-            for (int k = 0; k < dashes; k += 2) {
-                float u0 = k / (float) dashes, u1 = (k + 1) / (float) dashes;
-                g.line(ax + (bx - ax) * u0, ay + (by - ay) * u0, ax + (bx - ax) * u1, ay + (by - ay) * u1, 3 * dp);
+            float[] p = c.pts;
+            int n = p.length / 2;
+            if (n < 2) continue;
+            float minX = Float.MAX_VALUE, maxX = -Float.MAX_VALUE, minY = Float.MAX_VALUE, maxY = -Float.MAX_VALUE;
+            for (int k = 0; k < n; k++) {
+                float sx = cam.toScreenX(p[k * 2]), sy = cam.toScreenY(p[k * 2 + 1]);
+                minX = Math.min(minX, sx);
+                maxX = Math.max(maxX, sx);
+                minY = Math.min(minY, sy);
+                maxY = Math.max(maxY, sy);
             }
-            for (int k = 1; k < 5 && c.escorts > 0; k++) {
-                float u = k / 5f, px = ax + (bx - ax) * u, py = ay + (by - ay) * u;
+            if (maxX < -50 || minX > cam.sw + 50 || maxY < -50 || minY > cam.sh + 50) continue;
+            // along the road: a dark edge, green dashes, and the police posted along it
+            for (int pass = 0; pass < 2; pass++)
+                for (int k = 0; k + 1 < n; k++) {
+                    float ax = cam.toScreenX(p[k * 2]), ay = cam.toScreenY(p[k * 2 + 1]), bx = cam.toScreenX(p[k * 2 + 2]), by = cam.toScreenY(p[k * 2 + 3]);
+                    if (pass == 0) {
+                        g.color(0x90000000);
+                        g.line(ax, ay, bx, by, 7 * dp);
+                    } else {
+                        g.color(0xE040D070);
+                        g.line(ax, ay, bx, by, 3.5f * dp);
+                    }
+                }
+            int every = Math.max(1, n / 6);
+            for (int k = every; k < n - 1 && c.escorts > 0; k += every) {
+                float px = cam.toScreenX(p[k * 2]), py = cam.toScreenY(p[k * 2 + 1]);
                 g.color(0xFF101010);
-                g.fillCircle(px, py, 5 * dp);
+                g.fillCircle(px, py, 5.5f * dp);
                 g.color(0xFF2050C8);
-                g.fillCircle(px, py, 3.6f * dp);
+                g.fillCircle(px, py, 4 * dp);
+                g.color(0xFFE04040);
+                g.fillCircle(px - 1.2f * dp, py - 1.2f * dp, 1.3f * dp);
             }
-            view.label(g, "Escorted corridor (" + c.escorts + " officers)", (ax + bx) / 2, (ay + by) / 2 - 10 * dp, 10, 0xFFB8FFC8, Gfx.ALIGN_CENTER, true);
+            float lx = cam.toScreenX(p[(n / 2) * 2]), ly = cam.toScreenY(p[(n / 2) * 2 + 1]);
+            view.labelAlways(g, "Escorted corridor (" + c.escorts + " officers)", lx, ly - 12 * dp, 10, 0xFFB8FFC8, Gfx.ALIGN_CENTER, true);
         }
         // aid convoys: white trucks with a red cross
         for (Aid a : aid) {
@@ -1780,22 +1831,44 @@ public final class Services extends Module {
             if (x > -60 * dp && y > -60 * dp && x < cam.sw + 60 * dp && y < cam.sh + 60 * dp) {
                 float L = Math.max(16 * dp, 70 * z) * (1 + u * 0.4f);
                 g.save();
-                g.translate(x + L * 0.25f * u, y + L * 0.5f * u);
-                g.rotate(departHead);
-                g.color(0x50000000);
-                g.fillRect(-L / 2, -L / 14, L, L / 7);
-                g.fillRect(-L / 10, -L / 2, L / 5, L);
-                g.restore();
-                g.save();
                 g.translate(x, y);
                 g.rotate(departHead);
+                // an airliner: fuselage, swept wings, tailplane
+                plane[0] = L * 0.5f; plane[1] = 0; plane[2] = L * 0.42f; plane[3] = -L * 0.06f; plane[4] = -L * 0.45f; plane[5] = -L * 0.05f;
+                plane[6] = -L * 0.5f; plane[7] = 0; plane[8] = -L * 0.45f; plane[9] = L * 0.05f; plane[10] = L * 0.42f; plane[11] = L * 0.06f;
+                wing[0] = L * 0.12f; wing[1] = -L * 0.04f; wing[2] = -L * 0.12f; wing[3] = -L * 0.5f; wing[4] = -L * 0.22f; wing[5] = -L * 0.5f; wing[6] = -L * 0.06f; wing[7] = -L * 0.04f;
+                g.color(0xFF101418);
+                g.save();
+                g.scale(1.08f);
+                g.fillPoly(plane, 6);
+                g.restore();
                 g.color(0xFFF4F4F8);
-                g.fillRect(-L / 2, -L / 14, L, L / 7);
-                g.fillRect(-L / 10, -L / 2, L / 5, L);
+                g.fillPoly(wing, 4);
+                for (int k = 1; k < 8; k += 2) wing[k] = -wing[k];
+                g.fillPoly(wing, 4);
+                g.fillRect(-L * 0.5f, -L * 0.16f, L * 0.1f, L * 0.32f);
+                g.fillPoly(plane, 6);
                 g.color(0xFF2050A0);
-                g.fillRect(-L / 2, -L / 28, L * 0.15f, L / 14);
+                g.fillRect(-L * 0.42f, -L * 0.02f, L * 0.8f, L * 0.04f);
                 g.restore();
                 if (z < 1.2f) view.label(g, "Civilian flight", x, y - L * 0.6f - 6 * dp, 9.5f, 0xFFFFFFFF, Gfx.ALIGN_CENTER, false);
+            }
+        }
+        // rescue buses and ambulances: what they're doing, close in
+        if (z > 0.3f) {
+            for (Rescue r : rescues) {
+                if (!live(r.bus, r.busUid)) continue;
+                float x = cam.toScreenX(w.veh.x[r.bus]), y = cam.toScreenY(w.veh.y[r.bus]);
+                if (x < -40 * dp || y < -40 * dp || x > cam.sw + 40 * dp || y > cam.sh + 40 * dp) continue;
+                view.labelAlways(g, r.phase == 0 ? "Rescue bus" + (w.veh.crewN[r.bus] > 0 ? " (" + w.veh.crewN[r.bus] + " aboard)" : "") : "Rescue bus, " + w.veh.crewN[r.bus] + " carried out",
+                        x, y - 16 * dp, 9.5f, 0xFFFFF0B0, Gfx.ALIGN_CENTER, false);
+            }
+            for (Ambulance a : ambs) {
+                if (!live(a.v, a.uid)) continue;
+                float x = cam.toScreenX(w.veh.x[a.v]), y = cam.toScreenY(w.veh.y[a.v]);
+                if (x < -40 * dp || y < -40 * dp || x > cam.sw + 40 * dp || y > cam.sh + 40 * dp) continue;
+                String what = a.phase == A_DRIVE ? "Ambulance" : a.phase == A_SCENE ? "Paramedics at work" : w.veh.crewN[a.v] > 2 ? "Ambulance, to hospital" : "Ambulance";
+                view.label(g, what, x, y - 14 * dp, 9, 0xFFFFE0E0, Gfx.ALIGN_CENTER, false);
             }
         }
         // air tasks: a line from the helicopter to where it's going
@@ -1809,7 +1882,7 @@ public final class Services extends Module {
                 g.line(x, y, tx, ty, 1.5f * dp);
                 g.color(0xC0FFE070);
                 g.strokeCircle(tx, ty, 9 * dp, 2 * dp);
-                if (z > 0.15f) view.label(g, T_NAMES[a.kind] + (w.veh.crewN[a.v] > 0 ? " (" + w.veh.crewN[a.v] + " aboard)" : ""), x, y - 22 * dp, 9.5f, 0xFFFFF0B0, Gfx.ALIGN_CENTER, false);
+                if (z > 0.15f) view.labelAlways(g, T_NAMES[a.kind] + (w.veh.crewN[a.v] > 0 ? " (" + w.veh.crewN[a.v] + " aboard)" : ""), x, y - 22 * dp, 9.5f, 0xFFFFF0B0, Gfx.ALIGN_CENTER, false);
             }
     }
 

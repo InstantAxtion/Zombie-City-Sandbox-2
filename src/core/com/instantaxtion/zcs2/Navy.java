@@ -567,7 +567,7 @@ public final class Navy extends Module {
         for (Boat b : boats) {
             float sx = cam.toScreenX(b.x), sy = cam.toScreenY(b.y);
             if (sx < -60 * dp || sy < -60 * dp || sx > cam.sw + 60 * dp || sy > cam.sh + 60 * dp) continue;
-            float L = Math.max(10 * dp, 34 * z), W = Math.max(4 * dp, 12 * z);
+            float L = Math.max(16 * dp, 40 * z), W = Math.max(6 * dp, 14 * z);
             g.save();
             g.translate(sx, sy);
             g.rotate(b.head);
@@ -586,7 +586,7 @@ public final class Navy extends Module {
             g.color(0xFFF4F4F4);
             g.fillRect(-L * 0.25f, -W * 0.3f, L * 0.3f, W * 0.6f);
             g.restore();
-            if (z > 0.15f) view.label(g, "Coast guard" + (b.aboard > 0 ? " (" + b.aboard + " aboard)" : ""), sx, sy - W - 8 * dp, 9.5f, 0xFFFFE0C0, Gfx.ALIGN_CENTER, false);
+            if (z > 0.15f) view.labelAlways(g, "Coast guard" + (b.aboard > 0 ? " (" + b.aboard + " aboard)" : ""), sx, sy - W - 8 * dp, 9.5f, 0xFFFFE0C0, Gfx.ALIGN_CENTER, false);
         }
         for (Flight f : flights) {
             float sx = cam.toScreenX(f.x), sy = cam.toScreenY(f.y);
