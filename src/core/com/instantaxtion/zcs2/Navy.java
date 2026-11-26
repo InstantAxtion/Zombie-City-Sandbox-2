@@ -31,6 +31,9 @@ public final class Navy extends Module {
     public int rescued, airlifts;
     private float targetT;
 
+    /** Sectors at or by the water (rivers and lakes too): a coastal town's waterfront. */
+    private boolean[] wet;
+
     public Navy(World w) {
         super(w);
         coastal = new boolean[w.sec.n];
@@ -51,6 +54,16 @@ public final class Navy extends Module {
             coastal[s] = water > all / 25 && water < all * 9 / 10;
             if (deep == 0) coastal[s] = false;
             deepHere[s] = deep > 0;
+        }
+        wet = new boolean[w.sec.n];
+        for (int s = 0; s < w.sec.n; s++) {
+            int x0 = (s % w.sec.sw) * Region.SECT, y0 = (s / w.sec.sw) * Region.SECT;
+            for (int y = y0 - 8; y < y0 + Region.SECT + 8 && !wet[s]; y += 4)
+                for (int x = x0 - 8; x < x0 + Region.SECT + 8; x += 4)
+                    if (Tile.water(r.t(x, y))) {
+                        wet[s] = true;
+                        break;
+                    }
         }
         // a shore with deep water off it (in the next sector out) is reachable by boat too
         for (int s = 0; s < w.sec.n; s++) {
@@ -214,9 +227,11 @@ public final class Navy extends Module {
         float rate = w.c.rule("coastGuard", 0.0015f);
         Sectors sec = w.sec;
         for (int s = 0; s < sec.n; s++) {
-            if (!coastal[s] || sec.popIn[s] <= 0 || sec.zIn[s] > 0) continue;
+            if (sec.popIn[s] <= 0 || sec.zIn[s] > 0) continue;
             int st = sec.settlement[s];
             if (st < 0 || !w.gov.evacuating(st)) continue;
+            // boats reach a town on the coast from its waterfront (the sectors at or next to the water)
+            if (!coastal[s] && !(wet[s] && w.roles.coastal(w.r.settlements.get(st)))) continue;
             float m = sec.popIn[s] * rate * dt;
             int k = Math.min(sec.popIn[s], (int) m + (Rng.unit(w.seed, w.tick, s * 3L + 99) < m % 1f ? 1 : 0));
             if (k <= 0) continue;

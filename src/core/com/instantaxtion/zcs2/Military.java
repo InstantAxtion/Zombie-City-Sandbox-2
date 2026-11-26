@@ -124,8 +124,18 @@ public final class Military {
         Content.FormationT t = w.c.formationT(formationId);
         if (t == null || w.r.entryNodes.isEmpty()) return null;
         Forces.Formation f;
-        boolean train = !w.r.railEntries.isEmpty() && (guardsArrived + regularsArrived + wavesArrived) % 2 == 1;
-        if (train) {
+        int k = guardsArrived + regularsArrived + wavesArrived;
+        boolean train = !w.r.railEntries.isEmpty() && k % 2 == 1;
+        // every third unit from outside is flown in, while an airfield is ours
+        Region.Facility field = null;
+        if (k % 3 == 2 && !t.faction.equals("police"))
+            for (Region.Facility a : w.r.facilities)
+                if ((a.kind == Region.F_AIRBASE || a.kind == Region.F_AIRPORT) && w.strat.online(a.id) && (field == null || a.kind == Region.F_AIRBASE)) field = a;
+        if (field != null) {
+            f = w.forces.createFormation(t, field.x, field.y, true);
+            w.navy.airlifts++;
+            w.news.count("flownIn", "Airlift: the " + f.name + " is flown in to " + field.name + "|Airlift: %d more units flown in from outside", 1, field.x, field.y);
+        } else if (train) {
             // by train over the border
             int re = w.r.railEntries.get(w.rng.nextInt(w.r.railEntries.size()));
             f = w.forces.createFormation(t, w.r.rails.nx[re], w.r.rails.ny[re], true);
