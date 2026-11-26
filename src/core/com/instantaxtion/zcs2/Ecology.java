@@ -291,6 +291,8 @@ public final class Ecology extends Module {
         Strategic st = w.strat;
         Sectors sec = w.sec;
         int min = (int) w.c.rule("hordeSplit", 3000);
+        // (a national map: the few people in the fields aren't worth a horde's going to, as in Strategic)
+        float arriveAt = w.rule("hordeArrivePeople", 0);
         int n = st.hordes.size();
         for (int k = 0; k < n; k++) {
             Strategic.Horde h = st.hordes.get(k);
@@ -306,7 +308,7 @@ public final class Ecology extends Module {
                     xx |= SectorIndex.D - 1;
                     continue;
                 }
-                if (sec.popIn[t] == 0) continue;
+                if (sec.popIn[t] == 0 || sec.popIn[t] < arriveAt) continue;
                 int dx = t % sec.sw - sx, dy = t / sec.sw - sy;
                 float d = (float) Math.sqrt(dx * dx + dy * dy);
                 if (d > 24) continue;
@@ -339,7 +341,9 @@ public final class Ecology extends Module {
             h.keepT = o.keepT = 1800;
             Integer strn = hordeStrain.get(h.id);
             if (strn != null) hordeStrain.put(o.id, strn);
-            w.news.radio("Recon: the horde has split in two, one half for " + place(best) + ", the other for " + place(second), h.x, h.y, News.COMMAND);
+            String pa = place(best), pb = place(second);
+            w.news.radio(pa.equals(pb) ? "Recon: the horde has split in two, both halves making for " + pa + " by different ways"
+                    : "Recon: the horde has split in two, one half for " + pa + ", the other for " + pb, h.x, h.y, News.COMMAND);
         }
     }
 
