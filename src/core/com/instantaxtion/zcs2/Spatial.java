@@ -44,6 +44,7 @@ public final class Spatial implements ActiveSet.Paged {
     private final boolean dense;
 
     public Spatial(Region r, ActiveSet act) {
+        if (r.W != r.H) throw new IllegalStateException("the spatial grid assumes a square map"); // (national maps are square too)
         cw = r.px() / CELL + 1;
         ch = cw;
         int ns = r.secW * r.secH;

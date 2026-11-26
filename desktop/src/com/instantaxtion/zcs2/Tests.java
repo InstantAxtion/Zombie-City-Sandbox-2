@@ -2984,7 +2984,7 @@ public final class Tests {
                     int a = r.nextInt(g.nodeCount), b = r.nextInt(g.nodeCount);
                     float dx = g.nx[a] - g.nx[b], dy = g.ny[a] - g.ny[b];
                     if (dx * dx + dy * dy < g.shortTrip * g.shortTrip) continue;
-                    int[] p1 = g.route(a, b), p2 = g.route2(a, b);
+                    int[] p1 = g.astar(a, b), p2 = g.route2(a, b);
                     check(p1 != null && p2 != null && p2[0] == a && p2[p2.length - 1] == b, "no route " + a + " -> " + b);
                     float c1 = g.routeCost(p1), c2 = g.routeCost(p2);
                     check(c2 > 0, "the two-level route isn't a route");

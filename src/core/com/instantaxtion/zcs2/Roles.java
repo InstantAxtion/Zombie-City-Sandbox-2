@@ -458,7 +458,20 @@ public final class Roles extends Module {
         // junctions in the district next to streets outside it, scored by how close the dead are
         RoadGraph g = w.r.roads;
         java.util.List<float[]> posts = new java.util.ArrayList<float[]>();
-        for (int n = 0; n < g.nodeCount; n++) {
+        int[] cand = null;
+        if (w.r.nation != null) {
+            // (a national map: the junctions in the district's own sectors, by chunk, not the whole country's)
+            int[] byChunk = g.nodeChunks(ActiveSet.PX);
+            java.util.List<Integer> l = new java.util.ArrayList<Integer>();
+            for (int s : w.sec.idx.settlementSectors(f.settlement))
+                if (inDistrict(s))
+                    for (int i = g.nodeChunkFrom(s % w.sec.sw, s / w.sec.sw); i < g.nodeChunkTo(s % w.sec.sw, s / w.sec.sw); i++) l.add(byChunk[i]);
+            cand = new int[l.size()];
+            for (int i = 0; i < cand.length; i++) cand[i] = l.get(i);
+            java.util.Arrays.sort(cand);
+        }
+        for (int ci = 0; ci < (cand != null ? cand.length : g.nodeCount); ci++) {
+            int n = cand != null ? cand[ci] : ci;
             int s = w.r.sectorOfPx(g.nx[n], g.ny[n]);
             if (!inDistrict(s)) continue;
             boolean edge = false;

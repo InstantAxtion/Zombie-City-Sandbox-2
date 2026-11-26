@@ -215,7 +215,7 @@ public final class ScaleProbe {
             float dx = g.nx[x] - g.nx[y], dy = g.ny[x] - g.ny[y];
             if (dx * dx + dy * dy < g.shortTrip * g.shortTrip) continue;
             long q0 = g.searched, a0 = System.nanoTime();
-            int[] p1 = g.route(x, y);
+            int[] p1 = g.astar(x, y);
             long q1 = g.searched, a1 = System.nanoTime();
             int[] p2 = g.route2(x, y);
             long a2 = System.nanoTime();

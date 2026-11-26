@@ -362,7 +362,8 @@ public final class Undead extends Module {
         if (bx1 < 0) return;
         Region r = w.r;
         r.rebuildNav(bx0 - 1, by0 - 1, bx1 + 1, by1 + 1);
-        w.sec.connectivity();
+        if (r.nation != null) w.sec.connectivity(bx0 - 1, by0 - 1, bx1 + 1, by1 + 1); // (only the sectors round it)
+        else w.sec.connectivity();
         r.closeBarricadedRoads(bx0, by0, bx1, by1);
         bx0 = by0 = Integer.MAX_VALUE;
         bx1 = by1 = -1;

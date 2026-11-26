@@ -372,6 +372,46 @@ public final class Dispatch {
     private int[] badList = new int[64];
     private int badN;
 
+    private int[] edgeCache;
+    private long edgeTick = -1;
+    private boolean[] edgeMark;
+
+    /**
+     * National maps: the junctions in sectors next to an infected one (the only ones a post can stand on), ascending,
+     * from the road graph's junctions by chunk (a sector is a chunk) instead of every junction in the country.
+     */
+    private int[] edgeNodes(RoadGraph g) {
+        if (edgeTick == w.tick && edgeCache != null) return edgeCache;
+        edgeTick = w.tick;
+        int[] byChunk = g.nodeChunks(ActiveSet.PX);
+        if (edgeMark == null) edgeMark = new boolean[w.sec.n];
+        int[] secs = new int[64];
+        int ns = 0;
+        for (int k = 0; k < badN; k++)
+            for (int d = 0; d < 8; d++) {
+                int t = w.sec.neighbour(badList[k], d);
+                if (t < 0 || bad[t] || edgeMark[t]) continue;
+                edgeMark[t] = true;
+                if (ns == secs.length) secs = java.util.Arrays.copyOf(secs, ns * 2);
+                secs[ns++] = t;
+            }
+        int total = 0;
+        for (int k = 0; k < ns; k++) {
+            int cx = secs[k] % w.sec.sw, cy = secs[k] / w.sec.sw;
+            total += g.nodeChunkTo(cx, cy) - g.nodeChunkFrom(cx, cy);
+        }
+        int[] out = new int[total];
+        int m = 0;
+        for (int k = 0; k < ns; k++) {
+            int cx = secs[k] % w.sec.sw, cy = secs[k] / w.sec.sw;
+            for (int i = g.nodeChunkFrom(cx, cy); i < g.nodeChunkTo(cx, cy); i++) out[m++] = byChunk[i];
+            edgeMark[secs[k]] = false;
+        }
+        java.util.Arrays.sort(out);
+        edgeCache = out;
+        return out;
+    }
+
     /** A cordon of posts round each town's infected sectors, on the roads, held by police. */
     private void cordons() {
         // which sectors are infected
@@ -402,7 +442,10 @@ public final class Dispatch {
             sx /= sn;
             sy /= sn;
             List<Post> mine = new ArrayList<Post>();
-            for (int n = 0; n < g.nodeCount; n++) {
+            int[] cand = w.r.nation != null ? edgeNodes(g) : null;
+            int nc = cand != null ? cand.length : g.nodeCount;
+            for (int ci = 0; ci < nc; ci++) {
+                int n = cand != null ? cand[ci] : ci;
                 if (g.nset[n] != st) continue;
                 int s = w.r.sectorOfPx(g.nx[n], g.ny[n]);
                 if (bad[s]) continue;
