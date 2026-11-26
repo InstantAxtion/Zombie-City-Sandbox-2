@@ -1697,5 +1697,187 @@ public final class Tests {
                 w.shutdown();
             }
         });
+        scaleTests();
+    }
+
+    // ------------------------------------------------------------------ real scale (docs/SCALE_PLAN.md P0 and P5)
+
+    private static Nation country;
+    private static long countryBestMs = Long.MAX_VALUE;
+
+    /** The Country-size nation every scale test looks at (built once). */
+    static Nation country() {
+        if (country == null) {
+            country = NationGen.generate(28672, RegionGen.COAST, 3, 2);
+            countryBestMs = Math.min(countryBestMs, country.buildMs);
+        }
+        return country;
+    }
+
+    private static void scaleTests() {
+        test("perf: the once-a-second update stays cheap", new T() {
+            public void run() {
+                World w = game(7, 2304, "sandbox", 2);
+                w.setStrategic(true);
+                for (int k = 0; k < 20; k++) w.step();
+                long t0 = System.nanoTime();
+                for (int k = 0; k < 144; k++) w.step();
+                double ms = (System.nanoTime() - t0) / 1e6 / 144;
+                System.out.printf("        %.2f ms per update, %d sectors (a game day of fast-forward in %.2f s)%n", ms, w.sec.n, ms * 144 / 1000);
+                check(ms < 25, "the once-a-second update takes " + ms + " ms");
+                w.shutdown();
+            }
+        });
+        test("nation: the same seed builds the same nation", new T() {
+            public void run() {
+                Nation a = country();
+                Nation b = NationGen.generate(28672, RegionGen.COAST, 3, 1); // and on one thread
+                countryBestMs = Math.min(countryBestMs, b.buildMs);
+                check(a.checksum() == b.checksum(), "same seed, same nation");
+                check(NationGen.generate(20480, RegionGen.COAST, 4, 2).checksum() != NationGen.generate(20480, RegionGen.COAST, 5, 2).checksum(), "another seed, another nation");
+            }
+        });
+        test("nation: built at 28,672 in under 3 s, in under 40 MB", new T() {
+            public void run() {
+                Nation n = country();
+                if (countryBestMs >= 3000) countryBestMs = Math.min(countryBestMs, NationGen.generate(28672, RegionGen.COAST, 3, 2).buildMs);
+                long mem = n.memoryBytes();
+                System.out.printf("        built in %d ms, %.1f MB, %d junctions, %d roads%n", countryBestMs, mem / 1048576.0, n.roads.nodeCount, n.roads.edgeCount);
+                check(countryBestMs < 3000, "built in " + countryBestMs + " ms");
+                check(mem < 40L << 20, "nation memory " + (mem >> 20) + " MB");
+            }
+        });
+        test("nation: a capital of a million, cities of 150-450k, everyone counted", new T() {
+            public void run() {
+                Nation n = country();
+                Region.Settlement cap = n.capital();
+                check(cap.capital && cap.residents >= 1000000 && cap.residents <= 1400000, "capital " + cap.residents);
+                // real size: about 225 km2 for the capital, cities 7-13 km across, towns 1.6-4 km
+                float capKm = cap.radius * 2 / Nation.KM;
+                check(capKm > 13 && capKm < 22, "the capital is " + capKm + " km across");
+                long[] bySet = new long[n.settlements.size()];
+                for (int s = 0; s < n.residents.length; s++) if (n.secSettlement[s] >= 0) bySet[n.secSettlement[s]] += n.residents[s];
+                int cities = 0, towns = 0;
+                for (Region.Settlement s : n.settlements) {
+                    check(bySet[s.id] == s.residents, s.name + ": sectors hold " + bySet[s.id] + ", not " + s.residents);
+                    float km = s.radius * 2 / Nation.KM;
+                    if (s.kind == Region.S_CITY && !s.capital) {
+                        cities++;
+                        check(s.residents >= 150000 && s.residents <= 450000, s.name + " has " + s.residents);
+                        check(km > 5 && km < 14, s.name + " is " + km + " km across");
+                    }
+                    if (s.kind == Region.S_TOWN) {
+                        towns++;
+                        check(s.residents >= 5000 && s.residents <= 40000, s.name + " has " + s.residents);
+                        check(km > 1 && km < 5, s.name + " is " + km + " km across");
+                    }
+                }
+                check(cities == 5 && towns >= 40, cities + " cities, " + towns + " towns");
+                int total = n.totalResidents();
+                check(total > 3000000 && total < 6000000, "the country has " + total);
+            }
+        });
+        test("nation: every place can be reached by road, on every preset", new T() {
+            public void run() {
+                for (int p = 0; p < RegionGen.PRESETS.length; p++) {
+                    Nation n = p == RegionGen.COAST ? country() : NationGen.generate(20480, p, 10 + p, 2);
+                    RoadGraph g = n.roads;
+                    boolean[] seen = new boolean[g.nodeCount];
+                    int[] q = new int[g.nodeCount];
+                    int h = 0, t = 0;
+                    q[t++] = n.capital().hubNode;
+                    seen[q[0]] = true;
+                    while (h < t) {
+                        int a = q[h++];
+                        for (int i = g.adjStart[a]; i < g.adjStart[a + 1]; i++) {
+                            int b = g.other(g.adjEdge[i], a);
+                            if (!seen[b]) {
+                                seen[b] = true;
+                                q[t++] = b;
+                            }
+                        }
+                    }
+                    for (Region.Settlement s : n.settlements) check(s.hubNode >= 0 && seen[s.hubNode], RegionGen.PRESETS[p] + ": no road to " + s.name);
+                    check(t == g.nodeCount, RegionGen.PRESETS[p] + ": " + (g.nodeCount - t) + " junctions cut off");
+                    for (Region.Facility f : n.facilities) check(f.node >= 0, f.name + " has no junction");
+                    check(n.entryNodes.size() >= 2 && n.railEntries.size() >= 1, "roads and rails from abroad");
+                    for (int e : n.entryNodes) check(seen[e], "a road from abroad is cut off");
+                }
+            }
+        });
+        test("nation: facilities follow the population", new T() {
+            public void run() {
+                Nation n = country();
+                int[][] count = new int[n.settlements.size()][Region.FKINDS];
+                for (Region.Facility f : n.facilities) if (f.settlement >= 0) count[f.settlement][f.kind]++;
+                float wantPolice = 0, wantHospitals = 0, wantFire = 0;
+                int police = 0, hospitals = 0, fire = 0;
+                for (Region.Settlement s : n.settlements) {
+                    if (s.kind != Region.S_CITY && s.kind != Region.S_TOWN) continue;
+                    int pop = s.residents;
+                    wantPolice += Math.max(1, pop / 40000f);
+                    wantHospitals += Math.max(pop >= 8000 ? 1 : 0, pop / 100000f);
+                    wantFire += Math.max(1, pop / 30000f);
+                    int[] c = count[s.id];
+                    police += c[Region.F_POLICE];
+                    hospitals += c[Region.F_HOSPITAL];
+                    fire += c[Region.F_FIRE];
+                    check(c[Region.F_POLICE] >= 1 && c[Region.F_POLICE] <= Math.max(1, pop / 40000f * 1.25f) && c[Region.F_POLICE] >= pop / 40000f * 0.75f,
+                            s.name + " (" + pop + "): " + c[Region.F_POLICE] + " police stations");
+                    check(c[Region.F_FIRE] >= 1 && c[Region.F_FIRE] >= pop / 30000f * 0.75f && c[Region.F_FIRE] <= Math.max(1, pop / 30000f * 1.25f),
+                            s.name + " (" + pop + "): " + c[Region.F_FIRE] + " fire stations");
+                    check(c[Region.F_HOSPITAL] <= Math.max(1, pop / 100000f * 1.5f) && c[Region.F_HOSPITAL] >= (pop >= 8000 ? 1 : 0),
+                            s.name + " (" + pop + "): " + c[Region.F_HOSPITAL] + " hospitals");
+                    if (s.kind == Region.S_CITY)
+                        for (int k : new int[]{Region.F_POWER, Region.F_WATER, Region.F_PHONE, Region.F_HALL, Region.F_STATION})
+                            check(c[k] == 1, s.name + ": " + c[k] + " " + Region.FNAMES[k]);
+                }
+                int capPolice = count[0][Region.F_POLICE];
+                check(capPolice >= 24 && capPolice <= 36, "the capital has " + capPolice + " police stations");
+                // one per so many people, and at least one in every town
+                check(Math.abs(police - wantPolice) <= wantPolice * 0.2f, police + " police stations, " + wantPolice + " wanted");
+                check(Math.abs(hospitals - wantHospitals) <= wantHospitals * 0.3f, hospitals + " hospitals, " + wantHospitals + " wanted");
+                check(Math.abs(fire - wantFire) <= wantFire * 0.2f, fire + " fire stations, " + wantFire + " wanted");
+                // every facility on its own dry block, with its building inside it
+                for (Region.Facility f : n.facilities) {
+                    if (f.building < 0) continue;
+                    int b = f.building;
+                    check(n.bx[b] >= f.bx0 && n.by[b] >= f.by0 && n.bx[b] + n.bw[b] - 1 <= f.bx1 && n.by[b] + n.bh[b] - 1 <= f.by1, f.name + " is outside its block");
+                    check(!Nation.wet(n.coverAt(n.bx[b], n.by[b])), f.name + " stands in water");
+                }
+                for (int i = 0; i < n.facilities.size(); i++)
+                    for (int j = i + 1; j < n.facilities.size(); j++) {
+                        Region.Facility a = n.facilities.get(i), b = n.facilities.get(j);
+                        if (a.building < 0 || b.building < 0) continue;
+                        check(a.bx1 < b.bx0 || b.bx1 < a.bx0 || a.by1 < b.by0 || b.by1 < a.by0, a.name + " and " + b.name + " share a block");
+                    }
+            }
+        });
+        test("nation: two-level routes cost within 10% of plain A*", new T() {
+            public void run() {
+                Nation n = country();
+                RoadGraph g = n.roads;
+                Rng r = new Rng(11);
+                int k = 0;
+                double worst = 0;
+                while (k < 25) {
+                    int a = r.nextInt(g.nodeCount), b = r.nextInt(g.nodeCount);
+                    float dx = g.nx[a] - g.nx[b], dy = g.ny[a] - g.ny[b];
+                    if (dx * dx + dy * dy < g.shortTrip * g.shortTrip) continue;
+                    int[] p1 = g.route(a, b), p2 = g.route2(a, b);
+                    check(p1 != null && p2 != null && p2[0] == a && p2[p2.length - 1] == b, "no route " + a + " -> " + b);
+                    float c1 = g.routeCost(p1), c2 = g.routeCost(p2);
+                    check(c2 > 0, "the two-level route isn't a route");
+                    worst = Math.max(worst, c2 / c1);
+                    check(c2 <= c1 * 1.10f, "two-level " + c2 + " against " + c1);
+                    k++;
+                }
+                System.out.printf("        worst %.4f of plain A*%n", worst);
+                // the per-chunk edge buckets hold every edge, in every chunk it crosses
+                int c = (n.capital().cy / Nation.SECT) * g.chunkW + n.capital().cx / Nation.SECT;
+                check(g.chunkEdgeStart[c + 1] > g.chunkEdgeStart[c], "the capital's centre chunk has roads");
+                check(g.chunkEdge.length >= g.edgeCount, "every edge in a bucket");
+            }
+        });
     }
 }
