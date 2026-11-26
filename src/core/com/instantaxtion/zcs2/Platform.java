@@ -21,6 +21,12 @@ public interface Platform {
 
     void delete(String name);
 
+    /** Renames a file in the app's own files, replacing any file already called {@code to}. */
+    boolean rename(String from, String to);
+
+    /** The names of the app's own files (not directories). */
+    String[] list();
+
     String pref(String key, String def);
 
     void setPref(String key, String value);
@@ -38,7 +44,10 @@ public interface Platform {
     /** Leaves the app. */
     void exit();
 
-    /** Asks the player to type something (a challenge code). The answer comes back later, or never if cancelled. */
+    /**
+     * Asks the player to type something (a challenge code). The answer comes back later, or never if cancelled,
+     * and may come on another thread: the game hands it to its own thread with {@code Game.post}.
+     */
     void askText(String title, String current, TextAnswer answer);
 
     interface TextAnswer {

@@ -16,7 +16,7 @@ How the sequel works, and how it answers the lessons written down in the first g
 | Entity state | Booleans (dead, removed, listed), lazy sweeps | One location per slot, changed only by four methods |
 | Behaviour versions | `if (civic >= N)` everywhere | None: saves are versioned, the rules aren't |
 | Content | Code (40,000 lines of landmark drawing) | `assets/content.ini` for every type and scenario |
-| Tests | 25, about 12 minutes, Android stubs | 16, about a minute, no stubs (the core has no Android code) |
+| Tests | 25, about 12 minutes, Android stubs | 42, a few minutes, no stubs (the core has no Android code) |
 
 ## Code map
 
@@ -36,7 +36,7 @@ All in one package, `com.instantaxtion.zcs2`. The core (`src/core`) never touche
 | Checking | `Audit`, `SaveIO` | Invariants and state hashes; saves |
 | Presentation | `Gfx`, `GImage`, `Platform`, `Camera`, `MapPainter`, `WorldView`, `Ui`, `Icons`, `Game`, `Settings`, `Texts` | Drawing at every zoom, the interface, the screens |
 | Sound | `Synth`, `Mixer` | Every effect and the score, synthesised; mixing |
-| Android | `MainActivity`, `GameView`, `AndroidGfx`, `AndroidImage`, `AndroidPlatform` | The shell |
+| Android | `MainActivity`, `GameView`, `GLGameView`, `AndroidGfx`, `GLGfx`, `AndroidImage`, `AndroidPlatform` | The shell: Canvas by default, the GPU renderer if chosen |
 | Desktop | `DesktopMain`, `DesktopGfx`, `DesktopPlatform`, `Tests`, `Probe`, `Shot`, `UiShot` | Window, tests and tools |
 
 ## A step (1/20 s)
@@ -177,6 +177,21 @@ Pass-and-play: up to four players share one game, each in a role (Roles.players,
 aside wherever any player holds the job (Roles.holds). Adding a player and handing over are recorded actions, so
 a replay of a shared game is still exact. Results on a challenge are shared as a checked code
 (`ZC2R~challenge~name~lost~minutes~finished~check`) and compared on the report.
+
+## Threads on the phone
+
+The game lives on one thread: the UI thread with Canvas, GLSurfaceView's thread with the GPU renderer. Touches
+and the back button are handed to it (`queueEvent` for GL). Text typed into a dialog arrives on the UI thread, so
+`Game.ask` hands each answer to the game's thread with `Game.post`, carried out at the start of the next frame.
+New games, loads and replays build in the background; each load has a number, so a load cancelled with the back
+button (or replaced by another) is thrown away and its world shut down when it finishes. The first finger down
+(and a cancel) resets the game's idea of which fingers are down, so a lost UP can't leave every later tap
+counted as a second finger. An exception in a frame is caught: the game saves (unless it happened mid-step, when
+the world may be half-changed), shows what happened and offers the menu. It also saves every three minutes of
+play. The sound runs on its own thread, one at a time (a quick pause and resume can't leave two mixing).
+
+The simulation steps inside the frame within a 28 ms budget; when a fast-forward speed is more than the phone can
+do, the rest is dropped rather than queued, and the speed button shows the rate actually reached.
 
 ## What's next
 

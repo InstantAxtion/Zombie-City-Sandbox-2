@@ -77,7 +77,8 @@ public final class Vehicles {
         alt[v] = 0;
         ammo[v] = t.weapon != null ? t.weapon.ammo : 0;
         kills[v] = 0;
-        cargo[v] = 0;
+        // police cars and army trucks carry a couple of spare loads of ammunition for their squad
+        cargo[v] = t.seats > 0 && !t.flies && ("police".equals(t.faction) || "army".equals(t.faction)) ? 2 : 0;
         target[v] = -1;
         siren[v] = false;
         returning[v] = false;
@@ -213,12 +214,57 @@ public final class Vehicles {
             }
     }
 
-    /** The squad is gone: drive home empty. */
+    /** The squad is gone: the vehicle is left where it is (and towed back to its pool later). */
     public void release(int v) {
         squad[v] = -1;
         if (!usable(v)) return;
         if (crewN[v] > 0) alightAll(v);
-        goHome(v);
+        if (type(v).flies) {
+            goHome(v);
+            return;
+        }
+        state[v] = V_ARRIVED;
+        route[v] = null;
+        spd[v] = 0;
+        siren[v] = false;
+        timer[v] = 0;
+    }
+
+    /** Back into its home's pool of vehicles (off the map). */
+    void toPool(int v) {
+        if (home[v] >= 0 && home[v] < w.r.facilities.size() && usable(v)) {
+            Region.Facility f = w.r.facilities.get(home[v]);
+            if (f.vpool != null && type[v] < f.vpool.length) f.vpool[type[v]]++;
+        }
+        if (squad[v] >= 0 && squad[v] < w.sq.list.size()) {
+            Squads.Squad s = w.sq.get(squad[v]);
+            if (s.vehicle == v) s.vehicle = -1;
+        }
+        if (crewN[v] > 0) alightAll(v);
+        squad[v] = -1;
+        route[v] = null;
+        state[v] = V_NONE;
+    }
+
+    /** A squad's car or truck with nobody in it and no squad that still means to use it. */
+    private boolean abandoned(int v) {
+        if (crewN[v] > 0 || role[v] != R_SQUAD) return false;
+        Content.VType t = type(v);
+        if (t.flies || t.tracked || t.seats == 0 || !"police".equals(t.faction) && !"army".equals(t.faction)) return false;
+        if (squad[v] < 0 || squad[v] >= w.sq.list.size()) return true;
+        Squads.Squad s = w.sq.get(squad[v]);
+        return !s.alive || s.vehicle != v;
+    }
+
+    /** Stops where it is (nobody left aboard to drive on). */
+    public void halt(int v) {
+        if (state[v] == V_DRIVE || state[v] == V_PARKING) {
+            state[v] = V_ARRIVED;
+            route[v] = null;
+            spd[v] = 0;
+            siren[v] = false;
+            timer[v] = 0;
+        }
     }
 
     public void goHome(int v) {
@@ -358,6 +404,11 @@ public final class Vehicles {
                     timer[v] += dt;
                     spd[v] = 0;
                     mobCheck(v, dt);
+                    // left at a scene by a squad that's gone: towed back to its pool
+                    if (state[v] == V_ARRIVED && timer[v] > 120 && abandoned(v)) {
+                        toPool(v);
+                        continue;
+                    }
             }
             if (state[v] != V_NONE && state[v] != V_WRECK) weapons(v, dt);
         }
@@ -425,30 +476,49 @@ public final class Vehicles {
         // progress along this road
         float px = x[v] - ax, py = y[v] - ay;
         float along = px * ux + py * uy;
-        if (along >= len - 6) {
+        // the next road, if there is one: its lane decides where the corner is
+        boolean hasNext = ri[v] + 2 < rt.length;
+        float u2x = 0, u2y = 0, lane2 = 8;
+        if (hasNext) {
+            int c2 = rt[ri[v] + 2];
+            float cx2 = g.nx[c2] - bx, cy2 = g.ny[c2] - by, l2 = (float) Math.sqrt(cx2 * cx2 + cy2 * cy2) + 0.001f;
+            u2x = cx2 / l2;
+            u2y = cy2 / l2;
+            int e2 = g.edgeBetween(b, c2);
+            lane2 = e2 >= 0 ? Math.min(g.ehalf[e2] * 0.45f, 14) : 8;
+        }
+        // on to the next road: at the corner of the two lanes (inside a right turn that's before the junction),
+        // when close to the junction, or once already heading down the next road
+        float toBx = bx - x[v], toBy = by - y[v];
+        float dB = (float) Math.sqrt(toBx * toBx + toBy * toBy);
+        boolean next = along >= len - Math.max(6, lane2 + 4) || dB < lane + 10;
+        if (!next && hasNext && along >= len - 60) {
+            float along2 = -toBx * u2x - toBy * u2y;
+            if (along2 > -lane2 && dB < 60) next = true;
+        }
+        // a watchdog: moving but getting nowhere on this road for too long
+        if (!next && spd[v] > 5) {
+            seg[v] += dt;
+            if (seg[v] > 8 + len / Math.max(20f, t.speed * 0.35f)) next = true;
+        }
+        if (next) {
             ri[v]++;
-            if (ri[v] >= rt.length - 1) {
-                arrive(v);
-                return;
-            }
+            seg[v] = 0;
+            if (ri[v] >= rt.length - 1) arrive(v);
             return;
         }
         // steer at a point ahead in my lane
         float look = 22 + spd[v] * 0.15f;
         float tx, ty;
         float off = Math.abs(px * uy - py * ux - lane) ;
-        if (along + look < len || ri[v] + 2 >= rt.length) {
+        if (along + look < len || !hasNext) {
             float s = Math.min(len, Math.max(0, along) + look);
             tx = ax + ux * s + rx;
             ty = ay + uy * s + ry;
         } else {
-            int c2 = rt[ri[v] + 2];
-            float cx2 = g.nx[c2] - bx, cy2 = g.ny[c2] - by, l2 = (float) Math.sqrt(cx2 * cx2 + cy2 * cy2) + 0.001f;
             float over = along + look - len;
-            int e2 = g.edgeBetween(b, c2);
-            float lane2 = e2 >= 0 ? Math.min(g.ehalf[e2] * 0.45f, 14) : 8;
-            tx = bx + cx2 / l2 * over - cy2 / l2 * lane2;
-            ty = by + cy2 / l2 * over + cx2 / l2 * lane2;
+            tx = bx + u2x * over - u2y * lane2;
+            ty = by + u2y * over + u2x * lane2;
         }
         if (off > 60) {
             tx = ax + rx;
@@ -458,31 +528,40 @@ public final class Vehicles {
         float want = (float) Math.atan2(hy, hx);
         float diff = angle(want - head[v]);
         float turnRate = 2.6f + 20f / (spd[v] + 10);
+        // a barricade across the road: stop at it, and find a way round (the road is closed to routing)
+        float ahead = t.length * 0.5f + 10;
+        float hfx = (float) Math.cos(head[v]), hfy = (float) Math.sin(head[v]);
+        boolean wallOnRoad = w.r.tileAtPx(x[v] + ux * ahead, y[v] + uy * ahead) == Tile.BARRICADE
+                || w.r.tileAtPx(tx, ty) == Tile.BARRICADE;
+        boolean wallInFront = w.r.tileAtPx(x[v] + hfx * ahead, y[v] + hfy * ahead) == Tile.BARRICADE;
+        if (wallInFront && !wallOnRoad && Math.abs(diff) > 0.5f) {
+            // facing a barricade but the road goes elsewhere: turn on the spot
+            spd[v] = 0;
+            head[v] += Math.max(-3 * dt, Math.min(3 * dt, diff));
+            return;
+        }
+        if (wallOnRoad || wallInFront) {
+            spd[v] = 0;
+            stuck[v] += dt;
+            if (stuck[v] > 1.5f) {
+                stuck[v] = 0;
+                // a fresh route that still starts at the wall, or no way round: get out here
+                if (timer[v] < 6 && ri[v] == 0) arrive(v);
+                else if (!driveTo(v, destX[v], destY[v], 0) || throughBarricade(v)) arrive(v);
+            }
+            return;
+        }
         head[v] += Math.max(-turnRate * dt, Math.min(turnRate * dt, diff));
         // speed: road kind, corners, traffic ahead, the dead in the way
         float limit = t.speed * (g.ekind[e >= 0 ? e : 0] == RoadGraph.HIGHWAY ? 1f : g.ekind[e >= 0 ? e : 0] == RoadGraph.AVENUE ? 0.72f : 0.58f);
         if (siren[v]) limit *= 1.15f;
         if (Math.abs(diff) > 0.5f) limit *= 0.45f;
-        if (ri[v] + 2 < rt.length && len - along < 50) {
-            int c2 = rt[ri[v] + 2];
-            float cx2 = g.nx[c2] - bx, cy2 = g.ny[c2] - by, l2 = (float) Math.sqrt(cx2 * cx2 + cy2 * cy2) + 0.001f;
-            float dot = (cx2 * ux + cy2 * uy) / l2;
+        if (hasNext && len - along < 50) {
+            float dot = u2x * ux + u2y * uy;
             if (dot < 0.7f) limit *= 0.5f;
         }
-        if (ri[v] + 2 >= rt.length && len - along < 60) limit *= 0.5f;
+        if (!hasNext && len - along < 60) limit *= 0.5f;
         float fx = (float) Math.cos(head[v]), fy = (float) Math.sin(head[v]);
-        // a barricade across the road: stop at it, and find a way round (the road is closed to routing)
-        float ahead = t.length * 0.5f + 10;
-        if (w.r.tileAtPx(x[v] + fx * ahead, y[v] + fy * ahead) == Tile.BARRICADE) {
-            spd[v] = 0;
-            stuck[v] += dt;
-            if (stuck[v] > 1.5f) {
-                stuck[v] = 0;
-                w.r.closeBarricadedRoads();
-                if (!driveTo(v, destX[v], destY[v], 0) || throughBarricade(v)) arrive(v); // no way round: get out here
-            }
-            return;
-        }
         if (ghost[v] > 0) ghost[v] -= dt;
         else limit = Math.min(limit, traffic(v, fx, fy, t));
         limit = Math.min(limit, runDown(v, fx, fy, t, dt));
@@ -622,6 +701,7 @@ public final class Vehicles {
             state[v] = V_PARKED;
             spd[v] = 0;
             if (role[v] == R_SUPPLY) state[v] = V_NONE; // back in the depot
+            else if (abandoned(v) || ("fire_engine".equals(type(v).id) && squad[v] < 0)) toPool(v); // back in the garage
             return;
         }
         float s = Math.min(40, d * 2);

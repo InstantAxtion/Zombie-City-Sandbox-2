@@ -16,10 +16,34 @@ final class DirectorScreens {
 
     // ------------------------------------------------------------------ replays
 
+    /** The replays saved from the game, newest first (from the pref), then any other .zcr file in the app's files. */
     private String[] replayNames() {
         String list = g0.pf.pref("replays", "");
-        if (list.length() == 0) return new String[0];
-        return list.split(",");
+        java.util.List<String> out = new java.util.ArrayList<String>();
+        if (list.length() > 0) for (String n : list.split(",")) if (n.length() > 0 && !out.contains(n)) out.add(n);
+        return out.toArray(new String[0]);
+    }
+
+    private String[] listed;
+    private long listedAt;
+
+    /** Every replay to show: the saved list, plus .zcr files copied in or whose list entry was lost (checked once a second). */
+    private String[] allReplays() {
+        long now = System.currentTimeMillis();
+        if (listed != null && now - listedAt < 1000) return listed;
+        listedAt = now;
+        java.util.List<String> out = new java.util.ArrayList<String>();
+        for (String n : replayNames()) if (g0.pf.exists(n)) out.add(n);
+        java.util.List<String> extra = new java.util.ArrayList<String>();
+        try {
+            for (String n : g0.pf.list()) if (n.endsWith(".zcr") && !out.contains(n)) extra.add(n);
+        } catch (Throwable ignored) {
+        }
+        java.util.Collections.sort(extra);
+        java.util.Collections.reverse(extra);
+        out.addAll(extra);
+        listed = out.toArray(new String[0]);
+        return listed;
     }
 
     void saveReplay() {
@@ -47,6 +71,7 @@ final class DirectorScreens {
             g0.pf.setPref("replays", sb.toString());
             g0.pf.setPref("replay.title." + name, (w.scenario != null ? w.scenario.name : "Sandbox") + ", " + w.r.name + ", " + w.clock()
                     + ", as " + Roles.NAMES[w.roles.role] + ". " + w.director.events.size() + " inputs");
+            listed = null;
             g0.toast("Replay saved");
         } catch (Exception e) {
             g0.toast("Couldn't save the replay: " + e.getMessage());
@@ -62,7 +87,7 @@ final class DirectorScreens {
         ui.button("back", m, ui.dp(10), ui.dp(70), ui.dp(34), "Back", false, 13);
         ui.title("Replays", m + ui.dp(84), ui.dp(34));
         float y = ui.dp(64);
-        String[] names = replayNames();
+        String[] names = allReplays();
         if (names.length == 0) {
             ui.wrap("No replays yet. In a game, open the pause menu and choose Save replay: the whole outbreak, from its start, "
                     + "is kept in a few kilobytes and plays back exactly.", m, y + ui.dp(20), W - m * 2, ui.dp(13), Ui.DIM, 6);
@@ -70,7 +95,8 @@ final class DirectorScreens {
         }
         for (String n : names) {
             if (!g0.pf.exists(n)) continue;
-            ui.card("rp:" + n, m, y, W - m * 2, ui.dp(66), "Replay", g0.pf.pref("replay.title." + n, n), false);
+            String title = g0.pf.pref("replay.title." + n, "");
+            ui.card("rp:" + n, m, y, W - m * 2, ui.dp(66), "Replay", title.length() > 0 ? title : n + " (copied in)", false);
             y += ui.dp(74);
         }
     }

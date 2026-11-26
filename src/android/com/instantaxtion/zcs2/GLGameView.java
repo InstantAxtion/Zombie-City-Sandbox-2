@@ -96,9 +96,14 @@ final class GLGameView extends GLSurfaceView implements GLSurfaceView.Renderer {
             }
             return;
         }
-        gfx.begin(w, h);
-        game.frame(gfx, dt);
-        gfx.end();
+        try {
+            gfx.begin(w, h);
+            game.frame(gfx, dt);
+            gfx.end();
+        } catch (Throwable t) {
+            // never take the app down from a frame: the game shows what went wrong and offers the menu
+            game.crashed(t);
+        }
     }
 
     private void fail(String why) {
@@ -127,7 +132,8 @@ final class GLGameView extends GLSurfaceView implements GLSurfaceView.Renderer {
             }
         });
         try {
-            done.await(4, TimeUnit.SECONDS);
+            // the save is quick (a fraction of a second); don't hold the UI thread long if the GL thread is busy
+            done.await(1500, TimeUnit.MILLISECONDS);
         } catch (InterruptedException ignored) {
         }
         onPause();
@@ -157,6 +163,7 @@ final class GLGameView extends GLSurfaceView implements GLSurfaceView.Renderer {
         final int[] ids;
         final float[] xs, ys;
         final int kind;
+        final boolean reset = action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_CANCEL;
         switch (action) {
             case MotionEvent.ACTION_DOWN:
             case MotionEvent.ACTION_POINTER_DOWN:
@@ -192,8 +199,11 @@ final class GLGameView extends GLSurfaceView implements GLSurfaceView.Renderer {
         }
         queueEvent(new Runnable() {
             public void run() {
-                if (dead) return;
+                if (dead) return; // the game is moving to the Canvas view, which resets on its first touch
+                // the first finger (or a cancel): whatever the game thinks is still down (a lost UP) isn't
+                if (reset && kind == Game.DOWN) game.resetTouches();
                 for (int i = 0; i < n; i++) game.touch(kind, ids[i], xs[i], ys[i]);
+                if (reset && kind == Game.CANCEL) game.resetTouches();
             }
         });
         return true;

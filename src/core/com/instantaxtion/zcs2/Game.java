@@ -50,6 +50,23 @@ public final class Game {
     private volatile World loaded;
     private volatile String loadingText = "";
     private volatile Throwable loadError;
+    /** Which load is current: a load cancelled with back (or superseded) finds it changed and throws its result away. */
+    private volatile int loadGen;
+    /** The screen to go back to if a load is cancelled. */
+    private int loadingFrom = S_MENU;
+    /** The preview failed for this key: don't try again every frame. */
+    private volatile long previewFailed = -1;
+    private volatile Thread previewThread;
+
+    // things handed to the game's thread (answers typed into dialogs arrive on the UI thread)
+    private final java.util.ArrayDeque<Runnable> inbox = new java.util.ArrayDeque<Runnable>();
+    /** True while the world is stepping: an exception then may leave it half-changed, so it isn't autosaved. */
+    private boolean stepping;
+    /** Real seconds since the last autosave while playing. */
+    private float sinceAutosave;
+    static final float AUTOSAVE_EVERY = 180;
+    /** The fast-forward the device actually reached, in game seconds per real second (smoothed). */
+    private float achieved;
 
     // tools
     String tool = "look";
@@ -123,7 +140,98 @@ public final class Game {
 
     // ------------------------------------------------------------------ frame
 
+    /** Runs r on the game's thread before the next frame. Safe to call from any thread. */
+    public void post(Runnable r) {
+        synchronized (inbox) {
+            inbox.add(r);
+        }
+    }
+
+    private void runPosted() {
+        for (int n = 0; n < 64; n++) {
+            Runnable r;
+            synchronized (inbox) {
+                r = inbox.poll();
+            }
+            if (r == null) return;
+            r.run();
+        }
+    }
+
+    /** Asks for text; the answer is handed to the game's thread (the dialog's answer may come on the UI thread). */
+    void ask(String title, String current, final Platform.TextAnswer answer) {
+        pf.askText(title, current, answer == null ? null : new Platform.TextAnswer() {
+            public void answer(final String text) {
+                post(new Runnable() {
+                    public void run() {
+                        answer.answer(text);
+                    }
+                });
+            }
+        });
+    }
+
     public void frame(Gfx g, float dt) {
+        try {
+            frameInner(g, dt);
+        } catch (Throwable t) {
+            crashed(t);
+        }
+    }
+
+    /**
+     * Something threw during a frame. The game keeps running: it says what went wrong and offers the menu. The
+     * world is autosaved first unless it was in the middle of a step (then the last good autosave is kept).
+     */
+    public void crashed(Throwable t) {
+        t.printStackTrace();
+        boolean wasStepping = stepping;
+        stepping = false;
+        if (error != null) return;
+        String where = "";
+        StackTraceElement[] st = t.getStackTrace();
+        if (st.length > 0) where = " (" + st[0].getFileName() + ":" + st[0].getLineNumber() + ")";
+        String saved = "";
+        if (w != null && !wasStepping && screen != S_LOADING && replay == null) {
+            try {
+                saveTo("autosave");
+                saved = " The game was saved: Continue picks it up.";
+            } catch (Throwable ignored) {
+            }
+        } else if (w != null && pf.exists("autosave.sav")) saved = " Continue goes back to the last autosave.";
+        error = "Something went wrong: " + t + where + "." + saved;
+        crashedWorld = true;
+    }
+
+    /** The error screen came from a crash in a running game (the world may not be trustworthy). */
+    private boolean crashedWorld;
+
+    /** Leaves the error screen for the menu. */
+    private void clearError() {
+        error = null;
+        loadError = null;
+        loaded = null;
+        if (crashedWorld) closeWorld();
+        crashedWorld = false;
+        screen = S_MENU;
+        scroll = 0;
+    }
+
+    private void errorScreen(Gfx g) {
+        int W = g.width(), H = g.height();
+        g.color(0xFF101318);
+        g.fillRect(0, 0, W, H);
+        float m = ui.dp(16);
+        g.color(Ui.ACCENT);
+        g.text(content == null ? "The game can't start" : "Something went wrong", m, ui.dp(48), ui.dp(18), Gfx.ALIGN_LEFT, true);
+        ui.wrap(error, m, ui.dp(80), W - m * 2, ui.dp(14), Ui.TEXT, 20);
+        float bw = Math.min(W - m * 2, ui.dp(320)), bh = ui.dp(50);
+        if (content == null) ui.bigButton("quit", (W - bw) / 2, H - bh - ui.dp(40), bw, bh, "Quit", Ui.ACCENT);
+        else ui.bigButton("errmenu", (W - bw) / 2, H - bh - ui.dp(40), bw, bh, "Back to the menu", Ui.ACCENT);
+    }
+
+    private void frameInner(Gfx g, float dt) {
+        runPosted();
         dt = Math.min(dt, 0.1f);
         frameAcc += dt;
         frames++;
@@ -134,9 +242,7 @@ public final class Game {
         }
         ui.begin(g, d());
         if (error != null) {
-            g.color(0xFF101318);
-            g.fillRect(0, 0, g.width(), g.height());
-            ui.wrap(error, ui.dp(16), ui.dp(60), g.width() - ui.dp(32), ui.dp(14), Ui.TEXT, 20);
+            errorScreen(g);
             return;
         }
         switch (screen) {
@@ -488,7 +594,7 @@ public final class Game {
         if (pr == null || previewKey != key()) {
             if (captions) {
                 g.color(Ui.DIM);
-                g.text("Drawing the map...", pxx + ps / 2, y + ps / 2, ui.dp(Ui.M), Gfx.ALIGN_CENTER, false);
+                g.text(previewFailed == key() ? "Couldn't draw the map: try another seed" : "Drawing the map...", pxx + ps / 2, y + ps / 2, ui.dp(Ui.M), Gfx.ALIGN_CENTER, false);
             }
             return false;
         }
@@ -528,7 +634,7 @@ public final class Game {
 
     private void requestPreview() {
         final long k = key();
-        if (previewKey == k || previewBusy) return;
+        if (previewKey == k || previewBusy || previewFailed == k || screen == S_LOADING) return;
         previewBusy = true;
         final int size = RegionGen.SIZES[ngSize], preset = ngPreset;
         final long seed = ngSeed;
@@ -538,11 +644,14 @@ public final class Game {
                     Region r = RegionGen.generate(size, preset, seed);
                     preview = r;
                     previewKey = k;
+                } catch (Throwable e) {
+                    previewFailed = k;
                 } finally {
                     previewBusy = false;
                 }
             }
         }, "preview");
+        previewThread = t;
         t.start();
         if (previewImg != null) {
             previewImg.recycle();
@@ -556,36 +665,81 @@ public final class Game {
         final int size = RegionGen.SIZES[ngSize], preset = ngPreset;
         final long seed = ngSeed;
         final int role = chosenRole();
+        final long k = key();
+        // the preview already built this map (or is building it): use it rather than building it again
+        final Thread pt = previewThread;
+        final boolean usePreview = previewKey == k || (previewBusy && pt != null);
         closeWorld();
+        loadingFrom = S_NEW;
         screen = S_LOADING;
         loadingText = "Building " + RegionGen.SIZE_NAMES[ngSize].toLowerCase() + " (" + RegionGen.PRESETS[preset].toLowerCase() + ")...";
         loaded = null;
         loadError = null;
+        final int gen = ++loadGen;
         new Thread(new Runnable() {
             public void run() {
                 try {
-                    World nw = Setup.newGame(content, size, preset, seed, sc, settings.simThreads(), role, settings.maxIndividuals);
+                    Region pre = null;
+                    if (usePreview) {
+                        if (pt != null) pt.join();
+                        if (previewKey == k) pre = preview;
+                    }
+                    // the game changes its region (rubble, blown bridges): the preview mustn't show it, or be reused
+                    preview = null;
+                    previewKey = -1;
+                    if (gen != loadGen) return;
+                    World nw = Setup.newGame(content, size, preset, seed, sc, settings.simThreads(), role, settings.maxIndividuals, pre);
                     loadingText = "Putting everyone in place...";
-                    loaded = nw;
                     startX = Setup.originX;
                     startY = Setup.originY;
+                    outbreakX = Setup.outbreakX;
+                    outbreakY = Setup.outbreakY;
+                    publish(gen, nw);
                 } catch (Throwable t) {
-                    loadError = t;
+                    if (gen == loadGen) loadError = t;
                 }
             }
         }, "build").start();
     }
 
-    volatile float startX, startY;
+    volatile float startX, startY, outbreakX, outbreakY;
     volatile Replay loadedReplay;
+
+    /** Hands a world built in the background to the game, unless its load was cancelled (then it's shut down). */
+    private boolean publish(int gen, World nw) {
+        synchronized (inbox) {
+            if (gen != loadGen) {
+                nw.shutdown();
+                return false;
+            }
+            loaded = nw;
+            return true;
+        }
+    }
+
+    /** Back during loading: the background load carries on but its result is thrown away. */
+    private void cancelLoading() {
+        synchronized (inbox) {
+            loadGen++;
+            World nw = loaded;
+            loaded = null;
+            if (nw != null) nw.shutdown();
+        }
+        loadedReplay = null;
+        loadError = null;
+        screen = loadingFrom;
+        toast("Cancelled");
+    }
 
     /** Builds a replay in the background, then plays it. */
     void playReplay(final String file) {
         closeWorld();
+        loadingFrom = screen == S_LOADING ? S_MENU : screen;
         screen = S_LOADING;
         loadingText = "Rebuilding the outbreak from its start...";
         loaded = null;
         loadError = null;
+        final int gen = ++loadGen;
         new Thread(new Runnable() {
             public void run() {
                 try {
@@ -595,9 +749,9 @@ public final class Game {
                     startX = Setup.originX;
                     startY = Setup.originY;
                     loadedReplay = r;
-                    loaded = r.w;
+                    if (!publish(gen, r.w)) loadedReplay = null;
                 } catch (Throwable t) {
-                    loadError = t;
+                    if (gen == loadGen) loadError = t;
                 }
             }
         }, "replay").start();
@@ -616,15 +770,24 @@ public final class Game {
 
     private void loadFrom(final String name) {
         closeWorld();
+        loadingFrom = screen == S_LOADING ? S_MENU : screen;
         screen = S_LOADING;
         loadingText = "Loading...";
         loaded = null;
         loadError = null;
+        final int gen = ++loadGen;
         new Thread(new Runnable() {
             public void run() {
                 try {
+                    World nw;
                     InputStream in = pf.openRead(name);
-                    World nw = SaveIO.load(content, in, settings.simThreads());
+                    try {
+                        nw = SaveIO.load(content, in, settings.simThreads());
+                    } catch (Throwable t) {
+                        in.close();
+                        if (gen == loadGen) quarantine(name, t);
+                        return;
+                    }
                     in.close();
                     nw.maxIndividuals = settings.maxIndividuals;
                     startX = (nw.camX0 + nw.camX1) / 2;
@@ -633,12 +796,24 @@ public final class Game {
                         startX = nw.r.city().cx * 16f;
                         startY = nw.r.city().cy * 16f;
                     }
-                    loaded = nw;
+                    publish(gen, nw);
                 } catch (Throwable t) {
-                    loadError = t;
+                    if (gen == loadGen) loadError = t;
                 }
             }
         }, "load").start();
+    }
+
+    /**
+     * A save that can't be read is put aside (renamed to .bad, so Continue and the slots stop offering it) and
+     * the player is told, with a way back to the menu.
+     */
+    private void quarantine(String name, Throwable t) {
+        String base = name.endsWith(".sav") ? name.substring(0, name.length() - 4) : name;
+        boolean moved = pf.rename(name, base + ".bad");
+        if (moved) pf.setPref("info." + base, "");
+        loadError = new java.io.IOException("Couldn't read the save " + (base.equals("autosave") ? "\"Autosave\"" : "\"" + base + "\"")
+                + ": it may be damaged (" + t.getMessage() + ")." + (moved ? " It has been put aside as " + base + ".bad." : ""));
     }
 
     private float spin;
@@ -657,7 +832,11 @@ public final class Game {
         g.color(Ui.TEXT);
         g.text(loadingText, W / 2f, H / 2f + ui.dp(60), ui.dp(15), Gfx.ALIGN_CENTER, false);
         if (loadError != null) {
-            error = "Something went wrong: " + loadError;
+            Throwable le = loadError;
+            error = le instanceof java.io.IOException && le.getMessage() != null && le.getMessage().startsWith("Couldn't read the save")
+                    ? le.getMessage() : "Something went wrong: " + le;
+            loadError = null;
+            crashedWorld = false;
             return;
         }
         World nw = loaded;
@@ -684,7 +863,15 @@ public final class Game {
             ended = w.ended;
             soundsSeen = w.fx.sHead;
             closeInspector();
+            sinceAutosave = 0;
+            achieved = 0;
             if (w.scenario != null && w.tick < 5) toast(w.scenario.name);
+            if (w.tick < 5 && w.roles.role == Roles.SURVIVOR && w.playerEnt >= 0) {
+                // where the outbreak is, from here
+                float dx = outbreakX - w.e.x[w.playerEnt], dy = outbreakY - w.e.y[w.playerEnt];
+                float km = (float) Math.sqrt(dx * dx + dy * dy) / 16f * 0.025f;
+                if (km > 0.2f) toast("The outbreak is " + (km >= 10 ? "" + Math.round(km) : String.format("%.1f", km)) + " km " + compass(dx, dy) + ". Find somewhere safe.");
+            }
         }
     }
 
@@ -745,13 +932,14 @@ public final class Game {
             w.camY1 = cam.y1();
             w.camDetail = cam.zoom >= 0.3f && !w.strategic;
             // fast-forward speeds fold the simulation into numbers; normal speeds bring the detail back
+            if (speedIdx > maxSpeedIdx()) {
+                speedIdx = maxSpeedIdx();
+                toast("Can't fast-forward while you're playing a person");
+            }
             boolean wantStrategic = SPEEDS[speedIdx] >= 60;
             if (wantStrategic != w.strategic) {
                 Actions.strategic(w, wantStrategic);
-                if (wantStrategic && !w.strategic) {
-                    speedIdx = 4;
-                    toast("Can't fast-forward while you're playing a person");
-                }
+                if (wantStrategic && !w.strategic) speedIdx = maxSpeedIdx();
             }
         } else if (replay.done() && !paused) {
             // the end of the recording: from here on, it's yours
@@ -770,6 +958,8 @@ public final class Game {
             float stepDt = w.strategic ? World.STRATEGIC_DT : World.DT;
             long t0 = System.nanoTime();
             int steps = 0;
+            double simulated = 0;
+            stepping = true;
             while (acc >= stepDt) {
                 if (replay != null) {
                     if (replay.done()) break;
@@ -778,11 +968,22 @@ public final class Game {
                 }
                 w.step();
                 acc -= stepDt;
+                simulated += stepDt;
                 steps++;
                 if (System.nanoTime() - t0 > 28_000_000L) {
+                    // the device can't keep up: drop the rest rather than fall further behind (the label says so)
                     acc = 0;
                     break;
                 }
+            }
+            stepping = false;
+            float rate = (float) (simulated / dt);
+            achieved = achieved <= 0 ? rate : achieved + (rate - achieved) * Math.min(1, dt * 1.5f);
+            // a save every few minutes, so a crash or a killed app loses little
+            sinceAutosave += dt;
+            if (sinceAutosave >= AUTOSAVE_EVERY && replay == null && !w.ended) {
+                sinceAutosave = 0;
+                autosave();
             }
         }
         musicT -= dt;
@@ -1005,7 +1206,7 @@ public final class Game {
         float sx = W - m - spw - ui.dp(6) - sw;
         ui.button("playpause", sx, by, sw, bh, "", paused);
         Icons.draw(g, paused ? "play" : "pause", sx + sw / 2, by + bh / 2, ui.dp(16), Ui.TEXT);
-        ui.button("speed", sx + sw + ui.dp(6), by, spw, bh, SPEED_NAMES[speedIdx], w.strategic, 13);
+        ui.button("speed", sx + sw + ui.dp(6), by, spw, bh, speedLabel(), w.strategic, 13);
         // the time, the weather (named), the alert level
         float x = m + bh + ui.dp(10);
         float cy1 = by + ui.dp(17), cy2 = by + ui.dp(34);
@@ -1073,7 +1274,7 @@ public final class Game {
         String cue = null;
         int bg = 0xD0101318;
         if (w.strategic) {
-            cue = "▶▶ Fast-forward " + SPEED_NAMES[speedIdx] + ": everyone counted, fights by the numbers";
+            cue = "▶▶ Fast-forward " + speedLabel() + ": everyone counted, fights by the numbers";
             bg = 0xE0603010;
             // a warm edge round the map while time races
             g.color(0x50FF8A30);
@@ -2379,7 +2580,7 @@ public final class Game {
                 return;
             }
             case "code":
-                pf.askText("A challenge code (map, seed, scenario, role)", challengeCode(), new Platform.TextAnswer() {
+                ask("A challenge code (map, seed, scenario, role)", challengeCode(), new Platform.TextAnswer() {
                     public void answer(String text) {
                         if (applyCode(text)) toast("Challenge loaded");
                         else toast("That code doesn't look right");
@@ -2389,17 +2590,17 @@ public final class Game {
             case "players": back = S_PAUSE; screen = S_PLAYERS; return;
             case "shareresult":
                 if (pf.pref("playerName", null) == null) {
-                    pf.askText("Your name (shown to friends with your result)", "", new Platform.TextAnswer() {
+                    ask("Your name (shown to friends with your result)", "", new Platform.TextAnswer() {
                         public void answer(String text) {
                             String n = text.trim().replace(",", " ").replace(";", " ").replace("~", "-");
                             pf.setPref("playerName", n.length() == 0 ? "Player" : n.length() > 16 ? n.substring(0, 16) : n);
-                            pf.askText("Your result: send this code to a friend", resultCode(), null);
+                            ask("Your result: send this code to a friend", resultCode(), null);
                         }
                     });
-                } else pf.askText("Your result: send this code to a friend", resultCode(), null);
+                } else ask("Your result: send this code to a friend", resultCode(), null);
                 return;
             case "addresult":
-                pf.askText("A friend's result code", "", new Platform.TextAnswer() {
+                ask("A friend's result code", "", new Platform.TextAnswer() {
                     public void answer(String text) {
                         toast(addResult(text) ? "Result added" : "That code doesn't look right");
                     }
@@ -2423,9 +2624,15 @@ public final class Game {
                 paused = false;
                 return;
             }
-            case "pl:back": screen = S_PLAY; return;
+            case "pl:back":
+                // not yet: the game stays paused, in the pause menu, until someone takes over or resumes
+                paused = true;
+                screen = S_PAUSE;
+                toast("Paused: Player " + (handTo + 1) + " hasn't taken over");
+                return;
+            case "errmenu": clearError(); return;
             case "sharecode":
-                pf.askText("This game's challenge code: share it", challengeCodeOf(w), new Platform.TextAnswer() {
+                ask("This game's challenge code: share it", challengeCodeOf(w), new Platform.TextAnswer() {
                     public void answer(String text) {
                     }
                 });
@@ -2464,7 +2671,7 @@ public final class Game {
             case "seed": ngSeed = (ngSeed * 1103515245L + 12345L + System.nanoTime()) % 1000000L; if (ngSeed < 0) ngSeed = -ngSeed; return;
             case "pause": screen = S_PAUSE; return;
             case "playpause": paused = !paused; return;
-            case "speed": speedIdx = (speedIdx + 1) % SPEEDS.length; paused = false; return;
+            case "speed": speedIdx = speedIdx >= maxSpeedIdx() ? 0 : speedIdx + 1; paused = false; achieved = 0; return;
             case "report": back = screen == S_PAUSE ? S_PAUSE : S_PLAY; screen = S_REPORT; scroll = 0; recordBest(); return;
             case "radio": back = S_PAUSE; screen = S_RADIO; scroll = 0; return;
             case "shot": screenshot(); return;
@@ -2647,17 +2854,22 @@ public final class Game {
     void saveTo(String name) {
         try {
             OutputStream out = pf.openWrite(name + ".tmp");
-            SaveIO.save(w, out);
-            out.close();
+            try {
+                SaveIO.save(w, out);
+            } finally {
+                out.close();
+            }
             // replace the old save only once the new one is complete
-            InputStream in = pf.openRead(name + ".tmp");
-            OutputStream o2 = pf.openWrite(name + ".sav");
-            byte[] buf = new byte[1 << 16];
-            int n;
-            while ((n = in.read(buf)) > 0) o2.write(buf, 0, n);
-            in.close();
-            o2.close();
-            pf.delete(name + ".tmp");
+            if (!pf.rename(name + ".tmp", name + ".sav")) {
+                InputStream in = pf.openRead(name + ".tmp");
+                OutputStream o2 = pf.openWrite(name + ".sav");
+                byte[] buf = new byte[1 << 16];
+                int n;
+                while ((n = in.read(buf)) > 0) o2.write(buf, 0, n);
+                in.close();
+                o2.close();
+                pf.delete(name + ".tmp");
+            }
             pf.setPref("info." + name, w.r.name + ", " + w.clock() + (w.scenario != null ? ", " + w.scenario.name : "") + ". " + (w.totalZombies() == 0 ? "No dead walking" : WorldView.people(w.totalZombies()) + " dead walking") + ", " + WorldView.people(w.livingCivilians()) + " alive");
             if (!name.equals("autosave")) toast("Saved");
         } catch (Exception e) {
@@ -2666,7 +2878,8 @@ public final class Game {
     }
 
     public void autosave() {
-        if (w != null && screen != S_LOADING) saveTo("autosave");
+        if (w != null && screen != S_LOADING && error == null && replay == null) saveTo("autosave");
+        sinceAutosave = 0;
     }
 
     private void screenshot() {
@@ -2688,7 +2901,7 @@ public final class Game {
             down[id] = true;
             px[id] = x;
             py[id] = y;
-            pointers++;
+            pointers = countDown();
             if (pointers == 1) {
                 downX = x;
                 downY = y;
@@ -2754,7 +2967,7 @@ public final class Game {
         if (action == UP || action == CANCEL) {
             if (!down[id]) return;
             down[id] = false;
-            pointers = Math.max(0, pointers - 1);
+            pointers = countDown();
             if (id == joyPtr) {
                 joyPtr = -1;
                 if (w != null && replay == null) Actions.joy(w, 0, 0);
@@ -2780,6 +2993,55 @@ public final class Game {
             }
             if (screen == S_PLAY && w != null && !moved && !pinched && System.currentTimeMillis() - downT < 600) tap(x, y);
         }
+    }
+
+    private int countDown() {
+        int n = 0;
+        for (boolean b : down) if (b) n++;
+        return n;
+    }
+
+    /** The platform saw the first finger go down (or a cancel): forget any pointer whose UP was lost. */
+    public void resetTouches() {
+        for (int k = 0; k < down.length; k++) down[k] = false;
+        pointers = 0;
+        pinched = false;
+        ui.pressed = null;
+        if (joyPtr >= 0) {
+            joyPtr = -1;
+            if (w != null && replay == null && screen == S_PLAY) Actions.joy(w, 0, 0);
+        }
+    }
+
+    /** For tests: how many fingers the game thinks are down. */
+    int pointersDown() {
+        return pointers;
+    }
+
+    /** The fastest speed the player may pick: no fast-forward while playing a person. */
+    int maxSpeedIdx() {
+        if (w != null && w.playerEnt >= 0 && replay == null) {
+            int k = 0;
+            while (k + 1 < SPEEDS.length && SPEEDS[k + 1] < 60) k++;
+            return k;
+        }
+        return SPEEDS.length - 1;
+    }
+
+    /** The speed button's label: the speed chosen, or what the device really reaches when it falls short. */
+    String speedLabel() {
+        String name = SPEED_NAMES[speedIdx];
+        int want = SPEEDS[speedIdx];
+        if (paused || want < 60 || achieved <= 0 || achieved >= want * 0.8f) return name;
+        float h = achieved / 60f;
+        return "~" + (h >= 10 ? "" + Math.round(h) : String.format("%.1f", h)) + "h/s";
+    }
+
+    private static String compass(float dx, float dy) {
+        String[] names = {"east", "south-east", "south", "south-west", "west", "north-west", "north", "north-east"};
+        double a = Math.atan2(dy, dx);
+        int k = (int) Math.round(a / (Math.PI / 4));
+        return names[((k % 8) + 8) % 8];
     }
 
     private boolean isScrollScreen() {
@@ -2840,6 +3102,11 @@ public final class Game {
 
     /** The phone's back button. Returns false to let the app close. */
     public boolean back() {
+        if (error != null) {
+            if (content == null) return false;
+            clearError();
+            return true;
+        }
         switch (screen) {
             case S_PLAY:
                 if (inspectorOpen()) closeInspector();
@@ -2847,7 +3114,8 @@ public final class Game {
                 return true;
             case S_PAUSE: screen = S_PLAY; return true;
             case S_MENU: return false;
-            case S_LOADING: return true;
+            case S_LOADING: cancelLoading(); return true;
+            case S_HANDOFF: onButton("pl:back"); return true;
             default: onButton("back"); return true;
         }
     }
@@ -3098,7 +3366,7 @@ public final class Game {
     public void key(int code) {
         if (screen != S_PLAY || w == null) return;
         if (code == ' ') paused = !paused;
-        else if (code >= '1' && code <= '8') speedIdx = code - '1';
+        else if (code >= '1' && code <= '8') speedIdx = Math.min(code - '1', maxSpeedIdx());
         else if (code == 'm') mapToggle();
     }
 
