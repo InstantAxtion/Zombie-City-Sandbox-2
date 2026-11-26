@@ -107,9 +107,10 @@ to the general, the timelapse and replays).
 `tools/balance.sh 5000,50000,100000,250000 8 2304 30 4` plays each outbreak size on many seeds in fast-forward
 and prints the spread of outcomes (days to contain or fall, share of the country lost, losses); every run goes to
 `build/balance.csv` (a run counts as lost when a third of the country's people are gone). At the time of writing
-(8 seeds, the default map, 30 days): 5,000 dead are put down in well under a day; 50,000-250,000 are a war of two
-to four weeks that is usually won, with a fifth to a quarter of the country bitten or killed, and is sometimes lost
-or still going after a month. The alert, curfews, shelter orders and evacuations then come down, outside units go
+(6 seeds each, the default map, 30 days): 5,000 dead are put down in about half a day; 50,000 became wars of 11
+to 30 days (4 won, 1 lost, 1 still going after a month, about a fifth of the country bitten or killed); 250,000
+were all won in about 20 days with about a quarter of the country lost. The bigger outbreak is put down more
+reliably because the army's response scales with the dead that are reported; that is a known balance issue. The alert, curfews, shelter orders and evacuations then come down, outside units go
 home and people return to their towns.
 
 The game draws with Android's Canvas by default. Settings has "Renderer (next start)": choosing GPU (OpenGL ES
