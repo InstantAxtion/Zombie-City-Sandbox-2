@@ -473,6 +473,424 @@ public final class Tests {
         r2.w.shutdown();
     }
 
+    // ------------------------------------------------------------------ director, editor and modding (1.4)
+
+    /** A session with painting, a squad, orders, panning and a stretch of fast-forward, ending at its own tick. */
+    static World seekSession(int size, long seed) {
+        World w = Setup.newGame(content, size, RegionGen.COAST, seed, content.scenario("lab_leak"), 2, Roles.GOD, 60000);
+        float ox = Setup.originX, oy = Setup.originY;
+        camOver(w, ox, oy);
+        steps(w, 20);
+        Actions.paint(w, ox + 200, oy, 200, 150, -1);
+        Squads.Squad s = Actions.squad(w, "swat", 6, ox - 150, oy);
+        steps(w, 30);
+        if (s != null) Actions.order(w, s, ox + 120, oy);
+        camOver(w, ox + 400, oy + 200);
+        steps(w, 30);
+        w.camDetail = false;
+        Actions.strategic(w, true);
+        for (int k = 0; k < 24; k++) w.step();
+        Actions.strategic(w, false);
+        camOver(w, ox, oy);
+        steps(w, 25);
+        return w;
+    }
+
+    static void seekExact(int size) throws Exception {
+        World w = seekSession(size, 91);
+        long end = w.tick;
+        // played straight through, the state at each checkpoint
+        long[] at = {end / 9, end / 4, end / 2, end * 3 / 5, end * 9 / 10, end};
+        long[] hash = new long[at.length], tick = new long[at.length];
+        Replay straight = Replay.of(content, w, 2);
+        for (int k = 0; k < at.length; k++) {
+            straight.runTo(at[k]);
+            hash[k] = Audit.hash(straight.w);
+            tick[k] = straight.w.tick;
+        }
+        check(hash[at.length - 1] == Audit.hash(w), "the replay itself came out different");
+        straight.w.shutdown();
+        // another, its snapshots squeezed into a small cap (so they thin out), then sought about in no order
+        Replay r = Replay.of(content, w, 2);
+        r.snapEvery = 4;
+        r.snapCap = 1 << 20;
+        r.runTo(end);
+        check(r.snaps.size() >= 3, "only " + r.snaps.size() + " snapshots");
+        check(r.snapBytes() <= r.snapCap || r.snaps.size() <= 2, "snapshots over their cap: " + r.snapBytes());
+        check(r.snapEvery > 4, "the snapshots never thinned out (" + r.snaps.size() + ", " + r.snapBytes() / 1024 + " KB)");
+        int[] order = {2, 0, 5, 1, 4, 3, 0, 5, 2};
+        int loads = 0;
+        for (int k : order) {
+            World old = r.seek(at[k]);
+            if (old != null) {
+                loads++;
+                old.shutdown();
+            }
+            check(r.w.tick == tick[k], "seek to " + at[k] + " landed on " + r.w.tick + ", not " + tick[k]);
+            check(Audit.hash(r.w) == hash[k], "seeking to tick " + at[k] + " (checkpoint " + k + ") came out different from playing straight through");
+            check(Audit.check(r.w).isEmpty(), "audit after a seek: " + Audit.check(r.w));
+        }
+        check(loads >= 4, "only " + loads + " seeks loaded a snapshot");
+        r.w.shutdown();
+        w.shutdown();
+    }
+
+    static void camPathCut() throws Exception {
+        Replay.CamPath p = new Replay.CamPath();
+        p.add(0, 100, 100, 1);
+        p.add(24000, 1100, 1100, 1);
+        p.add(12000, 1100, 100, 0.25f);
+        p.add(12010, 1100, 100, 0.25f); // within a game minute: replaces the key
+        check(p.size() == 3, "keys: " + p.size());
+        check(p.ticks.get(1) == 12010, "kept in order and replaced");
+        float[] a = p.at(0), b = p.at(12010), c = p.at(30000);
+        check(a[0] == 100 && a[1] == 100 && Math.abs(a[2] - 1) < 1e-4, "at the first key");
+        check(Math.abs(b[0] - 1100) < 0.01f && Math.abs(b[1] - 100) < 0.01f && Math.abs(b[2] - 0.25f) < 1e-4, "at the middle key: " + b[0] + "," + b[1] + "," + b[2]);
+        check(c[0] == 1100 && c[1] == 1100, "holds after the last");
+        float[] prev = p.at(0);
+        for (long t = 60; t <= 24000; t += 60) {
+            float[] q = p.at(t);
+            check(Math.abs(q[0] - prev[0]) < 40 && Math.abs(q[1] - prev[1]) < 40, "the path jumps at " + t);
+            check(q[2] > 0.2f && q[2] < 1.2f, "zoom out of range at " + t + ": " + q[2]);
+            prev = q;
+        }
+        // a director's cut: the replay with its path, saved and loaded again, still exact
+        World w = Setup.newGame(content, 768, RegionGen.COAST, 92, content.scenario("lab_leak"), 2, Roles.GOD, 60000);
+        camOver(w, Setup.originX, Setup.originY);
+        steps(w, 20);
+        Actions.paint(w, Setup.originX + 150, Setup.originY, 100, 100, -1);
+        steps(w, 20);
+        Replay r = Replay.of(content, w, 1);
+        r.path.add(0, Setup.originX, Setup.originY, 0.8f);
+        r.path.add(w.tick / 2, Setup.originX + 300, Setup.originY, 0.5f);
+        r.path.add(w.tick, Setup.originX + 300, Setup.originY + 300, 1.2f);
+        ByteArrayOutputStream bo = new ByteArrayOutputStream();
+        r.saveCut(bo);
+        Replay r2 = Replay.load(content, new ByteArrayInputStream(bo.toByteArray()), 1);
+        check(r2.path.size() == 3 && r2.path.ticks.get(1) == w.tick / 2 && r2.path.keys.get(2)[2] == 1.2f, "the camera path didn't come back");
+        r2.runTo(w.tick);
+        check(Audit.hash(r2.w) == Audit.hash(w), "a director's cut plays differently");
+        // a replay saved from a game has no path, and still loads
+        bo.reset();
+        Replay.save(w, bo);
+        Replay r3 = Replay.load(content, new ByteArrayInputStream(bo.toByteArray()), 1);
+        check(r3.path.size() == 0, "a path from nowhere");
+        r.w.shutdown();
+        r2.w.shutdown();
+        r3.w.shutdown();
+        w.shutdown();
+    }
+
+    /** A custom scenario (as the editor writes it), read back through content.ini's reader. */
+    static Content.Scenario custom(String id, String origin, int zombies, String goals, String... triggers) throws Exception {
+        Content.Scenario sc = new Content.Scenario();
+        sc.id = id;
+        sc.name = "Test " + id;
+        sc.mode = "sandbox";
+        sc.origin = origin;
+        sc.goal = "";
+        sc.desc = "a test";
+        sc.zombies = zombies;
+        sc.goals = goals;
+        for (String t : triggers) sc.triggers.add(t);
+        String bad = Script.check(content, sc);
+        check(bad == null, "the scenario doesn't read: " + bad);
+        java.util.List<Content.Scenario> l = content.addScenarios(new ByteArrayInputStream(sc.toIni().getBytes("UTF-8")), true);
+        check(l.size() == 1 && l.get(0).toIni().equals(sc.toIni()), "the scenario changed going through content.ini:\n" + sc.toIni() + "\n" + (l.isEmpty() ? "" : l.get(0).toIni()));
+        return l.get(0);
+    }
+
+    static boolean said(World w, String text) {
+        for (News.Item it : w.news.log) if (it.text.contains(text)) return true;
+        return false;
+    }
+
+    static void scriptTriggers() throws Exception {
+        Content.Scenario sc = custom("trig_test", "lab", 25, "",
+                "time:20 -> horde:0.3,0.3,1500",
+                "time:40 -> message:Riots reported in the north",
+                "time:60 -> weather:4",
+                "dead:0:3 -> strike:0.5,0.5",
+                "time:90 -> send:0.5,0.5",
+                "lost:9999 -> message:never");
+        World a = Setup.newGame(content, 768, RegionGen.COAST, 33, sc, 2, Roles.GOD, 60000);
+        check(a.script != null && a.script.triggers.size() == 6, "no script");
+        camOver(a, Setup.originX, Setup.originY);
+        int hordes0 = a.strat.hordes.size();
+        steps(a, 19);
+        check(!a.script.triggers.get(0).fired && a.strat.hordes.size() == hordes0, "fired early");
+        steps(a, 3);
+        check(a.script.triggers.get(0).fired, "the horde trigger didn't fire at 20 minutes");
+        check(a.strat.hordes.size() > hordes0, "no horde came");
+        steps(a, 20);
+        check(said(a, "Riots reported in the north"), "the message wasn't given");
+        steps(a, 20);
+        check(a.rules.v[Rules.WEATHER] == 4, "the weather didn't change: " + a.rules.v[Rules.WEATHER]);
+        // a save part way keeps what has fired and plays on exactly
+        ByteArrayOutputStream bo = new ByteArrayOutputStream();
+        SaveIO.save(a, bo);
+        World l = SaveIO.load(content, new ByteArrayInputStream(bo.toByteArray()), 2);
+        check(l.script != null, "the loaded game has no script");
+        for (int k = 0; k < 6; k++) check(l.script.triggers.get(k).fired == a.script.triggers.get(k).fired, "trigger " + k + "'s state was lost");
+        for (int k = 0; k < 40 * 20; k++) {
+            a.step();
+            l.step();
+        }
+        check(Audit.hash(l) == Audit.hash(a), "diverged after loading");
+        check(a.script.triggers.get(4).fired, "the formation wasn't sent");
+        boolean sent = false;
+        for (Forces.Formation f : a.forces.formations) if (f.alive && f.player) sent = true;
+        check(sent, "no formation is on its way");
+        check(!a.script.triggers.get(5).fired, "a trigger on a facility that doesn't exist fired");
+        // the script's actions aren't inputs: a replay rebuilds them from the scenario
+        for (Director.Event e : a.director.events) check(e.kind != Actions.HORDE && e.kind != Actions.SEND && e.kind != Actions.MESSAGE, "a scripted action was recorded");
+        Replay r = Replay.of(content, a, 2);
+        r.runTo(a.tick);
+        check(Audit.hash(r.w) == Audit.hash(a), "the replay of a scripted game came out different");
+        for (int k = 0; k < 6; k++) check(r.w.script.triggers.get(k).fired == a.script.triggers.get(k).fired, "trigger " + k + " differs in the replay");
+        // and the same game again fires the same way
+        World b = Setup.newGame(content, 768, RegionGen.COAST, 33, sc, 1, Roles.GOD, 60000);
+        camOver(b, Setup.originX, Setup.originY);
+        while (b.tick < a.tick) {
+            if (b.tick == 0) camOver(b, Setup.originX, Setup.originY);
+            b.step();
+        }
+        check(Audit.hash(b) == Audit.hash(a), "the same scripted game played differently");
+        a.shutdown();
+        l.shutdown();
+        r.w.shutdown();
+        b.shutdown();
+    }
+
+    static void scriptGoals() throws Exception {
+        // held for long enough: won
+        World w = Setup.newGame(content, 768, RegionGen.COAST, 34, custom("goal_days", "none", 0, "days:0.05"), 2, Roles.GOD, 60000);
+        steps(w, 70);
+        check(!w.ended, "ended before the time was up");
+        steps(w, 5);
+        check(w.ended && w.won, "holding on didn't win: " + w.endTitle);
+        check(w.script.progress() != null, "no progress line");
+        w.shutdown();
+        // no dead: cleared, won
+        w = Setup.newGame(content, 768, RegionGen.COAST, 34, custom("goal_clear", "none", 0, "cleared"), 2, Roles.GOD, 60000);
+        steps(w, 40);
+        check(w.ended && w.won, "putting down every one of the dead didn't win");
+        w.shutdown();
+        // losses under 0 with the dead loose in the capital: lost
+        w = Setup.newGame(content, 768, RegionGen.COAST, 34, custom("goal_loss", "lab", 300, "days:5; losses:0"), 2, Roles.GOD, 60000);
+        camOver(w, Setup.originX, Setup.originY);
+        for (int k = 0; k < 120 * 20 && !w.ended; k++) w.step();
+        check(w.ended && !w.won, "losing people didn't lose: " + w.endTitle + " " + w.script.losses());
+        w.shutdown();
+        // keep the capital at 99.99%: lost once anyone there is caught
+        w = Setup.newGame(content, 768, RegionGen.COAST, 34, custom("goal_keep", "lab", 300, "keep:0:99.99"), 2, Roles.GOD, 60000);
+        camOver(w, Setup.originX, Setup.originY);
+        for (int k = 0; k < 240 * 20 && !w.ended; k++) w.step();
+        check(w.ended && !w.won && w.endTitle.contains(w.r.settlements.get(0).name), "losing the town didn't lose: " + w.endTitle);
+        w.shutdown();
+    }
+
+    /** A scenario using everything the editor makes: points, forces, defences, rules, a strain, goals, triggers. */
+    static Content.Scenario everything(String id, boolean national) throws Exception {
+        Content.Scenario sc = new Content.Scenario();
+        sc.id = id;
+        sc.name = "Everything " + id;
+        sc.mode = "sandbox";
+        sc.origin = national ? "xy:0.5,0.5" : "hospital";
+        sc.goal = "";
+        sc.desc = "every feature";
+        sc.zombies = 120;
+        sc.hordes = 1;
+        sc.hordeSize = 900;
+        sc.season = 355;
+        sc.role = "god";
+        sc.points = "0.3,0.4,150; 0.62,0.58,700";
+        sc.place = "squad:swat@0.5,0.52; squad:rifle@0.51,0.52; defence:" + Defences.SANDBAGS + "@0.5,0.53; defence:" + Defences.MG + "@0.502,0.53";
+        sc.rules = Rules.Z_SPEED + ":3, " + Rules.WEATHER + ":2";
+        sc.strain = 2;
+        sc.goals = "days:7; keep:0:30; losses:900000";
+        sc.triggers.add("time:10 -> horde:0.45,0.45,400");
+        sc.triggers.add("dead:0:1 -> message:The dead are in the capital");
+        sc.triggers.add("time:30 -> weather:3");
+        String bad = Script.check(content, sc);
+        check(bad == null, "doesn't read: " + bad);
+        java.util.List<Content.Scenario> l = content.addScenarios(new ByteArrayInputStream(sc.toIni().getBytes("UTF-8")), true);
+        check(l.get(0).toIni().equals(sc.toIni()), "changed going through content.ini");
+        return l.get(0);
+    }
+
+    static void editorEverything(int size) throws Exception {
+        boolean national = Setup.national(size);
+        Content.Scenario sc = everything("every" + size, national);
+        World w = Setup.newGame(content, size, RegionGen.COAST, 35, sc, 2, Roles.GOD, 60000);
+        float m = w.r.px();
+        check(w.script != null && w.script.triggers.size() == 3 && w.script.goals.size() == 3, "the script didn't come");
+        check(w.rules.v[Rules.Z_SPEED] == 3 && w.rules.v[Rules.WEATHER] == 2, "the rules weren't set");
+        check(w.strat.strain == 2, "the strain wasn't set");
+        int players = 0;
+        for (Squads.Squad s : w.sq.list) if (s.alive && s.player) players++;
+        check(players >= 2, "the forces weren't placed: " + players);
+        check(w.defs.list.size() >= 2, "the defences weren't placed: " + w.defs.list.size());
+        // the extra outbreak points: the dead near each (people on the street, or in the counts there)
+        for (float[] p : new float[][]{{0.3f, 0.4f}, {0.62f, 0.58f}}) {
+            int near = 0;
+            for (int i = 0; i < w.e.top; i++)
+                if (w.e.loc[i] == Ents.FREE && w.e.kind[i] == Ents.ZOMBIE && dist(w.e.x[i], w.e.y[i], p[0] * m, p[1] * m) < 900) near++;
+            int s = w.r.sectorOfPx(p[0] * m, p[1] * m);
+            check(near + w.sec.zIn[s] >= 50, "no dead at the point " + p[0] + "," + p[1] + ": " + near + " + " + w.sec.zIn[s]);
+        }
+        check(w.strat.hordes.size() >= 1, "no horde");
+        camOver(w, Setup.originX, Setup.originY);
+        steps(w, 35);
+        check(w.script.triggers.get(0).fired && w.script.triggers.get(2).fired, "the timed triggers didn't fire");
+        check(Audit.check(w).isEmpty(), "audit: " + Audit.check(w));
+        // saved and loaded, it plays on exactly
+        ByteArrayOutputStream bo = new ByteArrayOutputStream();
+        SaveIO.save(w, bo);
+        World l = SaveIO.load(content, new ByteArrayInputStream(bo.toByteArray()), 2);
+        check(l.script != null && l.script.goals.size() == 3, "the loaded game lost its script");
+        for (int k = 0; k < 15 * 20; k++) {
+            w.step();
+            l.step();
+        }
+        check(Audit.hash(l) == Audit.hash(w), "diverged after loading");
+        // and replays exactly, from a file
+        bo.reset();
+        Replay.save(w, bo);
+        Replay r = Replay.load(content, new ByteArrayInputStream(bo.toByteArray()), 2);
+        r.runTo(w.tick);
+        check(Audit.hash(r.w) == Audit.hash(w), "the replay came out different");
+        w.shutdown();
+        l.shutdown();
+        r.w.shutdown();
+    }
+
+    // the code's tables before they moved to content.ini (for the test that they arrived unchanged)
+    static final String[] OLD_PRE = {"Ash", "Brook", "Cedar", "Elm", "Fair", "Glen", "Hart", "Iron", "Kings", "Lake",
+            "Mill", "North", "Oak", "Pine", "Red", "Stone", "West", "Wood", "Clear", "Silver", "Spring", "Maple", "Willow",
+            "Cold", "Black", "Green", "High", "Mason", "Rose", "Bright", "Clay", "Cotton", "Deer", "Eagle", "Fox", "Hazel",
+            "Lin", "Mead", "Port", "Sutton", "Thorn", "Union", "Wal", "Bell", "Bay", "Copper", "Crest"};
+    static final String[] OLD_SUF = {"ford", "ton", "field", "ville", "dale", " Falls", "port", "burg", "wood",
+            " Springs", " Hill", "haven", "brook", "view", " Crossing", "ridge", "mont", " Creek", "water", "bury"};
+    static final String[] OLD_BNAMES = {"House", "Apartments", "Offices", "Tower", "Shop", "Warehouse", "Farmhouse",
+            "Barn", "Police station", "Hospital", "Power station", "Fuel depot", "Barracks", "Motor pool", "Prison",
+            "Research lab", "Church", "School", "Mall", "Guard armory", "Bus depot", "Cell block", "Water works",
+            "Telephone exchange", "Food warehouse", "Fire station", "City hall", "Railway station", "Terminal", "Dock warehouse",
+            "State house", "Tent"};
+    static final String[] OLD_PRESETS = {"Coast", "River Valley", "Highlands", "Lake District"};
+    /** Region checksums (tiles, buildings and junctions, then every roof) and names, recorded on the code before the move. */
+    static final long[] OLD_REGION = {7541346224121036853L, 5717814252102046637L, 1073831598034722776L, -5103872686852295160L,
+            350794609727050026L, -194660480813946018L, -6916372190236208595L, 8371790037975010950L};
+    static final int[] OLD_REGION_NAMES = {-432190659, -1698590290, 987147127, -170146497, 1805316018, -2130176824, -2143075508, -1708706981};
+    static final long[] OLD_NATION = {-2588273170170537126L, 8295708271490474933L, 3116740770274513315L, 4709034136227997975L};
+    static final int OLD_NAMES = 1579710398;
+
+    static void dataMoved() throws Exception {
+        check(java.util.Arrays.equals(Data.names("placePrefixes"), OLD_PRE), "place prefixes");
+        check(java.util.Arrays.equals(Data.names("placeSuffixes"), OLD_SUF), "place suffixes (\"_\" is a space)");
+        for (int k = 0; k < OLD_BNAMES.length; k++) check(Data.buildingName(k).equals(OLD_BNAMES[k]), "building " + k);
+        check(Data.presetCount() == 4, "presets: " + Data.presetCount());
+        for (int k = 0; k < 4; k++) check(Data.presetName(k).equals(OLD_PRESETS[k]) && Data.terrain(k) == k, "preset " + k);
+        check(java.util.Arrays.equals(Data.outside("mobilise", null), new String[]{"infantry", "armour", "infantry", "artillery"}), "mobilisation");
+        for (String o : new String[]{"lab", "crash", "prison", "festival", "port", "random", "state", "countryside", "edges", "none"})
+            check(Data.origin(o) != null, "no origin " + o);
+        check(Data.pitched(Region.B_HOUSE) && Data.pitched(Region.B_CHURCH) && !Data.pitched(Region.B_OFFICE), "roof shapes");
+        check(Data.lit(Region.B_HOSPITAL) && Data.home(Region.B_TOWER) && !Data.lit(Region.B_SHOP), "lights");
+        // the maps, their roofs and names, as the code made them before
+        int k = 0;
+        for (int size : new int[]{768, 1024})
+            for (int p = 0; p < 4; p++, k++) {
+                Region r = RegionGen.generate(size, p, 100 + p * 7 + size);
+                long h = r.checksum();
+                for (int b = 0; b < r.bCount; b++) h = (h ^ r.broof[b]) * 1099511628211L;
+                StringBuilder n = new StringBuilder(r.name);
+                for (Region.Settlement s : r.settlements) n.append('|').append(s.name);
+                for (Region.Facility f : r.facilities) n.append('|').append(f.name);
+                check(h == OLD_REGION[k], "region " + size + " " + p + " changed: " + h);
+                check(n.toString().hashCode() == OLD_REGION_NAMES[k], "region " + size + " " + p + "'s names changed");
+            }
+        for (int p = 0; p < 4; p++) {
+            Nation nt = NationGen.generate(8192, p, 31 + p, 2);
+            long h = nt.checksum();
+            for (int c = 0; c < 6; c++) {
+                Chunk ch = ChunkGen.generate(nt, (c * 37 + 40) % (nt.size / Chunk.SIZE), (c * 23 + 40) % (nt.size / Chunk.SIZE));
+                h = h * 31 + ch.checksum();
+                for (int b = 0; b < ch.bCount; b++) h = (h ^ ch.broof[b]) * 1099511628211L;
+            }
+            check(h == OLD_NATION[p], "nation " + p + " changed: " + h);
+        }
+        StringBuilder ppl = new StringBuilder();
+        for (int i = 0; i < 300; i++) ppl.append(Names.person(9, i)).append(Names.callsign(Content.SOLDIER, i)).append(Names.callsign(Content.COP, i));
+        Rng rng = new Rng(5);
+        for (int i = 0; i < 50; i++) ppl.append(Names.country(rng)).append(Names.state(rng));
+        check(ppl.toString().hashCode() == OLD_NAMES, "people's, states' and countries' names changed");
+    }
+
+    static String builtinIni() throws Exception {
+        return new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get("assets/content.ini")), "UTF-8");
+    }
+
+    static String loadError(String ini) {
+        try {
+            Content.load(new ByteArrayInputStream(ini.getBytes("UTF-8")));
+            return null;
+        } catch (Exception e) {
+            return e.getMessage();
+        }
+    }
+
+    static void dataModded() throws Exception {
+        String ini = builtinIni();
+        try {
+            String mod = ini.replaceFirst("placePrefixes = [^\n]*", "placePrefixes = Zed, Quorn")
+                    + "\n[preset drycoast]\nindex = 4\nname = Dry Coast\nterrain = coast\nlevel = 0.24\nrelief = 0.4\nfeature = 1.2\nfeatureAt = 0.18\nfeatureCap = 0.2\nrivers = 1\nnaval = 1\n"
+                    + "\n[origin mall]\nname = The fuel depot\nstart = facility\nfacility = fuel\nstreet = 40\n"
+                    + "\n[origin biglab]\nname = A bigger lab leak\nstart = lab\n";
+            Content mc = Content.load(new ByteArrayInputStream(mod.getBytes("UTF-8")));
+            check(mc.rulesHash == content.rulesHash, "a data section changed the rules' fingerprint");
+            check(Data.presetCount() == 5 && Data.presetName(4).equals("Dry Coast"), "the mod's preset");
+            Region r = RegionGen.generate(768, 4, 5);
+            check(r.settlements.get(0).name.startsWith("Zed") || r.settlements.get(0).name.contains("Zed") || r.settlements.get(0).name.contains("Quorn"), "the mod's names: " + r.settlements.get(0).name);
+            check(r.checksum() != RegionGen.generate(768, 0, 5).checksum(), "the mod's preset made the coast");
+            // an origin at a kind of facility, and one that reuses a built-in start
+            Content.Scenario sc = new Content.Scenario();
+            sc.id = "modstart";
+            sc.name = "Mod start";
+            sc.mode = "sandbox";
+            sc.origin = "mall";
+            sc.goal = "";
+            sc.desc = "";
+            sc.zombies = 100;
+            World w = Setup.newGame(mc, 768, 4, 6, sc, 1, Roles.GOD, 60000);
+            w.sp.build(w.e);
+            check(w.totalZombies() == 100, "the mod's origin put down " + w.totalZombies() + " of the dead");
+            Region.Facility fuel = null;
+            for (Region.Facility f : w.r.facilities) if (f.kind == Region.F_FUEL && fuel == null) fuel = f;
+            check(fuel == null || dist(Setup.originX, Setup.originY, fuel.x, fuel.y) < 50, "it didn't start at the fuel depot");
+            w.shutdown();
+            sc.origin = "biglab";
+            w = Setup.newGame(mc, 768, 4, 6, sc, 1, Roles.GOD, 60000);
+            Region.Facility lab = null;
+            for (Region.Facility f : w.r.facilities) if (f.kind == Region.F_LAB && lab == null) lab = f;
+            check(lab != null && dist(Setup.originX, Setup.originY, lab.x, lab.y) < 50, "the origin that reuses the lab start");
+            w.shutdown();
+            // mistakes are told plainly, by line
+            String e1 = loadError(ini + "\n[weapon broken]\nrange = far\n");
+            check(e1 != null && e1.contains("line ") && e1.contains("[weapon broken]") && e1.contains("number"), "a bad number: " + e1);
+            String e2 = loadError(ini + "\n[scenario bad]\nname = Bad\ntrigger.1 = sometime -> horde:0.1,0.1,10\n");
+            check(e2 != null && e2.contains("[scenario bad]") && e2.contains("no condition called sometime"), "a bad trigger: " + e2);
+            String e3 = loadError(ini + "\n[building odd]\nindex = 40\nroofs = #123456\n");
+            check(e3 != null && e3.contains("indices"), "a gap in the buildings: " + e3);
+            String e4 = loadError(ini + "\n[gadget x]\nsize = 1\n");
+            check(e4 != null && e4.contains("unknown kind of section"), "an unknown section: " + e4);
+            String e5 = loadError(ini + "\njust some words\n");
+            check(e5 != null && e5.contains("expected key = value"), "a stray line: " + e5);
+        } finally {
+            // the built-in tables back in place for the other tests
+            Content.load(new ByteArrayInputStream(ini.getBytes("UTF-8")));
+        }
+        check(Data.presetCount() == 4, "the built-in presets weren't put back");
+    }
     static void steps(World w, float seconds) {
         for (int k = 0; k < (int) (seconds * 20); k++) w.step();
     }
@@ -1371,6 +1789,46 @@ public final class Tests {
         test("director: a replay rebuilds the same outbreak", new T() {
             public void run() throws Exception {
                 replayExact(768);
+            }
+        });
+        test("director: seeking to any time gives the same hash as playing straight through", new T() {
+            public void run() throws Exception {
+                seekExact(768);
+            }
+        });
+        test("director: a camera path glides through its keyframes and is saved as a director's cut", new T() {
+            public void run() throws Exception {
+                camPathCut();
+            }
+        });
+        test("script: triggers fire deterministically, survive a save, and replay", new T() {
+            public void run() throws Exception {
+                scriptTriggers();
+            }
+        });
+        test("script: the scenario's own goals end the game, won or lost", new T() {
+            public void run() throws Exception {
+                scriptGoals();
+            }
+        });
+        test("editor: a scenario with every new feature saves, loads and replays", new T() {
+            public void run() throws Exception {
+                editorEverything(768);
+            }
+        });
+        test("editor: a scenario with every new feature on a national map (8192)", new T() {
+            public void run() throws Exception {
+                editorEverything(8192);
+            }
+        });
+        test("data: content.ini holds exactly what the code had, maps unchanged", new T() {
+            public void run() throws Exception {
+                dataMoved();
+            }
+        });
+        test("data: a mod's own names, preset and origin work, and mistakes are told by line", new T() {
+            public void run() throws Exception {
+                dataModded();
             }
         });
         test("tools: every new action replays exactly, and saves", new T() {

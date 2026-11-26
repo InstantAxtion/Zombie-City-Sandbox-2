@@ -162,7 +162,7 @@ public final class Replay {
     public boolean needsLoad(long tick) {
         if (tick < w.tick) return true;
         Snap s = nearest(tick);
-        return s.tick > w.tick + 1200;
+        return s.tick > w.tick + 1200; // (a game hour)
     }
 
     /** The world as it was at a snapshot (a fresh world: blocking, may run on another thread). */
@@ -202,7 +202,7 @@ public final class Replay {
         /** Adds (or replaces, within a game minute) a keyframe; keeps them in tick order. */
         public void add(long tick, float cx, float cy, float zoom) {
             for (int k = 0; k < ticks.size(); k++)
-                if (Math.abs(ticks.get(k) - tick) < 1200) {
+                if (Math.abs(ticks.get(k) - tick) < 20) {
                     ticks.remove(k);
                     keys.remove(k);
                     break;
