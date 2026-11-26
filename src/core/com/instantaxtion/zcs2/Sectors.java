@@ -137,6 +137,7 @@ public final class Sectors {
     public float attraction(int s) {
         float a = popIn[s] + w.sp.secCiv[s] * 4 + (w.sp.secCop[s] + w.sp.secSol[s]) * 3;
         if (w.night() && w.strat.lit(s) && home[s] > 0) a += 60;
+        if (w.night() && w.fires.burning(s)) a += 80;
         return a;
     }
 
@@ -181,6 +182,7 @@ public final class Sectors {
                 float bites = Math.min(popIn[s], rate * popIn[s] / (popIn[s] + dens));
                 int b = stoch(bites, s * 7L + 1);
                 popIn[s] -= b;
+                w.ecology.fed(s, b);
                 int killed = stoch(b * 0.2f, s * 7L + 2);
                 bodies[s] += killed;
                 inf[s] += b - killed;
@@ -259,7 +261,7 @@ public final class Sectors {
             for (int k = 0; k < m; k++) {
                 float[] p = spot(s, k);
                 if (p == null) break;
-                Content.ZType zt = w.pickZType(-1, s * 131L + k);
+                Content.ZType zt = w.pickZType(-1, s * 131L + k, s);
                 w.spawnZombie(p[0], p[1], zt);
                 zIn[s]--;
             }
@@ -326,25 +328,31 @@ public final class Sectors {
         for (int d = 0; d < 8; d++) {
             if ((connect[s] & (1 << d)) == 0) continue;
             int t = neighbour(s, d);
-            float a = attraction(t) + Rng.unit(w.seed, w.tick, s * 8L + d) * 2;
-            if (a > best) {
+            // (something has to be there to draw them: the random part only breaks ties)
+            float a = attraction(t) / w.ecology.cost[t];
+            if (a <= 0) continue;
+            a += Rng.unit(w.seed, w.tick, s * 8L + d) * 2;
+            if (a > best + 1) {
                 best = a;
                 bd = d;
             }
         }
+        float rate = 0.02f;
         if (bd < 0) {
-            // nothing to go to: shamble about a little
-            if (Rng.unit(w.seed, w.tick, s * 5L) < 0.08f) bd = Rng.hashInt(w.seed, w.tick, s, 8);
+            // nothing to go to: shamble about a little (more when hungry)
+            if (Rng.unit(w.seed, w.tick, s * 5L) < 0.08f * Math.min(1, dt)) bd = Rng.hashInt(w.seed, w.tick, s, 8);
             if (bd < 0 || (connect[s] & (1 << bd)) == 0) return;
+            rate = 0.003f;
         }
         int t = neighbour(s, bd);
-        int m = Math.min(zIn[s], stoch((zIn[s] * 0.02f + 0.2f) * dt * w.weather.zombieSpeed(), s * 13L));
+        int m = Math.min(zIn[s], stoch((zIn[s] * rate + 0.2f) * dt * w.weather.zombieSpeed() * w.ecology.migrateFactor(s), s * 13L));
         if (m <= 0) return;
         // a big mass on the move becomes a horde you can see on the map
-        if (zIn[s] >= 300 && popIn[t] == 0 && settlement[s] < 0) {
+        if (zIn[s] >= w.ecology.hordeThreshold(s) && popIn[t] == 0 && settlement[s] < 0) {
             w.strat.formHorde(s, zIn[s] / 2);
             return;
         }
+        w.ecology.carry(s, t, m, zIn[t]);
         zIn[s] -= m;
         zIn[t] += m;
     }

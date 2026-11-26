@@ -15,8 +15,8 @@ import java.util.List;
  * and fight person by person. In strategic fast-forward, everything is numbers.
  */
 public final class Forces extends Module {
-    public static final int GARRISON = 0, MOVING = 1, HOLDING = 2, BROKEN = 3;
-    public static final String[] STATES = {"In garrison", "On the move", "Holding", "Broken, falling back"};
+    public static final int GARRISON = 0, MOVING = 1, HOLDING = 2, BROKEN = 3, AIRLIFT = 4;
+    public static final String[] STATES = {"In garrison", "On the move", "Holding", "Broken, falling back", "In the air"};
 
     public static final class Formation {
         public int id;
@@ -342,7 +342,7 @@ public final class Forces extends Module {
                     w.news.headline(f.name + " has been destroyed", f.hq.x, f.hq.y);
                     continue;
                 }
-                if (f.state != BROKEN && f.state != MOVING) {
+                if (f.state != BROKEN && f.state != MOVING && f.state != AIRLIFT) {
                     f.state = BROKEN;
                     w.news.radio(f.name + " is broken and falling back", f.hq.x, f.hq.y, News.LOSS);
                 }
@@ -439,7 +439,7 @@ public final class Forces extends Module {
             if (f.pool == null || !w.strat.online(f.id)) continue;
             boolean hq = f.kind == Region.F_HQ;
             Formation fm = hq ? formationOf(f) : null;
-            if (fm != null && (fm.state == MOVING || !fm.alive)) continue;
+            if (fm != null && (fm.state == MOVING || fm.state == AIRLIFT || !fm.alive)) continue;
             int faction = hq ? fm.faction : f.kind == Region.F_POLICE || f.kind == Region.F_PRISON ? Ents.COP : Ents.SOLDIER;
             int armed = armedAt(f, faction);
             if (armed <= 0) continue;
@@ -486,7 +486,7 @@ public final class Forces extends Module {
         for (Strategic.Horde h : w.strat.hordes) {
             if (!h.alive) continue;
             for (Formation fm : formations) {
-                if (!fm.alive || fm.state == MOVING) continue;
+                if (!fm.alive || fm.state == MOVING || fm.state == AIRLIFT) continue;
                 float dx = h.x - fm.hq.x, dy = h.y - fm.hq.y;
                 if (dx * dx + dy * dy > 1500 * 1500) continue;
                 int armed = armedAt(fm.hq, fm.faction);

@@ -14,7 +14,7 @@ import java.util.zip.InflaterInputStream;
  * rebuilt from its seed, then the saved tiles (rubble, blown bridges) are laid over it.
  */
 public final class SaveIO {
-    public static final int VERSION = 2;
+    public static final int VERSION = 3;
     private static final int MAGIC = 0x5A435332; // "ZCS2"
 
     public static void save(World w, OutputStream os) throws IOException {
@@ -400,7 +400,7 @@ public final class SaveIO {
         o.writeInt(s.hordes.size());
         for (Strategic.Horde h : s.hordes) {
             o.writeInt(h.id); o.writeInt(h.count); o.writeInt(h.target);
-            o.writeFloat(h.x); o.writeFloat(h.y); o.writeFloat(h.tx); o.writeFloat(h.ty); o.writeBoolean(h.alive);
+            o.writeFloat(h.x); o.writeFloat(h.y); o.writeFloat(h.tx); o.writeFloat(h.ty); o.writeBoolean(h.alive); o.writeFloat(h.keepT);
         }
         o.writeInt(s.columns.size());
         for (Strategic.Column c : s.columns) {
@@ -427,7 +427,7 @@ public final class SaveIO {
         for (int k = 0; k < n; k++) {
             Strategic.Horde h = new Strategic.Horde();
             h.id = in.readInt(); h.count = in.readInt(); h.target = in.readInt();
-            h.x = in.readFloat(); h.y = in.readFloat(); h.tx = in.readFloat(); h.ty = in.readFloat(); h.alive = in.readBoolean();
+            h.x = in.readFloat(); h.y = in.readFloat(); h.tx = in.readFloat(); h.ty = in.readFloat(); h.alive = in.readBoolean(); h.keepT = in.readFloat();
             s.hordes.add(h);
         }
         n = in.readInt();
