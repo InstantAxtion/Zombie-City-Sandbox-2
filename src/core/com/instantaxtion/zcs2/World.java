@@ -109,6 +109,7 @@ public final class World {
     World(Content c, Region r, long seed, int threads, boolean sparse) {
         this.c = c;
         this.r = r;
+        r.recordEdits(); // from here on, changes to the map go into its overlay (saves hold that, not the tiles)
         national = r.sect != Region.SECT;
         this.seed = seed;
         rng = new Rng(seed ^ 0x5EEDL);

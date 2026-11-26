@@ -355,6 +355,15 @@ public final class Tests {
         l.shutdown();
     }
 
+    /** An overlay as a save holds it. */
+    static byte[] overlayBytes(Overlay o) throws java.io.IOException {
+        ByteArrayOutputStream bo = new ByteArrayOutputStream();
+        java.io.DataOutputStream d = new java.io.DataOutputStream(bo);
+        o.write(d);
+        d.flush();
+        return bo.toByteArray();
+    }
+
     static void replayExact(int size) throws Exception {
         World w = Setup.newGame(content, size, RegionGen.COAST, 77, content.scenario("lab_leak"), 2, Roles.GOD, 60000);
         camOver(w, Setup.originX, Setup.originY);
@@ -2512,6 +2521,95 @@ public final class Tests {
                 l.shutdown();
             }
         });
+        test("save: the overlay holds every change to the map, and lays it over a new one exactly", new T() {
+            public void run() throws Exception {
+                World w = game(5, 1024, "sandbox", 2);
+                barricadeArena(w, 20, -1);
+                int k = 0;
+                while (w.undead.broken < 1 && k++ < 20 * 240) w.step();
+                check(w.undead.broken >= 1, "the dead broke nothing");
+                // a big bomb on a building, a bridge blown
+                int best = -1;
+                float bd = Float.MAX_VALUE;
+                for (int b = 0; b < w.r.bCount; b++) {
+                    float dx = (w.r.bx[b] + w.r.bw[b] / 2f) * 16 - Setup.originX - 400, dy = (w.r.by[b] + w.r.bh[b] / 2f) * 16 - Setup.originY;
+                    if (dx * dx + dy * dy < bd) {
+                        bd = dx * dx + dy * dy;
+                        best = b;
+                    }
+                }
+                w.combat.blast((w.r.bx[best] + w.r.bw[best] / 2f) * 16, (w.r.by[best] + w.r.bh[best] / 2f) * 16, 140, 300, -1, Ents.SOLDIER);
+                int bridge = -1;
+                for (int e = 0; e < w.r.roads.edgeCount && bridge < 0; e++) if (w.r.roads.ebridge[e]) bridge = e;
+                if (bridge >= 0) check(w.strat.blowBridge(bridge, true), "the bridge didn't go");
+                play(w, 10, false);
+                check(w.stats.buildingsLost > 0, "nothing came down");
+                Overlay ov = w.r.overlay;
+                int national = 0, edited = 0;
+                for (int p = 0; p < ov.pages(); p++) if (ov.edited(p)) edited++;
+                for (int b = 0; b < w.r.bCount; b++) if (w.r.bfloors[b] == 0) national++;
+                System.out.printf("        %d tile edits on %d of %d pages, %d buildings down%n", ov.editCount(), edited, ov.pages(), national);
+                ByteArrayOutputStream bo = new ByteArrayOutputStream();
+                SaveIO.save(w, bo);
+                World l = SaveIO.load(content, new ByteArrayInputStream(bo.toByteArray()), 2);
+                // every tile, every building on a tile and the navigation grid as they were, from the overlay alone
+                for (int p = 0; p < w.r.store.pages(); p++) {
+                    check(java.util.Arrays.equals(l.r.store.tile[p], w.r.store.tile[p]), "tiles of page " + p + " differ");
+                    check(java.util.Arrays.equals(l.r.store.bld[p], w.r.store.bld[p]), "buildings on page " + p + " differ");
+                }
+                check(java.util.Arrays.equals(l.r.navCopy(), w.r.navCopy()), "navigation differs");
+                check(l.r.checksum() == w.r.checksum() && Audit.hash(l) == Audit.hash(w), "different straight after loading");
+                check(java.util.Arrays.equals(overlayBytes(l.r.overlay), overlayBytes(ov)), "the overlay itself didn't come back");
+                // smaller than the tiles alone used to be, before compression
+                SaveIO.Snapshot raw = SaveIO.snapshot(w);
+                check(raw.length() < w.r.W * w.r.H, "the save is " + raw.length() + " bytes before compression");
+                // a barricade put back as it was is no edit at all
+                int ti = -1;
+                for (int i = 0; i < w.r.W * w.r.H && ti < 0; i++) if (w.r.t(i % w.r.W, i / w.r.W) == Tile.ROAD) ti = i;
+                int before = ov.editCount();
+                w.r.set(ti % w.r.W, ti / w.r.W, Tile.BARRICADE);
+                check(ov.editCount() == before + 1, "the barricade wasn't recorded");
+                w.r.set(ti % w.r.W, ti / w.r.W, Tile.ROAD);
+                check(ov.editCount() == before, "taking it down left an edit");
+                for (int s = 0; s < 20 * 20; s++) {
+                    w.step();
+                    l.step();
+                }
+                check(Audit.hash(l) == Audit.hash(w), "diverged after loading");
+                w.shutdown();
+                l.shutdown();
+            }
+        });
+        test("save: version 6 and 7 saves still load, play on, and save again smaller", new T() {
+            public void run() throws Exception {
+                // made by the game before overlays: 768, seed 21, 400 dead, an air strike and a blown bridge, 30 s in
+                String[] files = {"desktop/testdata/save-v6-dense.zcs", "desktop/testdata/save-v7-sparse.zcs"};
+                for (int f = 0; f < 2; f++) {
+                    java.io.File file = new java.io.File(files[f]);
+                    FileInputStream in = new FileInputStream(file);
+                    World w = SaveIO.load(content, in, 1);
+                    in.close();
+                    check(w.act.sparse == (f == 1), files[f] + ": the wrong mode");
+                    check(w.tick == 600 && w.r.checksum() == 2656092569829786196L, files[f] + ": loaded a different map or time");
+                    check(Audit.check(w).isEmpty(), "audit: " + Audit.check(w));
+                    check(Audit.ledger(w) == 0, "the ledger is off by " + Audit.ledger(w));
+                    check(w.r.overlay.editCount() > 0, "no edits found in a map with a blown bridge");
+                    // saved again as version 8: smaller, and it carries on exactly
+                    ByteArrayOutputStream bo = new ByteArrayOutputStream();
+                    SaveIO.save(w, bo);
+                    System.out.printf("        %s: %d KB, again as version 8 %d KB%n", file.getName(), file.length() >> 10, bo.size() >> 10);
+                    check(bo.size() < file.length(), "the new save isn't smaller: " + bo.size() + " vs " + file.length());
+                    World l = SaveIO.load(content, new ByteArrayInputStream(bo.toByteArray()), 1);
+                    check(l.r.checksum() == w.r.checksum() && Audit.hash(l) == Audit.hash(w), "different straight after loading");
+                    play(w, 20, false);
+                    play(l, 20, false);
+                    check(Audit.hash(w) == Audit.hash(l), "a re-saved game doesn't carry on the same");
+                    check(Audit.check(l).isEmpty(), Audit.check(l));
+                    w.shutdown();
+                    l.shutdown();
+                }
+            }
+        });
         test("zombies: a watched horde comes on as individuals at its front", new T() {
             public void run() {
                 World w = game(11, 768, "sandbox", 1);
@@ -3029,6 +3127,97 @@ public final class Tests {
                 check(mem / ms.length < 40 * 1024, "chunks take " + mem / ms.length + " bytes");
                 // downtown towers, suburbs of one or two floors
                 check(dMax[Nation.D_CORE] >= 30 && dFloors[Nation.D_SUBURB] / (float) Math.max(1, dBuild[Nation.D_SUBURB]) < 2.2f, "heights by district");
+            }
+        });
+        test("chunks: an edited chunk evicted, regenerated and the overlay applied comes back the same", new T() {
+            public void run() {
+                Nation n = country();
+                // a capital chunk with its own buildings, streets and a national building
+                int cx = -1, cy = -1, nat = -1, ccx = n.capital().cx / 64, ccy = n.capital().cy / 64;
+                for (int r0 = 0; r0 < 12 && nat < 0; r0++)
+                    for (int dy = -r0; dy <= r0 && nat < 0; dy++)
+                        for (int dx = -r0; dx <= r0 && nat < 0; dx++) {
+                            if (Math.max(Math.abs(dx), Math.abs(dy)) != r0) continue;
+                            Chunk c = ChunkGen.generate(n, ccx + dx, ccy + dy);
+                            int roads = 0;
+                            for (byte t : c.tile) if (t == Tile.ROAD) roads++;
+                            if (c.bCount < 3 || roads < 40) continue;
+                            for (short v : c.bld)
+                                if (v < 0) {
+                                    nat = -v - 1;
+                                    cx = ccx + dx;
+                                    cy = ccy + dy;
+                                    break;
+                                }
+                        }
+                check(nat >= 0, "no chunk with a national building");
+                // and a national building elsewhere, in chunks not in memory when it comes down
+                int far = -1;
+                for (int b = 0; b < n.bCount && far < 0; b++)
+                    if (n.bx[b] >> 6 > cx + 1 && n.bw[b] > 0 && Math.abs((n.by[b] >> 6) - cy) < 20) far = b;
+                check(far >= 0, "no other national building");
+                // a region over the nation's chunks, holding the national buildings (as P7's will)
+                Region r = new Region(n.size, n.size, n.seed, n.preset, Nation.SECT, false);
+                check(r.store.pw == n.sw, "pages and chunks don't line up");
+                r.bCount = n.bCount;
+                r.bx = n.bx;
+                r.by = n.by;
+                r.bw = n.bw;
+                r.bh = n.bh;
+                r.bfloors = n.bfloors.clone();
+                r.recordEdits();
+                ChunkCache cache = new ChunkCache(n, 64);
+                cache.setOverlay(r.overlay);
+                Chunk c = cache.get(cx, cy);
+                long generated = c.checksum();
+                cache.pin(cx, cy);
+                r.store.attach(c);
+                int x0 = cx * 64, y0 = cy * 64;
+                // barricades across streets; a street cratered and put back; a house's corner smashed, then it comes down
+                int walls = 0, back = -1;
+                for (int i = 0; i < Chunk.AREA; i++) {
+                    if (c.tile[i] != Tile.ROAD) continue;
+                    if (walls < 12) {
+                        r.set(x0 + (i & 63), y0 + (i >> 6), Tile.BARRICADE);
+                        walls++;
+                    } else if (back < 0) back = i;
+                }
+                r.set(x0 + (back & 63), y0 + (back >> 6), Tile.RUBBLE);
+                r.set(x0 + (back & 63), y0 + (back >> 6), Tile.ROAD);
+                r.set(x0 + c.bx[0], y0 + c.by[0], Tile.GRASS);
+                r.destroyBuilding(c.id(0));
+                r.destroyBuilding(c.id(2));
+                r.destroyBuilding(nat);
+                r.destroyBuilding(far);
+                r.rebuildNav(x0, y0, x0 + 63, y0 + 63);
+                check(c.bfloors[0] == 0 && c.bfloors[2] == 0 && c.bfloors[1] > 0, "the wrong buildings came down");
+                check(r.overlay.editCount() == 12, r.overlay.editCount() + " tile edits held, not 12");
+                check(r.overlay.gone(c.index, 0) && r.overlay.gone(c.index, 2) && !r.overlay.gone(c.index, 1), "destroyed buildings not recorded");
+                for (short v : c.bld) check(v != -(nat + 1), "the national building still stands");
+                long edited = c.checksum();
+                check(edited != generated, "nothing changed");
+                check(cache.get(cx, cy) == c, "the chunk edited in place was taken for one needing its overlay");
+                cache.unpin(cx, cy);
+                check(cache.evict(cx, cy), "not evicted");
+                Chunk again = cache.get(cx, cy);
+                check(again != c && again.checksum() == edited, "regenerated with the overlay, it differs from the edited chunk");
+                // the other national building's chunks weren't in memory: they come in with its rubble
+                int others = 0;
+                for (int oy = n.by[far] >> 6; oy <= (n.by[far] + n.bh[far] - 1) >> 6; oy++)
+                    for (int ox = n.bx[far] >> 6; ox <= (n.bx[far] + n.bw[far] - 1) >> 6; ox++) {
+                        Chunk o = cache.get(ox, oy), fresh = ChunkGen.generate(n, ox, oy);
+                        int had = 0;
+                        for (int i = 0; i < Chunk.AREA; i++) {
+                            check(o.bld[i] != -(far + 1), "the national building stands in chunk " + ox + "," + oy);
+                            if (fresh.bld[i] == -(far + 1)) {
+                                had++;
+                                check(o.tile[i] == Tile.RUBBLE, "no rubble where it stood");
+                            }
+                        }
+                        if (had > 0) others++;
+                    }
+                check(others > 0, "the far national building stood in no chunk");
+                cache.shutdown();
             }
         });
         test("chunks: the cache evicts, pins, waits and regenerates the same chunk", new T() {

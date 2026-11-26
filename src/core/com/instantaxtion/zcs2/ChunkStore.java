@@ -2,7 +2,6 @@ package com.instantaxtion.zcs2;
 
 import java.io.DataInputStream;
 import java.io.IOException;
-import java.io.OutputStream;
 
 /**
  * Region's tiles and the building on each tile, kept in 64x64-tile pages (the Chunk square) instead of two dense
@@ -109,15 +108,7 @@ public final class ChunkStore {
         bld[(ty >> SHIFT) * pw + (tx >> SHIFT)][(ty & MASK) << SHIFT | (tx & MASK)] = (short) v;
     }
 
-    /** Writes the tiles row by row, top to bottom, W bytes a row: the same bytes as the old dense array. */
-    void writeTiles(OutputStream o) throws IOException {
-        for (int ty = 0; ty < H; ty++) {
-            int row = (ty & MASK) << SHIFT, base = (ty >> SHIFT) * pw;
-            for (int cx = 0; cx < pw; cx++) o.write(tile[base + cx], row, Math.min(SIZE, W - (cx << SHIFT)));
-        }
-    }
-
-    /** Reads what writeTiles wrote. */
+    /** Reads a save's tiles before version 8: row by row, top to bottom, W bytes a row (as the old dense array). */
     void readTiles(DataInputStream in) throws IOException {
         for (int ty = 0; ty < H; ty++) {
             int row = (ty & MASK) << SHIFT, base = (ty >> SHIFT) * pw;

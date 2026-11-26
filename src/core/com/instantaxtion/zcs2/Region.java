@@ -174,8 +174,35 @@ public final class Region {
         return tp[(ty >> 6) * pw + (tx >> 6)][(ty & 63) << 6 | (tx & 63)];
     }
 
+    /** Changes a tile (the game's edits: barricades, walls, rubble, blown bridges, camps), recorded in the overlay. */
     public void set(int tx, int ty, byte k) {
-        if (tx >= 0 && ty >= 0 && tx < W && ty < H) tp[(ty >> 6) * pw + (tx >> 6)][(ty & 63) << 6 | (tx & 63)] = k;
+        if (tx < 0 || ty < 0 || tx >= W || ty >= H) return;
+        int p = (ty >> 6) * pw + (tx >> 6), i = (ty & 63) << 6 | (tx & 63);
+        byte[] pg = tp[p];
+        byte was = pg[i];
+        if (was == k) return;
+        pg[i] = k;
+        if (overlay != null) edited(p, overlay.tile(p, i, was, k));
+    }
+
+    /**
+     * The edits made to the map since it was generated (Overlay), recorded from recordEdits() on; null before (the
+     * generators write tiles freely). Saves hold it instead of every tile.
+     */
+    public Overlay overlay;
+
+    /** Starts recording edits into the overlay (World does, once the map is generated). */
+    void recordEdits() {
+        if (overlay == null) overlay = new Overlay(store.pages());
+    }
+
+    /**
+     * A page was edited in place: a chunk standing as the page already holds the edit, so it is marked as having the
+     * overlay's new version applied (ChunkCache then doesn't apply the edits over it again).
+     */
+    private void edited(int p, int version) {
+        Chunk c = store.chunk(p);
+        if (c != null) c.overlayVersion = version;
     }
 
     /** Writes a tile with no bounds check (the generators, on tiles they know are on the map). */
@@ -373,22 +400,60 @@ public final class Region {
         return d < 0 ? -1 : (c.cy * Chunk.SIZE + d) * Tile.SIZE + Tile.SIZE / 2f;
     }
 
-    /** Turns a building into rubble (blasts, air strikes): people inside are the sector's problem. */
-    public void destroyBuilding(int i) {
+    /**
+     * Turns a building into rubble (blasts, air strikes, fires burning out): people inside are the sector's problem.
+     * Takes Region's buildings and (on a national map) a chunk's own; the overlay records which came down, not the
+     * rubble tile by tile.
+     */
+    public void destroyBuilding(int id) {
+        if ((id & Chunk.CHUNK_FLAG) != 0) {
+            destroyChunkBuilding(id);
+            return;
+        }
+        int i = id;
         for (int ty = by[i]; ty < by[i] + bh[i]; ty++)
-            for (int tx = bx[i]; tx < bx[i] + bw[i]; tx++)
-                if (in(tx, ty) && store.bldRaw(tx, ty) == -(i + 1)) {
-                    raw(tx, ty, Tile.RUBBLE);
-                    store.setBldRaw(tx, ty, 0);
+            for (int tx = bx[i]; tx < bx[i] + bw[i]; tx++) {
+                if (!in(tx, ty)) continue;
+                int p = store.pageOf(tx, ty);
+                if (!store.resident(p)) {
+                    // a page not in memory (a national map) gets the rubble drawn when it comes in
+                    if (overlay != null) overlay.nationalOn(p, i);
+                    continue;
                 }
+                if (store.bldRaw(tx, ty) != -(i + 1)) continue;
+                raw(tx, ty, Tile.RUBBLE);
+                store.setBldRaw(tx, ty, 0);
+                if (overlay != null) edited(p, overlay.rubbleNational(p, ChunkStore.local(tx, ty), i));
+            }
         bfloors[i] = 0;
         rebuildNav(bx[i] - 2, by[i] - 2, bx[i] + bw[i] + 2, by[i] + bh[i] + 2);
+    }
+
+    private void destroyChunkBuilding(int id) {
+        Chunk c = chunkOf(id);
+        int b = Chunk.localOf(id), x0 = c.cx * Chunk.SIZE + c.bx[b], y0 = c.cy * Chunk.SIZE + c.by[b];
+        int p = c.cy * pw + c.cx;
+        for (int y = c.by[b]; y < c.by[b] + c.bh[b]; y++)
+            for (int x = c.bx[b]; x < c.bx[b] + c.bw[b]; x++) {
+                int i = y * Chunk.SIZE + x;
+                if (c.bld[i] != b + 1) continue;
+                c.tile[i] = Tile.RUBBLE;
+                c.bld[i] = 0;
+                if (overlay != null) edited(p, overlay.rubbleLocal(p, i, b));
+            }
+        c.bfloors[b] = 0;
+        rebuildNav(x0 - 2, y0 - 2, x0 + c.bw[b] + 2, y0 + c.bh[b] + 2);
     }
 
     /** Map changes (rubble, blown bridges) for the painter to redraw: a counter and the changed tile rectangles. */
     public int changes;
     public final List<int[]> dirty = new ArrayList<int[]>();
 
+    /**
+     * Works the navigation cells over tiles (x0, y0)-(x1, y1) out again after the tiles changed, and marks them for
+     * the painter. It records nothing in the overlay: navigation cells follow from the tiles, so applying the
+     * overlay to a chunk works them out again the same way.
+     */
     public void rebuildNav(int x0, int y0, int x1, int y1) {
         changes++;
         dirty.add(new int[]{x0, y0, x1, y1});
@@ -397,6 +462,8 @@ public final class Region {
         int cx1 = Math.min(navW - 1, x1 / NAV), cy1 = Math.min(navH - 1, y1 / NAV);
         for (int cy = cy0; cy <= cy1; cy++)
             for (int cx = cx0; cx <= cx1; cx++) {
+                byte[] pg = np[(cy >> 5) * pw + (cx >> 5)];
+                if (pg == null) continue; // a page not in memory: worked out when it comes in
                 int open = 0, road = 0;
                 for (int dy = 0; dy < NAV; dy++)
                     for (int dx = 0; dx < NAV; dx++) {
@@ -404,8 +471,7 @@ public final class Region {
                         if (Tile.walkable(k)) open++;
                         if (Tile.roadish(k)) road++;
                     }
-                byte[] pg = np[(cy >> 5) * pw + (cx >> 5)];
-                if (pg != null) pg[(cy & 31) << 5 | (cx & 31)] = (byte) (open < 2 ? 0 : road >= 2 ? 2 : 1);
+                pg[(cy & 31) << 5 | (cx & 31)] = (byte) (open < 2 ? 0 : road >= 2 ? 2 : 1);
             }
     }
 

@@ -6,9 +6,10 @@ import java.io.FileInputStream;
  * Baselines for the move to real-scale maps (docs/SCALE_PLAN.md):
  *   world:  today's maps: memory by component, build time, the once-a-second update and fast-forward speed;
  *   nation: the national coarse layer at each national size: build time, memory, people, road graph, routing;
+ *   save:   save sizes (raw and compressed) of an outbreak with an air strike, dense and sparse, at 1024, 2304, 3072;
  *   sectors: the once-a-second update and a fast-forward game day on a national map's sectors (P3), for a quiet
  *            country, a war in the capital and the whole country collapsing.
- *   java -Xmx2g ... ScaleProbe [world|nation|sectors|all] [sizes...]
+ *   java -Xmx2g ... ScaleProbe [world|nation|save|sectors|all] [sizes...]
  */
 public final class ScaleProbe {
     public static void main(String[] a) throws Exception {
@@ -17,6 +18,14 @@ public final class ScaleProbe {
             Content c = Content.load(new FileInputStream("assets/content.ini"));
             int[] sizes = a.length > 1 && what.equals("world") ? parse(a) : new int[]{1536, 2304, 3072};
             for (int size : sizes) world(c, size);
+        }
+        if (what.equals("save")) {
+            Content c = Content.load(new FileInputStream("assets/content.ini"));
+            int[] sizes = a.length > 1 ? parse(a) : new int[]{1024, 2304, 3072};
+            for (int size : sizes) {
+                save(c, size, false);
+                save(c, size, true);
+            }
         }
         if (what.equals("nation") || what.equals("all")) {
             int[] sizes = a.length > 1 && what.equals("nation") ? parse(a) : Nation.SIZES;
@@ -219,5 +228,33 @@ public final class ScaleProbe {
         }
         System.out.printf("    routes over 3 km: two-level cost %.4f of plain A* on average, %.4f at worst; plain %.1f ms (%d junctions), two-level %.1f ms (%d)%n",
                 sum / k, worst, t1 / 1e6 / k, s1 / k, t2 / 1e6 / k, s2 / k);
+    }
+
+    /** An outbreak (2,000 dead painted round the origin) 40 s in, an air strike on it, 20 s more: the save's size before and after compression. */
+    static void save(Content c, int size, boolean sparse) throws Exception {
+        boolean was = ActiveSet.sparseDefault;
+        ActiveSet.sparseDefault = sparse;
+        try {
+            World w = Setup.newGame(c, size, RegionGen.COAST, 7, c.scenario("lab_leak"), 2);
+            w.camX0 = Setup.originX - 600;
+            w.camX1 = Setup.originX + 600;
+            w.camY0 = Setup.originY - 900;
+            w.camY1 = Setup.originY + 900;
+            w.camDetail = true;
+            Tools.paintZombies(w, Setup.originX, Setup.originY, 2000, 600, -1);
+            for (int k = 0; k < 40 * 20; k++) w.step();
+            Actions.strike(w, Setup.originX + 300, Setup.originY + 200);
+            for (int k = 0; k < 20 * 20; k++) w.step();
+            long t0 = System.nanoTime();
+            SaveIO.Snapshot raw = SaveIO.snapshot(w);
+            java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream();
+            SaveIO.compress(raw, bo);
+            long ms = (System.nanoTime() - t0) / 1000000;
+            System.out.printf("save %d %s: %d KB raw, %d KB compressed (%d ms); %d dead, %d buildings lost%n", size, sparse ? "sparse" : "dense ",
+                    raw.length() >> 10, bo.size() >> 10, ms, w.totalZombies(), w.stats.buildingsLost);
+            w.shutdown();
+        } finally {
+            ActiveSet.sparseDefault = was;
+        }
     }
 }

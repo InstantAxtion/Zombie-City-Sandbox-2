@@ -12,17 +12,21 @@ import java.util.zip.InflaterInputStream;
 /**
  * Saved games. The save format has a version; the game's rules don't. A save holds everything the simulation
  * depends on, so a loaded game carries on exactly as it would have (the tests check this). The region itself is
- * rebuilt from its seed, then the saved tiles (rubble, blown bridges) are laid over it.
+ * rebuilt from its seed, then the saved overlay (Overlay: barricades, rubble, blown bridges, destroyed buildings) is
+ * laid over it; saves before version 8 held every tile instead.
  */
 public final class SaveIO {
     /**
-     * The newest format this game reads and writes. Version 7 is a game with a sparse active set (ActiveSet): it holds
-     * the set after the header and the scent field only on active pages. A game whose every chunk is active (today's
-     * maps) still writes version 6, byte for byte as before the set existed.
+     * The newest format this game reads and writes, the one every save is written in.
+     * <ul>
+     * <li>8: the map as its overlay (the edits since it was generated) instead of every tile; a flag for a sparse
+     * active set, then the set as in 7; the sectors sparsely (each field as its differences from a new game's values,
+     * runs of no difference counted); the scent field as pages, only those it reaches.</li>
+     * <li>7: a game with a sparse active set (ActiveSet): the set after the header, the scent field on active pages.</li>
+     * <li>6: every chunk active (today's maps); 3-5 older still. 3-7 hold every tile, the sectors and scent whole.</li>
+     * </ul>
      */
-    public static final int VERSION = 7;
-    /** The version a game with every chunk active writes. */
-    public static final int DENSE_VERSION = 6;
+    public static final int VERSION = 8;
     /** The oldest save this version still reads (3: the game's 1.2; the fields added since get their defaults). */
     public static final int OLDEST = 3;
     private static final int MAGIC = 0x5A435332; // "ZCS2"
@@ -151,8 +155,8 @@ public final class SaveIO {
      * thread). compress() can then run anywhere, and save() is exactly snapshot() then compress().
      */
     public static Snapshot snapshot(World w) throws IOException {
-        // room for the tiles, the scent field and the rest at once, so the buffer seldom has to grow
-        Snapshot raw = new Snapshot(w.r.W * w.r.H + w.flow.dist.length * 2 + (4 << 20));
+        // room for the rest at once, so the buffer seldom has to grow (a save is mostly the individuals and modules)
+        Snapshot raw = new Snapshot(4 << 20);
         DataOutputStream o = new DataOutputStream(raw);
         write(w, o);
         o.flush();
@@ -205,7 +209,7 @@ public final class SaveIO {
 
     private static void write(World w, DataOutputStream o) throws IOException {
         o.writeInt(MAGIC);
-        o.writeInt(w.act.sparse ? VERSION : DENSE_VERSION);
+        o.writeInt(VERSION);
         o.writeLong(w.c.rulesHash);
         // the content by id, so a later game with more or reordered content reads this save by name
         writeIds(o, unitIds(w.c));
@@ -220,8 +224,9 @@ public final class SaveIO {
         o.writeLong(w.seed);
         o.writeUTF(w.scenario == null ? "" : w.scenario.id);
         o.writeInt(w.mode);
+        o.writeBoolean(w.act.sparse);
         if (w.act.sparse) w.act.write(o);
-        w.r.store.writeTiles(o);
+        w.r.overlay.write(o);
         bytes(o, w.r.bfloors, w.r.bCount);
         bools(o, w.r.roads.ealive, w.r.roads.edgeCount);
         facilities(o, w);
@@ -241,7 +246,7 @@ public final class SaveIO {
         ents(o, w.e);
         vehicles(o, w.veh);
         squads(o, w);
-        sectors(o, w.sec);
+        sectorsSparse(o, w.sec);
         dispatch(o, w.disp);
         military(o, w.mil);
         strategic(o, w.strat);
@@ -249,7 +254,7 @@ public final class SaveIO {
         news(o, w.news);
         stats(o, w.stats);
         effects(o, w.fx);
-        flow(o, w);
+        flowPages(o, w);
         modules(o, w);
         extras(o, w);
         extras5(o, w);
@@ -269,15 +274,28 @@ public final class SaveIO {
         String scen = in.readUTF();
         int mode = in.readInt();
         Region r = RegionGen.generate(size, preset, rseed);
-        // version 7: a sparse active set, restored before anything else so the world goes on with exactly that set
-        boolean sparse = ver >= 7;
+        // a sparse active set (version 7, or 8 says), restored before anything else so the world goes on with exactly
+        // that set
+        boolean sparse = ver >= 8 ? in.readBoolean() : ver == 7;
         World w = new World(c, r, seed, threads, sparse);
         if (sparse) w.act.read(in);
         w.scenario = scen.length() == 0 ? null : c.scenario(scen);
         w.mode = mode;
-        r.store.readTiles(in);
+        byte[][] generated = null;
+        if (ver >= 8) {
+            Overlay ov = Overlay.read(in);
+            if (ov.pages() != r.store.pages()) throw new IOException("save is damaged");
+            ov.applyTo(r);
+            r.overlay = ov;
+        } else {
+            // every tile: kept as generated first, so the edits can be told from the rest (the overlay)
+            generated = new byte[r.store.pages()][];
+            for (int p = 0; p < generated.length; p++) if (r.store.resident(p)) generated[p] = r.store.tile[p].clone();
+            r.store.readTiles(in);
+        }
         byte[] floors = readBytes(in);
         System.arraycopy(floors, 0, r.bfloors, 0, Math.min(floors.length, r.bCount));
+        if (generated != null) r.overlay = Overlay.diff(r, generated);
         for (int b = 0; b < r.bCount; b++) {
             if (r.bfloors[b] != 0) continue;
             for (int ty = r.by[b]; ty < r.by[b] + r.bh[b]; ty++)
@@ -304,15 +322,18 @@ public final class SaveIO {
         readEnts(in, w.e, map);
         readVehicles(in, w.veh, map);
         readSquads(in, w, ver, map);
-        readSectors(in, w.sec);
-        readDispatch(in, w.disp);
+        if (ver >= 8) readSectorsSparse(in, w.sec);
+        else readSectors(in, w.sec);
+        w.sec.idx.reset(); // (every district wakes: the sector index starts again from what was loaded)
+        readDispatch(in, w.disp, ver);
         readMilitary(in, w.mil);
         readStrategic(in, w.strat);
         readGov(in, w.gov);
         readNews(in, w.news);
         readStats(in, w.stats);
         readEffects(in, w.fx);
-        readFlow(in, w);
+        if (ver >= 8) readFlowPages(in, w);
+        else readFlow(in, w);
         w.loadRemap = map;
         try {
             readModules(in, w, ver);
@@ -693,20 +714,95 @@ public final class SaveIO {
 
     // ------------------------------------------------------------------ sectors, calls, command
 
-    private static void sectors(DataOutputStream o, Sectors s) throws IOException {
+    /**
+     * Version 8: each field as its differences from a new game's values (popIn: home; firstZ: -1; everything else
+     * nothing), runs of no difference counted rather than written. Most of a big map stays as it started.
+     */
+    private static void sectorsSparse(DataOutputStream o, Sectors s) throws IOException {
         int n = s.n;
-        ints(o, s.popIn, n); ints(o, s.zIn, n); ints(o, s.bodies, n); ints(o, s.ambient, n);
-        floats(o, s.inf, n); floats(o, s.hot, n); floats(o, s.panic, n); floats(o, s.firstZ, n);
-        floats(o, s.driftX, n); floats(o, s.driftY, n);
-        bools(o, s.alerted, n); bools(o, s.cam, n);
+        int[] d = new int[n];
+        for (int i = 0; i < n; i++) d[i] = s.popIn[i] - s.home[i];
+        runs(o, d, n, true);
+        runs(o, s.zIn, n, true);
+        runs(o, s.bodies, n, true);
+        runs(o, s.ambient, n, true);
+        for (float[] f : new float[][]{s.inf, s.hot, s.panic, s.firstZ, s.driftX, s.driftY}) {
+            int base = Float.floatToRawIntBits(f == s.firstZ ? -1f : 0f);
+            for (int i = 0; i < n; i++) d[i] = Float.floatToRawIntBits(f[i]) ^ base;
+            runs(o, d, n, false);
+        }
+        for (boolean[] b : new boolean[][]{s.alerted, s.cam}) {
+            for (int i = 0; i < n; i++) d[i] = b[i] ? 1 : 0;
+            runs(o, d, n, true);
+        }
     }
 
+    private static void readSectorsSparse(DataInputStream in, Sectors s) throws IOException {
+        int n = s.n;
+        int[] d = new int[n];
+        readRuns(in, d, true);
+        for (int i = 0; i < n; i++) s.popIn[i] = s.home[i] + d[i];
+        readRuns(in, s.zIn, true);
+        readRuns(in, s.bodies, true);
+        readRuns(in, s.ambient, true);
+        for (float[] f : new float[][]{s.inf, s.hot, s.panic, s.firstZ, s.driftX, s.driftY}) {
+            int base = Float.floatToRawIntBits(f == s.firstZ ? -1f : 0f);
+            readRuns(in, d, false);
+            for (int i = 0; i < n; i++) f[i] = Float.intBitsToFloat(d[i] ^ base);
+        }
+        for (boolean[] b : new boolean[][]{s.alerted, s.cam}) {
+            readRuns(in, d, true);
+            for (int i = 0; i < n; i++) b[i] = d[i] != 0;
+        }
+    }
+
+    /**
+     * a[0..n) with its zeros in runs: the count, then (zeros, values, the values) until the end. small: the values as
+     * zigzag varints (counts), else as plain ints (float bits).
+     */
+    static void runs(DataOutputStream o, int[] a, int n, boolean small) throws IOException {
+        Overlay.writeVar(o, n);
+        int i = 0;
+        while (i < n) {
+            int z = i;
+            while (z < n && a[z] == 0) z++;
+            int e = z;
+            while (e < n && a[e] != 0) e++;
+            Overlay.writeVar(o, z - i);
+            Overlay.writeVar(o, e - z);
+            for (int k = z; k < e; k++) {
+                if (small) Overlay.writeVar(o, a[k] << 1 ^ a[k] >> 31);
+                else o.writeInt(a[k]);
+            }
+            i = e;
+        }
+    }
+
+    /** Reads what runs() wrote into a (zeros where it says none; values past a's end are read and dropped). */
+    static void readRuns(DataInputStream in, int[] a, boolean small) throws IOException {
+        int n = Overlay.readVar(in), i = 0;
+        java.util.Arrays.fill(a, 0);
+        while (i < n) {
+            i += Overlay.readVar(in);
+            int m = Overlay.readVar(in);
+            if (i > n || m > n - i) throw new IOException("save is damaged");
+            for (int k = 0; k < m; k++, i++) {
+                int v;
+                if (small) {
+                    int u = Overlay.readVar(in);
+                    v = u >>> 1 ^ -(u & 1);
+                } else v = in.readInt();
+                if (i < a.length) a[i] = v;
+            }
+        }
+    }
+
+    /** Versions 3-7: every sector's fields in full. */
     private static void readSectors(DataInputStream in, Sectors s) throws IOException {
         readInts(in, s.popIn); readInts(in, s.zIn); readInts(in, s.bodies); readInts(in, s.ambient);
         readFloats(in, s.inf); readFloats(in, s.hot); readFloats(in, s.panic); readFloats(in, s.firstZ);
         readFloats(in, s.driftX); readFloats(in, s.driftY);
         readBools(in, s.alerted); readBools(in, s.cam);
-        s.idx.reset();
     }
 
     private static void dispatch(DataOutputStream o, Dispatch d) throws IOException {
@@ -724,11 +820,14 @@ public final class SaveIO {
         }
         o.writeInt(d.callsTotal);
         o.writeFloat(d.cordonT);
-        ints(o, d.secIncident, d.secIncident.length);
+        // version 8: sparse, against -1 (most sectors have no incident)
+        int[] inc = new int[d.secIncident.length];
+        for (int i = 0; i < inc.length; i++) inc[i] = d.secIncident[i] + 1;
+        runs(o, inc, inc.length, true);
         bools(o, d.perimeter, d.perimeter.length);
     }
 
-    private static void readDispatch(DataInputStream in, Dispatch d) throws IOException {
+    private static void readDispatch(DataInputStream in, Dispatch d, int ver) throws IOException {
         int n = in.readInt();
         d.incidents.clear();
         for (int k = 0; k < n; k++) {
@@ -750,7 +849,11 @@ public final class SaveIO {
         }
         d.callsTotal = in.readInt();
         d.cordonT = in.readFloat();
-        readInts(in, d.secIncident);
+        if (ver >= 8) {
+            int[] inc = new int[d.secIncident.length];
+            readRuns(in, inc, true);
+            for (int i = 0; i < inc.length; i++) d.secIncident[i] = inc[i] - 1;
+        } else readInts(in, d.secIncident);
         readBools(in, d.perimeter);
     }
 
@@ -918,29 +1021,46 @@ public final class SaveIO {
     }
 
     /**
-     * The scent field: with every chunk active the whole grid row by row (INF where no scent reaches), as it always
-     * was; with a sparse set each active page's 32x32 cells, in page order (the set is saved before).
+     * Version 8: the scent field by pages (every page with every chunk active, else the active ones, in page order),
+     * each a flag and, if the scent reaches anywhere on it, its 32x32 cells.
      */
-    private static void flow(DataOutputStream o, World w) throws IOException {
+    private static void flowPages(DataOutputStream o, World w) throws IOException {
         Flow f = w.flow;
-        int nw = w.r.navW, nh = w.r.navH;
-        if (!w.act.sparse) {
-            short[] d = new short[nw * nh];
-            for (int cy = 0; cy < nh; cy++)
-                for (int cx = 0; cx < nw; cx++) d[cy * nw + cx] = f.atCell(cx, cy);
-            shorts(o, d, d.length);
-            return;
-        }
         ActiveSet a = w.act;
         short[] d = new short[ChunkStore.NAV_AREA];
+        int nw = w.r.navW, nh = w.r.navH;
         for (int p = 0; p < a.pages; p++) {
             if (!a.active(p)) continue;
             int x0 = (p % a.pw) * ChunkStore.NAVS, y0 = (p / a.pw) * ChunkStore.NAVS;
-            for (int k = 0; k < d.length; k++) d[k] = f.atCell(x0 + (k & (ChunkStore.NAVS - 1)), y0 + (k >> ChunkStore.NAV_SHIFT));
-            shorts(o, d, d.length);
+            boolean any = false;
+            for (int k = 0; k < d.length; k++) {
+                int x = x0 + (k & (ChunkStore.NAVS - 1)), y = y0 + (k >> ChunkStore.NAV_SHIFT);
+                d[k] = x < nw && y < nh ? f.atCell(x, y) : Flow.INF;
+                if (d[k] != Flow.INF) any = true;
+            }
+            o.writeBoolean(any);
+            if (any) shorts(o, d, d.length);
         }
     }
 
+    private static void readFlowPages(DataInputStream in, World w) throws IOException {
+        Flow f = w.flow;
+        ActiveSet a = w.act;
+        f.nextStamp();
+        short[] d = new short[ChunkStore.NAV_AREA];
+        int nw = w.r.navW, nh = w.r.navH;
+        for (int p = 0; p < a.pages; p++) {
+            if (!a.active(p) || !in.readBoolean()) continue;
+            readShorts(in, d);
+            int x0 = (p % a.pw) * ChunkStore.NAVS, y0 = (p / a.pw) * ChunkStore.NAVS;
+            for (int k = 0; k < d.length; k++) {
+                int x = x0 + (k & (ChunkStore.NAVS - 1)), y = y0 + (k >> ChunkStore.NAV_SHIFT);
+                if (d[k] != Flow.INF && x < nw && y < nh) f.setCell(x, y, d[k]);
+            }
+        }
+    }
+
+    /** Versions 3-7: the scent field whole, row by row (INF where no scent reaches); 7: each active page's cells. */
     private static void readFlow(DataInputStream in, World w) throws IOException {
         Flow f = w.flow;
         int nw = w.r.navW, nh = w.r.navH;
