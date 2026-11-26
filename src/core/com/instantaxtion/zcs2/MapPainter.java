@@ -32,6 +32,8 @@ public final class MapPainter {
     private long cacheBytes;
     private int seenChanges;
     public int painted;
+    /** Time spent painting pictures, ns (for drawing budgets and probes). */
+    public long paintNs;
     public boolean realistic = true;
 
     /** The ground's colours: the map's, muted (about 30% less saturated), asphalt flat. */
@@ -285,6 +287,7 @@ public final class MapPainter {
         int side = CHUNK * ppt;
         // a picture the cache let go of at this level is painted over rather than a new one made
         if (r == null && !window(cx * CHUNK, cy * CHUNK)) return null;
+        long t0 = System.nanoTime();
         img = spare[lvl];
         spare[lvl] = null;
         if (img == null) img = pf.newImage(side, side);
@@ -296,6 +299,7 @@ public final class MapPainter {
         cache.put(k, img);
         cacheBytes += bytes(lvl);
         painted++;
+        paintNs += System.nanoTime() - t0;
         while (cacheBytes > BUDGET_BYTES && cache.size() > 1) {
             Integer oldest = cache.keySet().iterator().next();
             GImage o = cache.remove(oldest);

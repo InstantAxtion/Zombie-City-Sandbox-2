@@ -43,6 +43,12 @@ public final class NationView {
         cam.dp = density;
         cam.setScreen(W, H, n.px());
         districtCost();
+        long p0 = System.nanoTime();
+        int[] pv = NationPainter.preview(n, 768);
+        BufferedImage pimg = new BufferedImage(768, 768, BufferedImage.TYPE_INT_ARGB);
+        pimg.setRGB(0, 0, 768, 768, pv, 0, 768);
+        System.out.printf("New Game preview from the coarse layer: %.0f ms%n", (System.nanoTime() - p0) / 1e6);
+        save(out, "0_preview", pimg);
 
         Region.Settlement cap = n.capital();
         Region.Settlement town = null;
@@ -89,6 +95,7 @@ public final class NationView {
         }
         sg.dispose();
         ImageIO.write(sheet, "png", new File(out, "zoom_sheet.png"));
+        flight(out, capX + 300, capY + 200);
         // the bands where one level fades into the next, side by side at the same place
         transitions(out, capX + 300, capY + 200);
         System.out.printf("chunk cache: %d chunks, %d made, %.1f MB; district pictures %.1f MB%n", cache.size(), cache.generated, cache.memoryBytes() / 1048576.0,
@@ -101,10 +108,10 @@ public final class NationView {
         NationPainter np = view.np;
         Region.Settlement cap = n.capital();
         int cdx = cap.cx / NationPainter.DISTRICT, cdy = cap.cy / NationPainter.DISTRICT;
+        for (int round = 0; round < 4; round++) // the first rounds warm the JIT up; the last is reported
         for (int lvl = 0; lvl < NationPainter.DTPP.length; lvl++) {
             int tpp = NationPainter.DTPP[lvl], side = NationPainter.DISTRICT / tpp;
             // warm up, then time the capital's 5x5 districts and 25 spread over the country
-            for (int k = 0; k < 6; k++) np.paint((cdx + k % 3) * 512, (cdy + k / 3) * 512, tpp, side);
             long t = System.nanoTime();
             int cnt = 0;
             for (int dy = -2; dy <= 2; dy++)
@@ -120,7 +127,7 @@ public final class NationView {
                 cnt++;
             }
             double country = (System.nanoTime() - t) / 1e6 / cnt;
-            System.out.printf("district picture %dx%d (%d tiles a pixel): %.2f ms in the capital, %.2f ms elsewhere%n", side, side, tpp, city, country);
+            if (round == 3) System.out.printf("district picture %dx%d (%d tiles a pixel): %.2f ms in the capital, %.2f ms elsewhere%n", side, side, tpp, city, country);
         }
     }
 
@@ -173,6 +180,47 @@ public final class NationView {
         File f = new File(out, name + ".png");
         ImageIO.write(img, "png", f);
         System.out.println("  " + f);
+    }
+
+    /** A flight from a street corner of the capital to the farthest town, as the camera flies it at 30 frames a second. */
+    static void flight(File out, float x, float y) throws Exception {
+        place(0.5f, x, y);
+        settle();
+        Region.Settlement far = null;
+        float best = 0;
+        for (Region.Settlement s : n.settlements) {
+            float d = (s.cx * 16f - x) * (s.cx * 16f - x) + (s.cy * 16f - y) * (s.cy * 16f - y);
+            if (s.kind == Region.S_TOWN && d > best) {
+                best = d;
+                far = s;
+            }
+        }
+        cam.flyTo(far.cx * 16f, far.cy * 16f, 0.4f);
+        BufferedImage sheet = new BufferedImage(8 * W / 6, 2 * H / 6, BufferedImage.TYPE_INT_RGB);
+        Graphics2D sg = sheet.createGraphics();
+        float minZ = 9, t = 0;
+        int f = 0, shot = 0;
+        double worst = 0;
+        while (cam.flying() && f < 400) {
+            cam.update(1 / 30f, n.px());
+            minZ = Math.min(minZ, cam.zoom);
+            long t0 = System.nanoTime();
+            BufferedImage img = frame(1 / 30f);
+            worst = Math.max(worst, (System.nanoTime() - t0) / 1e6);
+            if (f % 7 == 0 && shot < 16) {
+                sg.drawImage(img, (shot % 8) * W / 6, (shot / 8) * H / 6, W / 6, H / 6, null);
+                sg.setColor(Color.WHITE);
+                sg.drawString(String.format("%.2fs z %.4f", f / 30f, cam.zoom), (shot % 8) * W / 6 + 4, (shot / 8) * H / 6 + 14);
+                shot++;
+            }
+            f++;
+        }
+        settle();
+        sg.dispose();
+        save(out, "flight_sheet", sheet);
+        save(out, "flight_end", frame(0));
+        System.out.printf("flight of %.0f km from a street corner: %.2f s, lowest zoom %.4f, slowest frame %.0f ms (painting on the way)%n",
+                Math.sqrt(best) / 16 / Nation.KM, f / 30f, minZ, worst);
     }
 
     /** Crops of the screen's middle on either side of each band and inside it, at the same place. */

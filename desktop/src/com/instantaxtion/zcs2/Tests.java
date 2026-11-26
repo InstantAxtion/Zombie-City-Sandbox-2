@@ -2810,6 +2810,49 @@ public final class Tests {
                 System.out.printf("        9 chunks attached as pages, %d buildings read through Region%n", buildings);
             }
         });
+        test("drawing: a real-scale map at every zoom, from the coarse layer and cached chunks", new T() {
+            public void run() {
+                Nation n = country();
+                ChunkCache cache = new ChunkCache(n, 512);
+                DesktopPlatform pf = new DesktopPlatform(new java.io.File("build/test-data"));
+                WorldView v = new WorldView(NationPainter.source(n, cache), pf);
+                NationPainter np = v.np;
+                check(np.countryImage.width() == n.cw / np.countryStep && np.tintImage.width() == n.sw, "country picture and tint sized");
+                // district pictures are pure, and painting them makes no chunk
+                int dx = n.capital().cx / NationPainter.DISTRICT, dy = n.capital().cy / NationPainter.DISTRICT;
+                for (int lvl = 0; lvl < NationPainter.DTPP.length; lvl++) {
+                    int tpp = NationPainter.DTPP[lvl], side = NationPainter.DISTRICT / tpp;
+                    int[] a = np.paint(dx * 512, dy * 512, tpp, side), b = np.paint(dx * 512, dy * 512, tpp, side);
+                    check(java.util.Arrays.equals(a, b), "district picture " + lvl + " the same twice");
+                }
+                check(cache.generated == 0, "district pictures generated chunks");
+                Camera cam = new Camera();
+                cam.dp = 2;
+                cam.setScreen(360, 640, n.px());
+                check(cam.minZoom < 0.002f && cam.minZoom > 0.0005f, "minZoom from the map's size: " + cam.minZoom);
+                java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(360, 640, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+                float[] zooms = {cam.minZoom, 0.006f, 0.035f, 0.1f, 0.5f};
+                for (float z : zooms) {
+                    cam.zoom = z;
+                    cam.cx = n.capital().cx * 16f;
+                    cam.cy = n.capital().cy * 16f;
+                    cam.update(0, n.px());
+                    for (int f = 0; f < 30; f++) {
+                        java.awt.Graphics2D g = img.createGraphics();
+                        v.draw(new DesktopGfx(g, 360, 640), cam, 0.016f);
+                        g.dispose();
+                        cache.drain();
+                    }
+                }
+                check(np.painted > 0 && v.map.painted > 0, "pictures painted: district " + np.painted + ", street " + v.map.painted);
+                check(cache.generated > 0 && cache.generated < 200, "chunks made for the street view: " + cache.generated);
+                // the middle of the screen at street zoom is a street picture of the capital, not the sea
+                int c = img.getRGB(180, 320);
+                check(c != (NationPainter.WATER_DEEP | 0) , "street view drew nothing");
+                cache.shutdown();
+                System.out.printf("        %d district and %d street pictures painted, %d chunks made in the background%n", np.painted, v.map.painted, cache.generated);
+            }
+        });
     }
 }
 

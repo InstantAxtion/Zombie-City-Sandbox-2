@@ -273,9 +273,13 @@ public final class NationPainter {
      * exact buildings.
      */
     int blockTile(int d, float dn, boolean city, boolean capital, int x0, int y0, int x1, int y1, int tx, int ty) {
+        return blockTile(d, dn, city, capital, x0, y0, x1, y1, tx, ty, Rng.hash(seed ^ 0xB10CL, x0, y0));
+    }
+
+    /** The same, with the block's hash (Rng.hash(seed ^ 0xB10C, x0, y0)) given. */
+    int blockTile(int d, float dn, boolean city, boolean capital, int x0, int y0, int x1, int y1, int tx, int ty, long h) {
         if (tx == x0 || tx == x1 || ty == y0 || ty == y1) return MapPainter.GROUND[d == Nation.D_RURAL ? Tile.GRASS : Tile.PAVEMENT];
         int u = tx - x0 - 1, v = ty - y0 - 1, iw = x1 - x0 - 1, ih = y1 - y0 - 1;
-        long h = Rng.hash(seed ^ 0xB10CL, x0, y0);
         boolean wide = iw >= ih;
         int along = wide ? u : v, across = wide ? v : u, len = wide ? iw : ih, dep = wide ? ih : iw;
         switch (d) {
@@ -519,8 +523,8 @@ public final class NationPainter {
             if (!n.built(s)) continue;
             float dn = (n.density[s] & 15) / 15f;
             int d = n.district[s];
-            int c = d == Nation.D_PARK ? 0xFF5E8A4E : d == Nation.D_INDUSTRIAL ? 0xFF8A8C96 : MapPainter.mix(0xFFE2CFA6, 0xFF8A5A4A, dn);
-            float a = d == Nation.D_PARK ? 0.25f : 0.22f + 0.38f * dn;
+            int c = d == Nation.D_PARK ? 0xFF5E8A4E : d == Nation.D_INDUSTRIAL ? 0xFF8A8C96 : MapPainter.mix(0xFFC8BCA4, 0xFF6E5C58, dn);
+            float a = d == Nation.D_PARK ? 0.15f : 0.12f + 0.3f * dn;
             px[s] = MapPainter.alpha(c, a);
         }
         return px;
@@ -635,7 +639,7 @@ public final class NationPainter {
 
     // the scratch arrays for painting (one picture at a time, on the drawing thread)
     private int[] out;
-    private float[] wet, dist, wobL, jxL, jyL;
+    private float[] wet, dist, wobL, jxL, jyL, trL;
     private byte[] deep, hard;
 
     /**
@@ -663,15 +667,14 @@ public final class NationPainter {
             wobL = new float[L * L];
             jxL = new float[L * L];
             jyL = new float[L * L];
+            trL = new float[L * L];
         }
         int lx0 = (int) Math.floor(ox / ls), ly0 = (int) Math.floor(oy / ls);
-        for (int j = 0; j < L; j++)
-            for (int i = 0; i < L; i++) {
-                float x = (lx0 + i) * ls, y = (ly0 + j) * ls;
-                wobL[j * L + i] = ix.wob.value(x / 9f, y / 9f) * 0.6f + ix.wob.value(x / 3.1f + 40, y / 3.1f) * 0.25f;
-                jxL[j * L + i] = ix.jitX.value(x / 11f, y / 11f) * 7;
-                jyL[j * L + i] = ix.jitY.value(x / 11f, y / 11f) * 7;
-            }
+        noiseGrid(ix.wob, 9f, 0, lx0, ly0, ls, L, wobL, 0.6f, false);
+        noiseGrid(ix.wob, 3.1f, 40, lx0, ly0, ls, L, wobL, 0.25f, true);
+        noiseGrid(ix.jitX, 11f, 0, lx0, ly0, ls, L, jxL, 7, false);
+        noiseGrid(ix.jitY, 11f, 0, lx0, ly0, ls, L, jyL, 7, false);
+        if (tpp <= 2) noiseGrid(ix.trees, 5f, 0, lx0, ly0, ls, L, trL, 1, false);
         int ns = Math.min(tpp, 2); // tiles sampled across a pixel, each way, for the land
         for (int py = 0; py < W; py++)
             for (int px = 0; px < W; px++) {
@@ -700,7 +703,7 @@ public final class NationPainter {
                 int cov = dryAt(tx + jx, ty + jy);
                 int col;
                 if (tpp <= 2) {
-                    float clump = ix.trees.value(tx / 5f, ty / 5f);
+                    float clump = lerp2(trL[a], trL[a + 1], trL[a + L], trL[a + L + 1], fx, fy);
                     int r = 0, g = 0, b = 0;
                     int bx = (int) Math.floor(tx - tpp / 2f), by = (int) Math.floor(ty - tpp / 2f);
                     for (int sy = 0; sy < ns; sy++)
@@ -765,16 +768,17 @@ public final class NationPainter {
         for (int i = 0; i < A; i++) {
             float wf = wet[i];
             if (wf <= 0) continue;
-            float d = Math.min(dist[i], 6) - tpp * 0.5f + 0.5f;
+            // as MapPainter: the distance (to the pixel's middle) capped at 6 tiles, deep water 2.5 further
+            float d = Math.min(6, Math.max(0.5f, dist[i] - tpp * 0.5f + 0.5f));
             if (deep[i] != 0) d += 2.5f;
-            int wc = MapPainter.waterColorAt(Math.max(0.5f, d));
+            int wc = MapPainter.waterColorAt(d);
             out[i] = wf >= 1 ? wc : MapPainter.mix(out[i], wc, wf);
             if (wf >= 0.5f) hard[i] = 1;
         }
         // the blocks of built sectors
         int sx0 = Math.max(0, (int) Math.floor(ox / Nation.SECT)), sy0 = Math.max(0, (int) Math.floor(oy / Nation.SECT));
         int sx1 = Math.min(n.sw - 1, (int) ((ox + W * tpp) / Nation.SECT)), sy1 = Math.min(n.sw - 1, (int) ((oy + W * tpp) / Nation.SECT));
-        int nsb = Math.min(tpp, 4); // samples each way in a pixel
+        int nsb = tpp <= 2 ? tpp : 3; // samples each way in a pixel (jittered in coarse pixels, so no lattice line is favoured)
         for (int sy = sy0; sy <= sy1; sy++)
             for (int sx = sx0; sx <= sx1; sx++) {
                 int s = sy * n.sw + sx;
@@ -790,6 +794,7 @@ public final class NationPainter {
                         if (reserved(s, bl)) continue;
                         // ChunkGen leaves blocks under four tiles wide unbuilt: a sidewalk at most
                         boolean tiny = bl[2] - bl[0] < 4 || bl[3] - bl[1] < 4;
+                        long bh = Rng.hash(seed ^ 0xB10CL, bl[0], bl[1]);
                         int px0 = Math.max(0, (int) Math.floor((bl[0] - ox) / tpp)), px1 = Math.min(W - 1, (int) Math.floor((bl[2] + 1 - ox - 0.001f) / tpp));
                         int py0 = Math.max(0, (int) Math.floor((bl[1] - oy) / tpp)), py1 = Math.min(W - 1, (int) Math.floor((bl[3] + 1 - oy - 0.001f) / tpp));
                         for (int py = py0; py <= py1; py++)
@@ -799,9 +804,18 @@ public final class NationPainter {
                                 int r = 0, g = 0, b = 0, in = 0;
                                 for (int qy = 0; qy < nsb; qy++)
                                     for (int qx = 0; qx < nsb; qx++) {
-                                        int tx = (int) Math.floor(ox + px * tpp + (qx + 0.5f) * tpp / nsb), ty = (int) Math.floor(oy + py * tpp + (qy + 0.5f) * tpp / nsb);
+                                        int tx, ty;
+                                        if (tpp <= 2) {
+                                            tx = (int) Math.floor(ox + px * tpp + qx);
+                                            ty = (int) Math.floor(oy + py * tpp + qy);
+                                        } else {
+                                            int gx = (int) Math.floor(ox) + px * tpp, gy = (int) Math.floor(oy) + py * tpp;
+                                            long jh = Rng.hash(seed ^ 0x5A3L, gx + qx, gy + qy);
+                                            tx = gx + (int) ((qx + ((jh & 1023) / 1024f)) * tpp / nsb);
+                                            ty = gy + (int) ((qy + ((jh >>> 10 & 1023) / 1024f)) * tpp / nsb);
+                                        }
                                         if (tx < bl[0] || tx > bl[2] || ty < bl[1] || ty > bl[3]) continue;
-                                        int c = tiny ? MapPainter.GROUND[Tile.PAVEMENT] : blockTile(d, dn, city, cap, bl[0], bl[1], bl[2], bl[3], tx, ty);
+                                        int c = tiny ? MapPainter.GROUND[Tile.PAVEMENT] : blockTile(d, dn, city, cap, bl[0], bl[1], bl[2], bl[3], tx, ty, bh);
                                         r += (c >> 16) & 255;
                                         g += (c >> 8) & 255;
                                         b += c & 255;
@@ -885,6 +899,48 @@ public final class NationPainter {
         return res;
     }
 
+    private float[] corners = new float[64];
+    private int[] cxs = new int[64], cys = new int[64];
+    private float[] fxs = new float[64], fys = new float[64];
+
+    /**
+     * nz.value(X / sc + off, Y / sc) times mul at the grid points X = (lx0 + i) * ls, Y = (ly0 + j) * ls (i, j < L),
+     * into out (or added to it), with each of the noise's lattice corners hashed once: the same arithmetic as
+     * Noise.value, so the same values.
+     */
+    private void noiseGrid(Noise nz, float sc, float off, int lx0, int ly0, int ls, int L, float[] out, float mul, boolean add) {
+        if (cxs.length < L) {
+            cxs = new int[L];
+            cys = new int[L];
+            fxs = new float[L];
+            fys = new float[L];
+        }
+        for (int i = 0; i < L; i++) {
+            float x = (lx0 + i) * ls / sc + off, y = (ly0 + i) * ls / sc;
+            cxs[i] = (int) Math.floor(x);
+            cys[i] = (int) Math.floor(y);
+            fxs[i] = Noise.fade(x - cxs[i]);
+            fys[i] = Noise.fade(y - cys[i]);
+        }
+        int bx = cxs[0], by = cys[0], cw = cxs[L - 1] - bx + 2, ch = cys[L - 1] - by + 2;
+        if (corners.length < cw * ch) corners = new float[cw * ch];
+        for (int j = 0; j < ch; j++)
+            for (int i = 0; i < cw; i++) corners[j * cw + i] = nz.lattice(bx + i, by + j);
+        for (int j = 0; j < L; j++) {
+            int rj = (cys[j] - by) * cw;
+            float fy = fys[j];
+            for (int i = 0; i < L; i++) {
+                int o = rj + cxs[i] - bx;
+                float fx = fxs[i];
+                float a = corners[o], b = corners[o + 1], c = corners[o + cw], d = corners[o + cw + 1];
+                float top = a + (b - a) * fx, bot = c + (d - c) * fx;
+                float v = (top + (bot - top) * fy) * mul;
+                if (add) out[j * L + i] += v;
+                else out[j * L + i] = v;
+            }
+        }
+    }
+
     private int[] stamp;
     private int stampN;
 
@@ -949,9 +1005,21 @@ public final class NationPainter {
         float y0 = (Math.min(ay, by) - rad) / k - oy / tpp, y1 = (Math.max(ay, by) + rad) / k - oy / tpp;
         int ix0 = Math.max(0, (int) Math.floor(x0)), ix1 = Math.min(W - 1, (int) Math.ceil(x1));
         int iy0 = Math.max(0, (int) Math.floor(y0)), iy1 = Math.min(W - 1, (int) Math.ceil(y1));
-        for (int y = iy0; y <= iy1; y++)
-            for (int x = ix0; x <= ix1; x++) {
-                float wx = (ox + (x + 0.5f) * tpp) * 16, wy = (oy + (y + 0.5f) * tpp) * 16;
+        float m = rad + k; // the reach of a pixel's coverage
+        for (int y = iy0; y <= iy1; y++) {
+            // the stretch of this row the band can touch: the segment's x between wy - m and wy + m, widened by m
+            float wy = (oy + (y + 0.5f) * tpp) * 16;
+            int rx0 = ix0, rx1 = ix1;
+            if (Math.abs(by - ay) > 1) {
+                float t0 = (wy - m - ay) / (by - ay), t1 = (wy + m - ay) / (by - ay);
+                float ta = Math.max(0, Math.min(t0, t1)), tb = Math.min(1, Math.max(t0, t1));
+                if (ta > tb) continue;
+                float xa = ax + (bx - ax) * ta, xb = ax + (bx - ax) * tb;
+                rx0 = Math.max(ix0, (int) Math.floor((Math.min(xa, xb) - m) / k - ox / tpp));
+                rx1 = Math.min(ix1, (int) Math.ceil((Math.max(xa, xb) + m) / k - ox / tpp));
+            }
+            for (int x = rx0; x <= rx1; x++) {
+                float wx = (ox + (x + 0.5f) * tpp) * 16;
                 float d = (float) Math.sqrt(segDist2(wx, wy, ax, ay, bx, by));
                 float cov = clamp01((rad - d) / k + 0.5f);
                 if (cov <= 0) continue;
@@ -962,6 +1030,7 @@ public final class NationPainter {
                 out[i] = cov >= 0.999f ? col : MapPainter.mix(out[i], col, cov);
                 if (cov >= 0.5f) hard[i] = 1;
             }
+        }
     }
 
     private static float lerp2(float a, float b, float c, float d, float fx, float fy) {

@@ -462,8 +462,11 @@ public final class WorldView {
     private void drawBuildings(Gfx g, Camera cam, int n) {
         float z = cam.zoom;
         float ccx = cam.cx, ccy = cam.cy;
-        float lk = lean3d ? 0.0016f : 0;
-        float maxLean = 60;
+        // on a real-scale map the buildings rise out of the street pictures' roofs as the zoom grows, so nothing
+        // jumps where they start being drawn (today's maps keep drawing them standing from the start)
+        float rise = np != null ? clamp01((z - 0.22f) / 0.12f) : 1;
+        float lk = lean3d ? 0.0016f * rise : 0;
+        float maxLean = 60 * rise;
         boolean detail = z > 0.45f;
         // pass 0: soft shadows (the sun in the south-west... from the top left), pass 1: walls, pass 2: roofs
         for (int pass = 0; pass < 3; pass++) {
@@ -474,7 +477,8 @@ public final class WorldView {
                 float sx = cam.toScreenX(wx), sy = cam.toScreenY(wy), sw = ww * z, sh = wh * z;
                 float height = Math.min(40, floors) * 3.2f + 4;
                 if (pass == 0) {
-                    float off = height * 0.32f * z;
+                    if (rise <= 0) continue;
+                    float off = height * 0.32f * z * rise;
                     g.color(0x22000000);
                     g.fillRect(sx + off * 0.5f, sy + off * 0.65f, sw + off * 0.5f, sh + off * 0.5f);
                     g.color(0x26000000);
@@ -489,7 +493,7 @@ public final class WorldView {
                 }
                 int roof = dbr[k];
                 if (pass == 1) {
-                    if (!lean3d) continue;
+                    if (!lean3d || rise <= 0) continue;
                     int wall = MapPainter.mix(MapPainter.shade(roof, 0.58f), 0xFF3C3E44, 0.35f);
                     if (ly < 0) face(g, sx, sy, sx + sw, sy, lx, ly, MapPainter.shade(wall, 1.12f), floors, -ly, detail);
                     if (lx > 0) face(g, sx + sw, sy, sx + sw, sy + sh, lx, ly, MapPainter.shade(wall, 0.86f), floors, lx, detail);
@@ -1497,7 +1501,6 @@ public final class WorldView {
         lastCy = cam.cy;
         lastZ = z;
         long budget = framesDrawn < 20 ? 40_000_000L : stillT > 0.25f ? 14_000_000L : paintBudgetNs;
-        long t0;
         float ox = cam.toScreenX(0), oy = cam.toScreenY(0);
         float da = districtFade(z), sa = streetFade(z);
         float dpx = NationPainter.DISTRICT * Tile.SIZE;
@@ -1523,7 +1526,7 @@ public final class WorldView {
                 districtsCover = any;
             }
         if (!districtsCover && !streetsCover) g.image(np.countryImage, ox, oy, worldPx * z, worldPx * z);
-        t0 = System.nanoTime(); // the budget is for painting
+        long p0 = np.paintNs + map.paintNs; // the budget is for painting
         if (da > 0 && !streetsCover) {
             int lvl = dlvl;
             float mx = (dx0 + dx1) / 2f, my = (dy0 + dy1) / 2f;
@@ -1532,13 +1535,13 @@ public final class WorldView {
                 for (int dy = dy0; dy <= dy1; dy++)
                     for (int dx = dx0; dx <= dx1; dx++) {
                         if ((int) Math.max(Math.abs(dx - mx), Math.abs(dy - my)) != ring) continue;
-                        boolean may = System.nanoTime() - t0 < budget;
+                        boolean may = (np.paintNs + map.paintNs - p0) < budget;
                         GImage img = np.district(dx, dy, lvl, may);
                         if (img == null) {
                             // another level stands in (coarser first); else a coarse one is cheap enough to paint now
                             for (int l = lvl - 1; l >= 0 && img == null; l--) img = np.district(dx, dy, l, false);
                             for (int l = lvl + 1; l < NationPainter.DTPP.length && img == null; l++) img = np.district(dx, dy, l, false);
-                            if (img == null && System.nanoTime() - t0 < budget + 4_000_000L) img = np.district(dx, dy, 0, true);
+                            if (img == null && (np.paintNs + map.paintNs - p0) < budget + 4_000_000L) img = np.district(dx, dy, 0, true);
                         }
                         if (img == null) continue;
                         float sx = cam.toScreenX(dx * dpx), sy = cam.toScreenY(dy * dpx), side = dpx * z;
@@ -1571,13 +1574,13 @@ public final class WorldView {
                 for (int cy = cy0; cy <= cy1; cy++)
                     for (int cx = cx0; cx <= cx1; cx++) {
                         if ((int) Math.max(Math.abs(cx - mx), Math.abs(cy - my)) != ring) continue;
-                        boolean may = System.nanoTime() - t0 < budget;
+                        boolean may = (np.paintNs + map.paintNs - p0) < budget;
                         GImage img = map.chunk(cx, cy, lvl, may);
                         if (img == null) {
                             for (int l = lvl - 1; l >= 0 && img == null; l--) img = map.chunk(cx, cy, l, false);
-                            if ((img == null || !map.has(cx, cy, Math.min(1, lvl))) && lvl >= 1 && System.nanoTime() - t0 < budget + 4_000_000L)
+                            if ((img == null || !map.has(cx, cy, Math.min(1, lvl))) && lvl >= 1 && (np.paintNs + map.paintNs - p0) < budget + 4_000_000L)
                                 img = map.chunk(cx, cy, 1, true);
-                            if (img == null && System.nanoTime() - t0 < budget + 4_000_000L) img = map.chunk(cx, cy, 0, true);
+                            if (img == null && (np.paintNs + map.paintNs - p0) < budget + 4_000_000L) img = map.chunk(cx, cy, 0, true);
                         }
                         if (img == null) continue;
                         float sx = cam.toScreenX(cx * pcPx), sy = cam.toScreenY(cy * pcPx), side = pcPx * z;
@@ -1585,7 +1588,7 @@ public final class WorldView {
                         else g.image(img, sx, sy, side, side, sa);
                     }
         }
-        float ta = clamp01((0.03f - z) / 0.018f);
+        float ta = clamp01((NationPainter.Z_DISTRICT * 1.4f - z) / (NationPainter.Z_DISTRICT * 0.6f));
         if (ta > 0) g.image(np.tintImage, ox, oy, worldPx * z, worldPx * z, ta);
     }
 
@@ -1750,8 +1753,8 @@ public final class WorldView {
             if (k == Region.F_HELIPAD || k == Region.F_PARK) continue;
             boolean major = k == Region.F_POWER || k == Region.F_BASE || k == Region.F_PRISON || k == Region.F_AIRBASE || k == Region.F_PORT || k == Region.F_AIRPORT;
             boolean emergency = k == Region.F_POLICE || k == Region.F_HOSPITAL;
-            if (z < 0.008f && !major) continue;
-            if (z < 0.03f && !major && !emergency) continue;
+            if (z < 0.025f && !major) continue;
+            if (z < 0.045f && !major && !emergency) continue;
             if (z < 0.06f && (k == Region.F_FIRE || k == Region.F_FUEL || k == Region.F_WATER || k == Region.F_PHONE || k == Region.F_FOODW
                     || k == Region.F_DEPOT || k == Region.F_LAB)) continue;
             float sx = cam.toScreenX(f.x), sy = cam.toScreenY(f.y);
