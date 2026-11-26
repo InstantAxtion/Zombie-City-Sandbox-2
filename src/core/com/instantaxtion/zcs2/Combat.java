@@ -48,6 +48,8 @@ final class Combat {
         Content.ZType zt = w.ztypeOf(z);
         if (dx * dx + dy * dy > (zt.radius + 12) * (zt.radius + 12)) return false;
         Content.Unit u = w.unitOf(v);
+        // behind sandbags the dead can't get at the armed so easily (Defences)
+        if (w.defs.count[Defences.SANDBAGS] > 0 && e.armed(v) && w.defs.sandbagged(e.x[v], e.y[v])) mult *= 0.6f;
         float dmg = zt.bite * mult * (1 - u.armor) * (0.8f + w.rng.nextFloat() * 0.4f);
         if (u.armor > 0 && w.rng.chance(0.35f)) dmg *= 0.5f;
         e.hp[v] -= dmg;
@@ -55,7 +57,7 @@ final class Combat {
         // in a frenzy they bite again sooner
         Undead ud = w.undead;
         if (ud.has(z) && w.time < ud.frenzyUntil[z]) e.aimT[z] *= 0.7f;
-        if (dmg > 3 && (e.flags[v] & Ents.F_INFECTED) == 0 && w.rng.chance(zt.infect * u.infect)) {
+        if (dmg > 3 && (e.flags[v] & Ents.F_INFECTED) == 0 && w.rng.chance(zt.infect * u.infect * w.rules.infection())) {
             e.flags[v] |= Ents.F_INFECTED;
             if (e.kind[v] == Ents.CIV && w.stats.resident(v)) {
                 int st = w.sec.settlement[w.r.sectorOfPx(e.x[v], e.y[v])];
@@ -166,7 +168,7 @@ final class Combat {
         float near = Math.max(0, 1 - d / wp.range);
         float crowd = w.sp.zombiesNear(e, x, y, 50, 4) >= 3 ? 0.7f : 1f;
         byte doc = armed ? ai.doctrine(i) : ArmedAI.D_NONE;
-        float hit = Math.min(0.97f, (0.45f + 0.55f * aim) * (0.55f + 0.45f * near) * crowd);
+        float hit = Math.min(0.97f, (0.45f + 0.55f * aim) * (0.55f + 0.45f * near) * crowd * (armed ? w.rules.force() : 1));
         boolean hits = w.rng.chance(hit);
         float ex = tx, ey = ty;
         if (!hits) {

@@ -14,6 +14,9 @@ public final class Squads {
     public static final String[] ORDER_NAMES = {"Standing by", "Moving", "Holding", "Responding", "On the cordon",
             "Returning to restock", "On patrol", "Guarding", "Demolition"};
     public static final int M_FOOT = 0, M_BOARD = 1, M_RIDE = 2;
+    /** How a squad fights: as ever, holding its fire (unless the dead are on it), or closing in on the dead near it. */
+    public static final int STANCE_NORMAL = 0, STANCE_HOLD = 1, STANCE_AGGRESSIVE = 2;
+    public static final String[] STANCE_NAMES = {"Normal", "Hold fire", "Aggressive"};
 
     public static final class Squad {
         public int id, faction, n, vehicle = -1, home = -1, order, mode, incident = -1, task = -1;
@@ -27,6 +30,9 @@ public final class Squads {
         public float hold = 40; // spread when holding
         public int template = -1; // the content squad it was made from
         public float idleT; // seconds idle at home (it stands down into the pool after a while)
+        /** STANCE_*; and whether it stays in its vehicle when it gets there (the player's "mount up"). */
+        public int stance;
+        public boolean stayMounted;
 
         public int leader(Ents e) {
             for (int k = 0; k < n; k++) if (e.loc[mem[k]] == Ents.FREE) return mem[k];
@@ -122,6 +128,34 @@ public final class Squads {
             if (aboardCount(s) > 0) dismount(s);
             s.mode = M_FOOT;
         }
+    }
+
+    /** The player's "mount up": everyone into the squad's vehicle, and they stay in it. False if it has none. */
+    public boolean mount(Squad s) {
+        if (!s.alive || s.vehicle < 0 || !w.veh.usable(s.vehicle)) return false;
+        s.stayMounted = true;
+        float vx = w.veh.x[s.vehicle], vy = w.veh.y[s.vehicle];
+        s.gx = vx;
+        s.gy = vy;
+        s.path = null;
+        if (aboardCount(s) == s.n) return true;
+        s.mode = M_BOARD;
+        s.boardT = 0;
+        return true;
+    }
+
+    /** The player's "dismount": everyone out where the vehicle is, holding there. */
+    public void dismountAll(Squad s) {
+        if (!s.alive) return;
+        s.stayMounted = false;
+        if (aboardCount(s) == 0 && s.mode == M_FOOT) return;
+        float[] p = where(s);
+        dismount(s);
+        s.mode = M_FOOT;
+        s.path = null;
+        s.order = O_HOLD;
+        s.gx = p[0];
+        s.gy = p[1];
     }
 
     private int aboardCount(Squad s) {
@@ -270,6 +304,7 @@ public final class Squads {
             return;
         }
         if (w.veh.arrived(v)) {
+            if (s.stayMounted) return;
             if (s.order == O_PATROL) {
                 w.veh.patrolOn(v);
                 return;

@@ -225,7 +225,7 @@ public final class Sectors {
             if (zIn[s] > 0 && popIn[s] > 0) {
                 float attackers = Math.min(zIn[s], popIn[s] * 0.5f + 20);
                 float k = (w.strat.lit(s) ? 1f : 1.35f) * (holdout(s) ? 0.3f : 1f) * w.gov.compliance(settlement[s]);
-                float rate = attackers * bite * dt * k * popIn[s] / (popIn[s] + dens);
+                float rate = attackers * bite * dt * k * popIn[s] / (popIn[s] + dens) * w.rules.infection();
                 float cap = popIn[s] * maxBite * dt / 60f + w.rule("biteFloor", 0.5f) * dt / 10f;
                 float bites = Math.min(popIn[s], Math.min(rate, cap));
                 int b = stoch(bites, s * 7L + 1);
@@ -352,7 +352,7 @@ public final class Sectors {
         }
         // people stay barricaded in while the dead are only outside; once the dead get in, they run
         int zHere = zO + zIn[s];
-        if (popIn[s] > 0 && zIn[s] > 0 && room) {
+        if (popIn[s] > 0 && zIn[s] > 0 && room && w.rules.civilians()) {
             int m = Math.min(popIn[s], Math.min((int) w.rule("emergeFleeing", 12), stoch(0.5f + zIn[s] * 0.3f + panic[s] * 2, s * 11L + 2)));
             for (int k = 0; k < m; k++) {
                 float[] p = spot(s, 100 + k);
@@ -365,7 +365,7 @@ public final class Sectors {
             }
         }
         // ordinary life on the streets, where the camera is
-        if (cam[s] && zHere == 0 && popIn[s] > 0 && room && !w.gov.streetsClosed() && !w.command.sheltering(settlement[s]) && w.daylight() > 0.3f) {
+        if (cam[s] && zHere == 0 && popIn[s] > 0 && room && w.rules.civilians() && !w.gov.streetsClosed() && !w.command.sheltering(settlement[s]) && w.daylight() > 0.3f) {
             int want = Math.min((int) w.rule("emergeStreet", 28), popIn[s] / 25 + 2);
             if (ambient[s] < want) {
                 int m = Math.min(want - ambient[s], 3);

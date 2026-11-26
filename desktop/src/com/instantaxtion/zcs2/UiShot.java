@@ -30,6 +30,10 @@ public final class UiShot {
             directorShots(pf);
             return;
         }
+        if (a.length > 4 && a[4].equals("tools")) {
+            toolShots();
+            return;
+        }
         if (a.length > 4 && a[4].equals("legible")) {
             legibleShots();
             return;
@@ -452,6 +456,200 @@ public final class UiShot {
     static void deleteAll(File f) {
         if (f.isDirectory()) for (File c : f.listFiles()) deleteAll(c);
         f.delete();
+    }
+
+    /** The player's tools: the palettes from content.ini, Build and Clear, orders, possession and the rules sheet. */
+    static void toolShots() throws Exception {
+        tap("new");
+        frames(2);
+        tap("mode:0");
+        frames(1);
+        tap("scen:1"); // lab leak, as God
+        frames(1);
+        tap("rules");
+        frames(1);
+        tap("rule:0");
+        tap("rule:6");
+        tap("rule:6");
+        frames(1);
+        shot("t01-rules-new-game");
+        tap("rules:close");
+        frames(1);
+        shot("t02-new-game-rules-changed");
+        tap("start");
+        waitPlay();
+        game.speedIdx = 0;
+        frames(60);
+        float cx = W / 2f, cy = H / 2f;
+        tap("tool:dead");
+        frames(2);
+        shot("t03-dead-palette");
+        tap("b:250000");
+        frames(1);
+        shot("t03b-dead-250k");
+        tap("b:10");
+        tap("tool:police");
+        frames(2);
+        shot("t04-police-officers");
+        tap("cat:police:veh");
+        frames(2);
+        shot("t05-police-vehicles");
+        tap("cat:police:sq");
+        frames(2);
+        shot("t06-police-squads");
+        tap("tool:army");
+        frames(1);
+        tap("cat:army:sq");
+        frames(2);
+        tapAt(cx - 60, cy + 60);
+        frames(2);
+        shot("t07-army-squads-placed");
+        tap("cat:army:units");
+        frames(2);
+        shot("t08-army-soldiers");
+        tap("tool:build");
+        frames(2);
+        shot("t09-build-defences");
+        game.cam.follow = -1;
+        game.cam.zoom = 1.5f;
+        frames(3);
+        String[] kinds = {"bd:mg", "bd:sandbags", "bd:wire", "bd:wire", "bd:ammo", "bd:medkit", "bd:post"};
+        float[][] at = {{40, -20}, {40, 30}, {150, -40}, {150, 40}, {-40, 60}, {0, 90}, {-60, -80}};
+        for (int k = 0; k < kinds.length; k++) {
+            tap(kinds[k]);
+            float[] p = walkAt(cx + at[k][0] * 2, cy + at[k][1] * 2);
+            tapAt(p[0], p[1]);
+        }
+        tap("bd:barricade");
+        game.touch(Game.DOWN, 0, cx + 150, cy - 90);
+        for (int k = 0; k < 8; k++) game.touch(Game.MOVE, 0, cx + 150, cy - 90 + k * 22);
+        game.touch(Game.UP, 0, cx + 150, cy + 80);
+        frames(30);
+        shot("t10-defences-placed");
+        game.cam.zoom = 0.75f;
+        frames(2);
+        tap("cat:build:ground");
+        frames(2);
+        shot("t11-build-ground");
+        tap("cat:build:people");
+        frames(2);
+        shot("t12-build-people");
+        tap("tool:erase");
+        frames(2);
+        shot("t13-clear-palette");
+        // orders: the squad placed above, its order modes and stance
+        tap("tool:orders");
+        frames(1);
+        tapAt(cx - 60, cy + 60);
+        frames(2);
+        tap("om:route");
+        tapAt(walkAt(cx - 120, cy + 140));
+        tapAt(walkAt(cx + 20, cy + 180));
+        tapAt(walkAt(cx + 120, cy + 120));
+        frames(2);
+        shot("t14-orders-route");
+        tap("o:go");
+        frames(20);
+        tap("om:cordon");
+        tapAt(walkAt(cx - 100, cy - 120));
+        frames(2);
+        shot("t15-orders-cordon-first-end");
+        tapAt(walkAt(cx + 60, cy - 140));
+        frames(30);
+        shot("t16-orders-cordon");
+        // a vehicle: a gunship placed and sent to orbit
+        tap("tool:army");
+        frames(1);
+        tap("cat:army:veh");
+        frames(1);
+        tap("v:gunship");
+        tapAt(cx, cy - 150);
+        frames(10);
+        tap("tool:look");
+        frames(1);
+        int v = -1;
+        for (int i = 0; i < game.w.veh.top; i++)
+            if (game.w.veh.usable(i) && game.w.veh.type(i).id.equals("gunship") && (v < 0 || game.w.veh.uid[i] > game.w.veh.uid[v])) v = i;
+        if (v >= 0) {
+            game.inspVeh = v;
+            frames(2);
+            shot("t17-vehicle-inspector");
+            tap("i:vorders");
+            frames(2);
+            tap("vo:2");
+            tapAt(cx + 100, cy + 40);
+            frames(20);
+            shot("t18-vehicle-orbit");
+            tap("vo:drive");
+            frames(20);
+            shot("t19-take-the-wheel");
+            tap("letgo");
+            frames(2);
+            tap("vo:done");
+        }
+        // a person: control them with the stick
+        tap("tool:look");
+        frames(1);
+        int who = -1;
+        for (int i = 0; i < game.w.e.top; i++)
+            if (game.w.e.loc[i] == Ents.FREE && game.w.e.armed(i)) {
+                who = i;
+                break;
+            }
+        if (who >= 0) {
+            game.inspEnt = who;
+            frames(2);
+            shot("t20-person-inspector");
+            tap("i:possess");
+            frames(40);
+            shot("t21-possessed");
+            tap("letgo");
+            frames(2);
+        }
+        frames(150);
+        tap("pause");
+        frames(2);
+        shot("t22-pause-rules-item");
+        tap("rules");
+        frames(2);
+        shot("t23-rules-in-game");
+        tap("rules:close");
+        frames(1);
+        tap("resume");
+        frames(2);
+        // a formation's postures, from the whole country
+        tap("tool:orders");
+        frames(1);
+        Forces.Formation fm = null;
+        for (Forces.Formation f : game.w.forces.formations) if (f.alive) { fm = f; break; }
+        if (fm != null) {
+            game.inspFormation = fm;
+            game.cam.flyTo(fm.hq.x, fm.hq.y, 0.08f);
+            frames(60);
+            shot("t24-formation-orders");
+        }
+    }
+
+    /** A screen point near (sx, sy) on open ground (not a building). */
+    static float[] walkAt(float sx, float sy) {
+        Camera c = game.cam;
+        for (int r = 0; r < 40; r++)
+            for (int a = 0; a < 12; a++) {
+                float x = sx + (float) Math.cos(a * 0.5236) * r * 6, y = sy + (float) Math.sin(a * 0.5236) * r * 6;
+                float wx = c.toWorldX(x), wy = c.toWorldY(y);
+                if (game.w.r.walkablePx(wx, wy) && game.w.r.walkablePx(wx + 12, wy) && game.w.r.walkablePx(wx - 12, wy)) return new float[]{x, y};
+            }
+        return new float[]{sx, sy};
+    }
+
+    static void tapAt(float[] p) {
+        tapAt(p[0], p[1]);
+    }
+
+    static void tapAt(float x, float y) {
+        game.touch(Game.DOWN, 0, x, y);
+        game.touch(Game.UP, 0, x, y);
+        frames(1);
     }
 
     static void waitPlay() throws Exception {

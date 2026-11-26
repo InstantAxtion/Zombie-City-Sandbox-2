@@ -31,7 +31,7 @@ All in one package, `com.instantaxtion.zcs2`. The core (`src/core`) never touche
 | Behaviour | `ZombieAI`, `Undead`, `CivAI`, `ArmedAI`, `Combat` | Thinking (in parallel) and carrying it out (in order): bites, shots, blasts, deaths, rising; the dead smashing, feeding, leading, lunging |
 | Forces | `Squads`, `Vehicles`, `Dispatch`, `Military` | Squads and their orders; driving on the road graph and flying; 911 calls, cordons; the army, gunships, tanks, air strikes, supply, outside help |
 | The region-wide | `Strategic`, `Gov`, `News`, `Stats`, `Records` | Facilities, power grids, ammunition, hordes, refugees, bridges, strains, goals; the alert level, trust, curfews, evacuations, rumours; the radio log; the numbers and the report; why things happened (a tracer of each fighter's last seconds, why towns fell, each formation's story, decisive moments, callouts and the alerts fast-forward stops for: read-only, a module of its own) |
-| Player | `Tools`, `Setup`, `Actions`, `Roles` | Everything the player can do (every change goes through `Actions`, which records it); building a new game, its scenario and the player's role; the country-scale campaign goals |
+| Player | `Tools`, `Setup`, `Actions`, `Roles`, `Defences`, `Orders`, `Rules` | Everything the player can do (every change goes through `Actions`, which records it); building a new game, its scenario and the player's role; the country-scale campaign goals; what the player builds, lasting orders, driving and possession, and the rules sheet |
 | Director | `Director`, `Replay`, `DirectorScreens` | The record of inputs, replays from a game's start, the timelapse, heatmaps; the replay list, timelapse and scenario editor screens |
 | Checking | `Audit`, `SaveIO` | Invariants and state hashes; saves |
 | Presentation | `Gfx`, `GImage`, `Platform`, `Camera`, `MapPainter`, `WorldView`, `Ui`, `Icons`, `Game`, `Settings`, `Texts` | Drawing at every zoom, the interface, the screens |
@@ -203,6 +203,31 @@ stick moves (`ArmedAI` hands it to `Combat.playerThink`), with its patrol kept c
 be fast-forwarded (that would fold them into the counts); instead, while none of the dead are near, "Skip ahead"
 steps the world in person as fast as the device can and stops when the dead come close. Speed is not an input, so
 replays don't change. A new game opens on the player's own piece (`Roles.focusOf`), with a button to the outbreak.
+
+## The player's tools
+
+Every verb is an `Actions` kind, so it is recorded and a replay carries it out at the same tick. The palettes are
+built from `content.ini` (every zombie type, unit, vehicle and squad template, a mod's own too); a squad template
+is placed with its vehicle. Three modules (saved) hold what lasts:
+
+- `Defences`: sandbags (cover: `ArmedAI.cover` and `aimMul`, and bites land softer), razor wire (`ZombieAI`
+  slows the dead in it; once a second it cuts them and wears out), machine-gun nests (a gunner pinned in place and
+  a gun firing along an arc, on the main thread after the move), ammunition crates and medical kits, and command
+  posts (the same nerve as a station or HQ near). Barricades, walls, roads, houses and clearing are tiles
+  (`Tools.build`, `Region.set` into the overlay), with the paths, the sectors' connectivity and the roads closed
+  by barricades caught up at once, as the engineers' walls are.
+- `Orders`: a squad's lasting order (a route of waypoints, falling back with its fire held, a cordon line it spreads
+  along, clearing an area, escorting a person or a vehicle), its stance (`Squads.Squad.stance`; hold fire is read
+  in the think) and whether it stays mounted; vehicles sent to go, orbit, attack an area or return; the vehicle the
+  stick drives (`Vehicles.update` hands it to `Orders.wheel`); the person God possesses (`World.playerEnt`, so
+  `Combat.playerThink` moves them); and formations' postures (attack, defend, withdraw, screen, dig in), which
+  scale the fights by the numbers in `Forces.aggregate`. Each order is drawn as a line and flags.
+- `Rules`: the dead's speed and infection, force strength, civilians on the streets, how early people flee,
+  outside help, the weather and the time of day, each read by one hook where it matters.
+
+The dead brush goes to 250,000: up to 1,500 as individuals (`Tools.MASS_INDIVIDUALS`), the rest into the counts
+of the sectors round about. The tests replay a session using every new verb, save and load it, and check that a
+machine-gun nest kills and razor wire holds the dead back.
 
 ## Director mode: replays are exact
 

@@ -58,10 +58,10 @@ public final class Weather extends Module {
     /** How fast the dead can move now (1 = normal). */
     public float zombieSpeed() {
         float t = temperature();
-        float cold = w.c.rule("coldSpeed", 0.7f);
-        if (t < -10) return cold * 0.7f;
-        if (t < 0) return cold;
-        return 1;
+        float cold = w.c.rule("coldSpeed", 0.7f), k = w.rules.zombieSpeed();
+        if (t < -10) return cold * 0.7f * k;
+        if (t < 0) return cold * k;
+        return k;
     }
 
     /** How far anyone can see (1 = normal). */
@@ -114,6 +114,11 @@ public final class Weather extends Module {
 
     private void change() {
         Rng r = w.rng;
+        if (w.rules.weather() >= 0) {
+            // held by the rules sheet
+            state = w.rules.weather();
+            return;
+        }
         float t = temperature();
         boolean winter = t < 3;
         float roll = r.nextFloat();
