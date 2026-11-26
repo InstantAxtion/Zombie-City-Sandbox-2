@@ -11,6 +11,10 @@ public final class WorldView {
     public boolean lean3d = true, blood = true, healthBars = true, names = true;
     public Squads.Squad selected;
     public Forces.Formation selectedFormation;
+    /** The map overlay shown (the national map's layers). */
+    public int overlay = OV_INFECTION;
+    public static final int OV_NONE = 0, OV_INFECTION = 1, OV_UTIL = 2, OV_SUPPLY = 3, OV_TRUST = 4, OV_FORCES = 5, OV_DEATHS = 6, OV_PEAK = 7;
+    public static final String[] OV_NAMES = {"Plain", "Infection", "Utilities", "Supplies", "Trust and fear", "Forces and fronts", "Deaths", "Peak infection"};
     public int inspectEnt = -1, inspectVehicle = -1;
     public float brushX = -1, brushY, brushR;
     public int brushColor;
@@ -532,8 +536,9 @@ public final class WorldView {
     private void overlays(Gfx g, Camera cam) {
         float z = cam.zoom;
         float cs = Region.SECT * Tile.SIZE;
+        layers(g, cam);
         // the infection as a stain over the sectors (from far out, and where the dead are only counted)
-        if (z < 0.5f) {
+        if (z < 0.5f && (overlay == OV_INFECTION || overlay == OV_FORCES)) {
             int sx0 = Math.max(0, (int) (cam.x0() / cs)), sy0 = Math.max(0, (int) (cam.y0() / cs));
             int sx1 = Math.min(w.sec.sw - 1, (int) (cam.x1() / cs)), sy1 = Math.min(w.sec.sh - 1, (int) (cam.y1() / cs));
             for (int sy = sy0; sy <= sy1; sy++)
@@ -665,9 +670,11 @@ public final class WorldView {
                 String label = s.name;
                 if (s.kind == Region.S_CITY || s.kind == Region.S_TOWN) {
                     int zz = w.stats.zBySettlement[s.id];
+                    if (z < 0.2f && (s.kind == Region.S_CITY || z > 0.04f)) label += " " + people(w.stats.popBySettlement[s.id]);
                     if (w.gov.evacuating(s.id)) label += "  (evacuating)";
-                    else if (zz > 0 && z < 0.2f) label += "  (" + fmt(zz) + " dead)";
+                    else if (zz > 0 && z < 0.2f) label += "  (" + people(zz) + " dead)";
                 }
+                if (s.capital) label = "\u2605 " + label;
                 g.color(0xA0000000);
                 g.text(label, sx + 1.5f, sy + 1.5f, size, Gfx.ALIGN_CENTER, true);
                 g.color(0xFFFFFFFF);
@@ -675,6 +682,170 @@ public final class WorldView {
             }
         }
     }
+
+    // ------------------------------------------------------------------ the national map's layers
+
+    private float[] stateX, stateY;
+
+    /** The chosen overlay over the sectors, and state borders when far out. */
+    private void layers(Gfx g, Camera cam) {
+        float z = cam.zoom;
+        float cs = Region.SECT * Tile.SIZE;
+        Sectors sec = w.sec;
+        int sx0 = Math.max(0, (int) (cam.x0() / cs)), sy0 = Math.max(0, (int) (cam.y0() / cs));
+        int sx1 = Math.min(sec.sw - 1, (int) (cam.x1() / cs)), sy1 = Math.min(sec.sh - 1, (int) (cam.y1() / cs));
+        if (overlay == OV_FORCES) {
+            g.color(0x70000000);
+            g.fillRect(0, 0, g.width(), g.height());
+        }
+        if (overlay == OV_TRUST || overlay == OV_DEATHS || overlay == OV_PEAK || overlay == OV_UTIL) {
+            for (int sy = sy0; sy <= sy1; sy++)
+                for (int sx = sx0; sx <= sx1; sx++) {
+                    int s = sy * sec.sw + sx;
+                    int c = 0;
+                    if (overlay == OV_TRUST) {
+                        float p = sec.panic[s];
+                        if (p > 0.02f && sec.home[s] > 0) c = ((int) (40 + p * 170) << 24) | 0xF08020;
+                    } else if (overlay == OV_DEATHS) {
+                        float d = w.director.deaths[s] + sec.bodies[s];
+                        if (d > 0) c = ((int) Math.min(220, 50 + Math.log10(1 + d) * 45) << 24) | 0x9030C0;
+                    } else if (overlay == OV_PEAK) {
+                        float p = w.director.peak[s];
+                        if (p > 0) c = ((int) Math.min(220, 50 + Math.log10(1 + p) * 45) << 24) | (p > 1000 ? 0xFF3010 : 0xFFA020);
+                    } else if (sec.home[s] > 0) {
+                        boolean lit = w.strat.lit(s);
+                        c = lit ? 0x3040C040 : 0x90100808;
+                    }
+                    if (c != 0) {
+                        g.color(c);
+                        g.fillRect(cam.toScreenX(sx * cs), cam.toScreenY(sy * cs), cs * z + 1, cs * z + 1);
+                    }
+                }
+        }
+        if (overlay == OV_UTIL) utilities(g, cam);
+        if (overlay == OV_SUPPLY) supplies(g, cam);
+        // state borders and names from far out
+        if (z < 0.2f && w.r.states.size() > 1) {
+            g.color(0x90FFFFFF);
+            for (int sy = sy0; sy <= sy1; sy++)
+                for (int sx = sx0; sx <= sx1; sx++) {
+                    int s = sy * sec.sw + sx;
+                    int st = w.roles.stateOfSector(s);
+                    float x = cam.toScreenX(sx * cs), y = cam.toScreenY(sy * cs), len = cs * z;
+                    if (sx + 1 < sec.sw && w.roles.stateOfSector(s + 1) != st) dashed(g, x + len, y, x + len, y + len);
+                    if (sy + 1 < sec.sh && w.roles.stateOfSector(s + sec.sw) != st) dashed(g, x, y + len, x + len, y + len);
+                }
+            if (z < 0.08f) {
+                if (stateX == null) {
+                    int ns = w.r.states.size();
+                    stateX = new float[ns];
+                    stateY = new float[ns];
+                    int[] cnt = new int[ns];
+                    for (int s = 0; s < sec.n; s++) {
+                        int st = w.roles.stateOfSector(s);
+                        if (st < 0 || !Tile.walkable(w.r.tileAtPx(sec.cx(s), sec.cy(s)))) continue;
+                        stateX[st] += sec.cx(s);
+                        stateY[st] += sec.cy(s);
+                        cnt[st]++;
+                    }
+                    for (int k = 0; k < ns; k++) if (cnt[k] > 0) {
+                        stateX[k] /= cnt[k];
+                        stateY[k] /= cnt[k];
+                    }
+                }
+                for (Region.State st : w.r.states) {
+                    g.color(0x70FFFFFF);
+                    g.text(st.name.toUpperCase(), cam.toScreenX(stateX[st.id]), cam.toScreenY(stateY[st.id]) + 30, 16, Gfx.ALIGN_CENTER, true);
+                }
+            }
+        }
+    }
+
+    private static void dashed(Gfx g, float x1, float y1, float x2, float y2) {
+        float dx = x2 - x1, dy = y2 - y1, len = (float) Math.sqrt(dx * dx + dy * dy);
+        int n = Math.max(1, (int) (len / 6));
+        for (int i = 0; i < n; i += 2) g.line(x1 + dx * i / n, y1 + dy * i / n, x1 + dx * (i + 1) / n, y1 + dy * (i + 1) / n, 1.5f);
+    }
+
+    /** Power, water and telephones for every town: a coloured dot for each. */
+    private void utilities(Gfx g, Camera cam) {
+        boolean[] water = network(Region.F_WATER), phone = network(Region.F_PHONE);
+        for (Region.Settlement s : w.r.settlements) {
+            if (s.kind != Region.S_CITY && s.kind != Region.S_TOWN) continue;
+            float x = cam.toScreenX(s.cx * 16f), y = cam.toScreenY(s.cy * 16f) + 14;
+            boolean[] on = {s.grid < 0 || w.strat.gridOn[s.grid], s.water < 0 || s.water >= water.length || water[s.water], s.phone < 0 || s.phone >= phone.length || phone[s.phone]};
+            String[] l = {"P", "W", "T"};
+            for (int k = 0; k < 3; k++) {
+                float cx = x + (k - 1) * 16;
+                g.color(0xD0000000);
+                g.fillCircle(cx, y, 8);
+                g.color(on[k] ? 0xFF40C040 : 0xFFE03030);
+                g.fillCircle(cx, y, 6.5f);
+                g.color(0xFF000000);
+                g.text(l[k], cx, y + 3.5f, 9, Gfx.ALIGN_CENTER, true);
+            }
+        }
+    }
+
+    /** Which networks of a kind (water, phones) still run: their works are working. */
+    private boolean[] network(int kind) {
+        int n = 0;
+        for (Region.Facility f : w.r.facilities) if (f.kind == kind) n = Math.max(n, f.network + 1);
+        boolean[] on = new boolean[n];
+        for (Region.Facility f : w.r.facilities) if (f.kind == kind && f.network >= 0 && w.strat.online(f.id)) on[f.network] = true;
+        return on;
+    }
+
+    /** Ammunition, food and fuel at each place that keeps them, as bars. */
+    private void supplies(Gfx g, Camera cam) {
+        for (Region.Facility f : w.r.facilities) {
+            float tot = f.ammo + f.food + f.fuel;
+            if (tot <= 0 && f.kind != Region.F_POLICE && f.kind != Region.F_BASE) continue;
+            float x = cam.toScreenX(f.x), y = cam.toScreenY(f.y);
+            if (x < -30 || y < -30 || x > cam.sw + 30 || y > cam.sh + 30) continue;
+            float[] v = {f.ammo, f.food, f.fuel};
+            int[] col = {0xFFE0C040, 0xFF60C060, 0xFFB07030};
+            g.color(0xC0000000);
+            g.fillRect(x - 14, y - 26, 28, 22);
+            for (int k = 0; k < 3; k++) {
+                float h = (float) Math.min(1, Math.log10(1 + v[k]) / 5) * 18;
+                g.color(col[k]);
+                g.fillRect(x - 11 + k * 8, y - 6 - h, 6, Math.max(1, h));
+            }
+            if (!w.strat.online(f.id)) {
+                g.color(0xFFFF4040);
+                g.line(x - 14, y - 26, x + 14, y - 4, 2);
+            }
+        }
+    }
+
+    /** A small key for the overlay, at (x, y). */
+    public void legend(Gfx g, float x, float y, float dp) {
+        String[] lines;
+        int[] cols;
+        switch (overlay) {
+            case OV_UTIL: lines = new String[]{"Power, water, phones", "working", "lost"}; cols = new int[]{0, 0xFF40C040, 0xFFE03030}; break;
+            case OV_SUPPLY: lines = new String[]{"Stocks", "ammunition", "food", "fuel"}; cols = new int[]{0, 0xFFE0C040, 0xFF60C060, 0xFFB07030}; break;
+            case OV_TRUST: lines = new String[]{"Public trust " + (int) w.gov.trust + "%", "fear in the streets"}; cols = new int[]{0, 0xFFF08020}; break;
+            case OV_FORCES: lines = new String[]{"Forces and fronts", "police", "army", "front line"}; cols = new int[]{0, 0xFF3B6FD8, 0xFF6E8A48, 0xFFFFD040}; break;
+            case OV_DEATHS: lines = new String[]{"Where they died", "people and the dead"}; cols = new int[]{0, 0xFF9030C0}; break;
+            case OV_PEAK: lines = new String[]{"Peak infection", "hundreds", "thousands"}; cols = new int[]{0, 0xFFFFA020, 0xFFFF3010}; break;
+            default: return;
+        }
+        float lh = 15 * dp, wdt = 150 * dp;
+        g.color(0xB0000000);
+        g.fillRoundRect(x, y, wdt, lines.length * lh + 8 * dp, 6 * dp);
+        for (int k = 0; k < lines.length; k++) {
+            float ly = y + 4 * dp + (k + 1) * lh - 4 * dp;
+            if (cols[k] != 0) {
+                g.color(cols[k]);
+                g.fillRect(x + 8 * dp, ly - 8 * dp, 9 * dp, 9 * dp);
+            }
+            g.color(k == 0 ? 0xFFFFFFFF : 0xFFD0D0D0);
+            g.text(lines[k], x + (cols[k] != 0 ? 22 : 8) * dp, ly, 11 * dp, Gfx.ALIGN_LEFT, k == 0);
+        }
+    }
+
 
     static void facilityIcon(Gfx g, int kind, float x, float y, boolean on, float s) {
         int bg;
@@ -718,6 +889,13 @@ public final class WorldView {
             default:
                 g.fillCircle(x, y, s * 0.3f);
         }
+    }
+
+    /** People counts as they read best: 950, 12,400, 450k, 2.3M. */
+    public static String people(long n) {
+        if (n >= 1000000) return String.format("%.1fM", n / 1e6);
+        if (n >= 100000) return (n / 1000) + "k";
+        return fmt((int) n);
     }
 
     static String fmt(int n) {

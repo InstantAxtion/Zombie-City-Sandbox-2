@@ -34,6 +34,11 @@ public final class Gov {
         if (level < 1) raise(1);
     }
 
+    /** The player (as president) raises the alert level. */
+    public void raiseTo(int to) {
+        raise(Math.max(0, Math.min(LEVELS.length - 1, to)));
+    }
+
     private void raise(int to) {
         if (to <= level) return;
         level = to;
@@ -93,6 +98,7 @@ public final class Gov {
         if (level >= 2 && !curfew) setCurfew(true);
         for (Region.Settlement s : w.r.settlements) {
             if (s.kind != Region.S_CITY && s.kind != Region.S_TOWN) continue;
+            if (w.roles.role == Roles.INCIDENT && w.roles.target == s.id) continue; // the player's call
             int zs = w.stats.zBySettlement[s.id];
             int pop = Math.max(1, w.stats.popBySettlement[s.id]);
             if (!evac[s.id] && level >= 2 && (zs > Math.max(400, s.residents * 0.01f) || zs > pop * 0.25f)) setEvac(s.id, true);

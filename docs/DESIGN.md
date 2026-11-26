@@ -7,8 +7,10 @@ How the sequel works, and how it answers the lessons written down in the first g
 
 | | First game | Sequel |
 |---|---|---|
-| Map | One city, 424-752 tiles | A region, 768-1536 tiles: a city (the old map's size), towns, villages, an army base, a prison, countryside |
-| People | ~3,000 individuals | ~30,000-60,000 residents counted by the sector, plus up to 60,000 (setting) individuals where it matters |
+| Map | One city, 424-752 tiles | A country, 1536-3072 tiles: a capital, cities, dozens of towns and villages, states, bases, rail, ports (768-1024 tile regions still build, for tests) |
+| People | ~3,000 individuals | ~1-3 million residents counted by the sector (about 2 million on the default map), plus up to 60,000 (setting) individuals where it matters |
+| Forces | Every officer an entity | Pools at stations and bases, formations on the national map; individuals only when deployed |
+| Player | A sandbox god | Eight roles from God and the President down to one officer or survivor; replays, challenge codes, an editor |
 | Crowds | Each zombie steers, pairwise separation | One scent field (breadth-first search) twice a second; the dead walk downhill on it |
 | Threads | One | Parallel think and move phases, deterministic |
 | Entity state | Booleans (dead, removed, listed), lazy sweeps | One location per slot, changed only by four methods |
@@ -29,7 +31,8 @@ All in one package, `com.instantaxtion.zcs2`. The core (`src/core`) never touche
 | Behaviour | `ZombieAI`, `CivAI`, `ArmedAI`, `Combat` | Thinking (in parallel) and carrying it out (in order): bites, shots, blasts, deaths, rising |
 | Forces | `Squads`, `Vehicles`, `Dispatch`, `Military` | Squads and their orders; driving on the road graph and flying; 911 calls, cordons; the army, gunships, tanks, air strikes, supply, outside help |
 | The region-wide | `Strategic`, `Gov`, `News`, `Stats` | Facilities, power grids, ammunition, hordes, refugees, bridges, strains, goals; the alert level, trust, curfews, evacuations, rumours; the radio log; the numbers and the report |
-| Player | `Tools`, `Setup` | Everything the player can do; building a new game and its scenario |
+| Player | `Tools`, `Setup`, `Actions`, `Roles` | Everything the player can do (every change goes through `Actions`, which records it); building a new game, its scenario and the player's role; the country-scale campaign goals |
+| Director | `Director`, `Replay`, `DirectorScreens` | The record of inputs, replays from a game's start, the timelapse, heatmaps; the replay list, timelapse and scenario editor screens |
 | Checking | `Audit`, `SaveIO` | Invariants and state hashes; saves |
 | Presentation | `Gfx`, `GImage`, `Platform`, `Camera`, `MapPainter`, `WorldView`, `Ui`, `Game`, `Settings`, `Texts` | Drawing at every zoom, the interface, the screens |
 | Sound | `Synth`, `Mixer` | Every effect and the score, synthesised; mixing |
@@ -100,6 +103,26 @@ loaded game continues exactly as the original would have (the test compares stat
 loading). The region is rebuilt from its seed and the saved tiles (rubble, blown bridges) laid over it. There is
 one save version and no behaviour gating. A save made with different rules (`content.ini` hash) loads with a note.
 
+## Playing at any level
+
+`Roles` (a module, saved) holds who the player is and their piece of the world: a city for the incident
+commander, a police station for the precinct commander, a squad for the squad leader, an entity for the officer
+and the survivor. A role decides the tools the interface shows, which squads can be ordered (`canOrder`), whether
+the governor AI (`Gov.playerDecides`) and the military command (`Forces.command`) step aside, and which station
+the dispatcher leaves to the player. Everything else stays with the AI. The officer is an armed police entity the
+stick moves (`ArmedAI` hands it to `Combat.playerThink`), with its patrol kept close each second.
+
+## Director mode: replays are exact
+
+Every change the player makes goes through `Actions`, which records it in `Director` with the tick it happens
+before, and then carries it out through the same `apply` a replay uses. The camera is an input too (it decides
+which sectors are simulated in detail), so `Director` records it as the simulation saw it at each once-a-second
+update; so are the stick, fast-forward and the people-in-detail setting. A replay is the game's start (map,
+seed, scenario as text, role) plus those events: `Replay` rebuilds the world and feeds the events back before
+each step, and the test `director: a replay rebuilds the same outbreak` checks the state hash matches after a
+session with painting, orders, strikes, panning and fast-forward. The timelapse stores the dead and the people of
+every sector once a game hour as log-scale bytes (about 10 KB an hour on the default map, inside the save).
+
 ## Lessons from the first game, and where they went
 
 - *The fight must be legible.* Everything can be tapped; squads and their orders, the alert level, the radio log
@@ -113,10 +136,9 @@ one save version and no behaviour gating. A save made with different rules (`con
   counts. Balance was tuned against probes on several scenarios.
 - *Instrumentation from day one.* `Audit` and state hashes are part of the game, not a side tool.
 
-## What's next (not in 1.0)
+## What's next
 
 - Fire brigades and fires; paramedics.
-- A strategic fast-forward that resolves fights in counts when nobody is watching anywhere (now: up to 16x).
-- Railways and trains; ports and the navy; airports.
-- Several regions joined into a country.
+- Trains on the railways; the navy at sea; airlifts.
+- Cooperative and asynchronous play beyond challenge codes.
 - GPU rendering (OpenGL ES) for more individuals on screen at once.

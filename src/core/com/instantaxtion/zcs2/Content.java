@@ -61,8 +61,29 @@ public final class Content {
     }
 
     public static final class Scenario {
-        public String id, name, mode, origin, goal, desc;
+        public String id, name, mode, origin, goal, desc, role = "";
         public int zombies, days, index, hordes, hordeSize;
+        /** Day of the year it starts (-1 = the default, 1 September). */
+        public int season = -1;
+        public boolean custom;
+
+        /** The scenario as a content.ini section (for custom scenarios and replays). */
+        public String toIni() {
+            StringBuilder b = new StringBuilder();
+            b.append("[scenario ").append(id).append("]\n");
+            b.append("name = ").append(name).append("\n");
+            b.append("mode = ").append(mode).append("\n");
+            b.append("origin = ").append(origin).append("\n");
+            if (goal.length() > 0) b.append("goal = ").append(goal).append("\n");
+            b.append("zombies = ").append(zombies).append("\n");
+            b.append("days = ").append(days).append("\n");
+            b.append("hordes = ").append(hordes).append("\n");
+            b.append("hordeSize = ").append(hordeSize).append("\n");
+            if (season >= 0) b.append("season = ").append(season).append("\n");
+            if (role.length() > 0) b.append("role = ").append(role).append("\n");
+            b.append("desc = ").append(desc.replace('\n', ' ')).append("\n");
+            return b.toString();
+        }
     }
 
     public final List<Weapon> weapons = new ArrayList<Weapon>();
@@ -246,6 +267,8 @@ public final class Content {
         sc.days = (int) f(b, "days", 0);
         sc.hordes = (int) f(b, "hordes", 0);
         sc.hordeSize = (int) f(b, "hordeSize", 800);
+        sc.season = (int) f(b, "season", -1);
+        sc.role = s(b, "role", "");
         sc.index = scenarios.size();
         scenarios.add(sc);
         scById.put(id, sc);
@@ -312,6 +335,42 @@ public final class Content {
     public float rule(String key, float def) {
         Float v = rules.get(key);
         return v == null ? def : v;
+    }
+
+    /** Reads extra scenarios (custom ones, or one from a replay). Only [scenario] sections; returns them. */
+    public List<Scenario> addScenarios(InputStream in, boolean custom) throws IOException {
+        BufferedReader r = new BufferedReader(new InputStreamReader(in, "UTF-8"));
+        List<Scenario> out = new ArrayList<Scenario>();
+        String id = null;
+        Map<String, String> cur = null;
+        String line;
+        while (true) {
+            line = r.readLine();
+            boolean head = line != null && line.trim().startsWith("[");
+            if ((line == null || head) && id != null) {
+                scenarios.remove(scById.get(id));
+                addScenario(id, cur);
+                Scenario sc = scById.get(id);
+                sc.custom = custom;
+                out.add(sc);
+                id = null;
+            }
+            if (line == null) break;
+            line = line.trim();
+            if (line.length() == 0 || line.startsWith("#")) continue;
+            if (head) {
+                String[] p = line.substring(1, line.length() - 1).trim().split("\\s+");
+                if (p.length == 2 && p[0].equals("scenario")) {
+                    id = p[1];
+                    cur = new LinkedHashMap<String, String>();
+                }
+                continue;
+            }
+            int eq = line.indexOf('=');
+            if (eq > 0 && cur != null) cur.put(line.substring(0, eq).trim(), line.substring(eq + 1).trim());
+        }
+        for (int i = 0; i < scenarios.size(); i++) scenarios.get(i).index = i;
+        return out;
     }
 
     public Weapon weapon(String id) {

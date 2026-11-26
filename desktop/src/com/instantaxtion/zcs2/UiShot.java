@@ -26,6 +26,10 @@ public final class UiShot {
         pf.density = density;
         game = new Game(pf);
         frames(3);
+        if (a.length > 4 && a[4].equals("director")) {
+            directorShots(pf);
+            return;
+        }
         if (a.length > 4) {
             modeShots(a[4]);
             return;
@@ -109,6 +113,113 @@ public final class UiShot {
     }
 
     /** A commander or survivor game. */
+    /** The new screens: roles, campaigns, codes, the editor, overlays, the timelapse, replays. */
+    static void directorShots(DesktopPlatform pf) throws Exception {
+        tap("new");
+        game.ngSize = 0;
+        long t0 = System.currentTimeMillis();
+        while (System.currentTimeMillis() - t0 < 5000) { frames(1); Thread.sleep(50); }
+        shot("d01-new-sandbox");
+        tap("mode:1");
+        frames(2);
+        shot("d02-campaigns");
+        tap("role");
+        frames(1);
+        shot("d03-role");
+        pf.answers.add("ZC2-1536-0-777-hold_city-military");
+        tap("code");
+        frames(2);
+        t0 = System.currentTimeMillis();
+        while (System.currentTimeMillis() - t0 < 4000) { frames(1); Thread.sleep(50); }
+        shot("d04-code");
+        tap("editor");
+        frames(2);
+        t0 = System.currentTimeMillis();
+        while (System.currentTimeMillis() - t0 < 3000) { frames(1); Thread.sleep(50); }
+        float[] mp = game.ui.find("ed:map");
+        game.touch(Game.DOWN, 0, mp[0] - 40, mp[1] + 30);
+        game.touch(Game.UP, 0, mp[0] - 40, mp[1] + 30);
+        tap("ed:z");
+        tap("ed:h");
+        tap("ed:goal");
+        tap("ed:role");
+        frames(2);
+        shot("d05-editor");
+        tap("ed:save");
+        frames(2);
+        shot("d06-yours");
+        // the campaign from the code, as military commander
+        pf.answers.add("ZC2-1536-0-777-hold_city-military");
+        tap("code");
+        frames(1);
+        tap("start");
+        waitPlay();
+        game.speedIdx = 2;
+        frames(120);
+        shot("d07-military");
+        tap("tool:map");
+        frames(1);
+        tap("m:jump");
+        frames(60);
+        String[] ov = {"2", "3", "4", "5", "7"};
+        for (String o : ov) {
+            tap("ov:" + o);
+            frames(3);
+            shot("d08-overlay-" + o);
+        }
+        tap("ov:1");
+        // a formation ordered somewhere
+        World w = game.world();
+        tap("tool:orders");
+        frames(1);
+        if (!w.forces.formations.isEmpty()) {
+            Forces.Formation f = w.forces.formations.get(0);
+            float sx = game.cam.toScreenX(f.hq.x), sy = game.cam.toScreenY(f.hq.y);
+            game.touch(Game.DOWN, 0, sx, sy);
+            game.touch(Game.UP, 0, sx, sy);
+            frames(1);
+            Region.Settlement c = w.r.city();
+            float tx = game.cam.toScreenX(c.cx * 16f + 2000), ty = game.cam.toScreenY(c.cy * 16f);
+            game.touch(Game.DOWN, 0, tx, ty);
+            game.touch(Game.UP, 0, tx, ty);
+            frames(60);
+            shot("d09-formation-ordered");
+        }
+        game.speedIdx = 6; // six hours a second: strategic
+        frames(90);
+        shot("d10-fast-forward");
+        game.speedIdx = 2;
+        frames(10);
+        tap("pause");
+        frames(1);
+        shot("d11-pause");
+        tap("timelapse");
+        frames(30);
+        shot("d12-timelapse");
+        tap("back");
+        frames(1);
+        tap("savereplay");
+        frames(1);
+        tap("report");
+        frames(2);
+        shot("d13-report");
+        tap("back");
+        frames(1);
+        tap("tomenu");
+        frames(2);
+        tap("replays");
+        frames(2);
+        shot("d14-replays");
+        String[] names = pf.pref("replays", "").split(",");
+        tap("rp:" + names[0]);
+        waitPlay();
+        frames(60);
+        shot("d15-replay");
+        System.out.println("ok director: " + game.world().clock() + ", replay " + (game.replay != null ? game.replay.events.size() + " events" : "over"));
+        game.world().shutdown();
+        System.exit(0);
+    }
+
     static void modeShots(String mode) throws Exception {
         tap("new");
         frames(2);
