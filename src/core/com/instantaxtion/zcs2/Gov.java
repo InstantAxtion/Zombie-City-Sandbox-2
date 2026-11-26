@@ -34,7 +34,7 @@ public final class Gov {
         if (level < 1) raise(1);
     }
 
-    private void raise(int to) {
+    void raise(int to) {
         if (to <= level) return;
         level = to;
         String[] say = {"", "Officials urge calm and ask people to stay indoors after reports of attacks.",
@@ -69,11 +69,9 @@ public final class Gov {
         w.news.headline(on ? "Curfew: everyone indoors until further notice." : "Curfew lifted.", -1, -1);
     }
 
+    /** Trust; the alert level, curfews and evacuations are decided by the officials (Command), rumours by Media. */
     void update(float dt) {
         int z = w.totalZombies();
-        if (z > 60 && level < 2 && reported) raise(2);
-        if (z > 1500 && level < 3) raise(3);
-        if (z > 7000 && level < 4) raise(4);
         // trust: falls with deaths and losses, recovers slowly while things are under control
         int deaths = w.stats.civDeaths + w.stats.armedDeaths[1] + w.stats.armedDeaths[2];
         int newDeaths = deaths - lastDeaths;
@@ -83,38 +81,5 @@ public final class Gov {
         for (boolean g : w.strat.gridOn) if (!g) trust -= 0.004f * dt;
         if (trust < 5) trust = 5;
         if (trust > 95) trust = 95;
-        rumourT -= dt;
-        if (rumourT <= 0 && level >= 1) {
-            rumourT = 240 + w.rng.nextFloat() * 300;
-            rumour();
-        }
-        if (playerDecides) return;
-        // the governor's calls
-        if (level >= 2 && !curfew) setCurfew(true);
-        for (Region.Settlement s : w.r.settlements) {
-            if (s.kind != Region.S_CITY && s.kind != Region.S_TOWN) continue;
-            int zs = w.stats.zBySettlement[s.id];
-            int pop = Math.max(1, w.stats.popBySettlement[s.id]);
-            if (!evac[s.id] && level >= 2 && (zs > Math.max(400, s.residents * 0.01f) || zs > pop * 0.25f)) setEvac(s.id, true);
-        }
-    }
-
-    private void rumour() {
-        String[] good = {"Officials: the outbreak is being contained street by street.",
-                "Volunteers organise food and water for people sheltering at home.",
-                "Hospitals: anyone bitten must report for treatment immediately."};
-        String[] bad = {"RUMOUR: 'the bite isn't dangerous if you wash it'. Officials say this is false.",
-                "RUMOUR: the army is pulling out tonight. The Pentagon denies it.",
-                "RUMOUR: the water supply is infected. People are fleeing on foot.",
-                "Footage of a police line breaking spreads online. Panic grows."};
-        if (trust > 55 && w.rng.chance(0.5f)) {
-            w.news.headline(good[w.rng.nextInt(good.length)], -1, -1);
-            trust += 2;
-        } else {
-            w.news.headline(bad[w.rng.nextInt(bad.length)], -1, -1);
-            trust -= 4;
-            // the frightened come out of hiding and take to the roads
-            for (int s = 0; s < w.sec.n; s++) w.sec.panic[s] = Math.min(1, w.sec.panic[s] + 0.2f);
-        }
     }
 }

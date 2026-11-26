@@ -265,6 +265,7 @@ final class Combat {
     void playerThink(int i, Parallel.Scratch s) {
         Ents e = w.e;
         Content.Unit u = w.unitOf(i);
+        if (e.aimT[i] > 0) e.aimT[i] -= World.DT;
         float jx = w.strat.playerJoyX, jy = w.strat.playerJoyY;
         float len = (float) Math.sqrt(jx * jx + jy * jy);
         float sp = len > 0.6f ? u.run : u.walk * 1.2f;

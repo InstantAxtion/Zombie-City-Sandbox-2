@@ -5,7 +5,7 @@ package com.instantaxtion.zcs2;
  * Runs in parallel: reads anything, writes only its own entity's slot.
  */
 final class CivAI {
-    static final byte S_WANDER = 0, S_FLEE = 1, S_SHELTER = 2, S_EVAC = 3, S_HOME = 4, S_PLAYER = 5;
+    static final byte S_WANDER = 0, S_FLEE = 1, S_SHELTER = 2, S_EVAC = 3, S_HOME = 4, S_PLAYER = 5, S_MILITIA = 6;
     static final int I_ENTER = 20, I_EVAC = 21;
     private final World w;
 
@@ -19,8 +19,13 @@ final class CivAI {
             w.combat.playerThink(i, s);
             return;
         }
+        if (e.aimT[i] > 0) e.aimT[i] -= World.DT;
         // think on alternate steps; between thinks keep going the same way
         if (((w.tick + i) & 1) != 0) return;
+        if (e.state[i] == S_MILITIA) {
+            militia(i, s);
+            return;
+        }
         float dt = World.DT * 2;
         Content.Unit u = w.unitOf(i);
         float x = e.x[i], y = e.y[i];
@@ -126,6 +131,37 @@ final class CivAI {
                     break;
                 }
                 default:
+            }
+        }
+        steer(i, dirX, dirY, speed, s);
+    }
+
+    /** An armed resident holding their street: shoot what comes, step back from what gets close. */
+    private void militia(int i, Parallel.Scratch s) {
+        Ents e = w.e;
+        Content.Unit u = w.unitOf(i);
+        float x = e.x[i], y = e.y[i];
+        float range = u.weapon != null ? u.weapon.range : 120;
+        int z = w.sp.nearestZombie(e, x, y, range);
+        float dirX = 0, dirY = 0, speed = 0;
+        if (z >= 0) {
+            float dx = e.x[z] - x, dy = e.y[z] - y, d = (float) Math.sqrt(dx * dx + dy * dy) + 0.01f;
+            e.face[i] = (float) Math.atan2(dy, dx);
+            if (d < 24 || e.ammo[i] <= 0) {
+                dirX = -dx / d;
+                dirY = -dy / d;
+                speed = u.run;
+                if (e.ammo[i] <= 0) e.state[i] = S_FLEE;
+            } else if (e.aimT[i] <= 0 && (d < 48 || w.r.lineOfSight(x, y, e.x[z], e.y[z]))) {
+                e.intent[i] = Combat.I_SHOOT;
+                e.intentArg[i] = z;
+            }
+        } else {
+            float gx = e.gx[i] - x, gy = e.gy[i] - y, gd = (float) Math.sqrt(gx * gx + gy * gy);
+            if (gd > 20) {
+                dirX = gx / gd;
+                dirY = gy / gd;
+                speed = u.walk;
             }
         }
         steer(i, dirX, dirY, speed, s);

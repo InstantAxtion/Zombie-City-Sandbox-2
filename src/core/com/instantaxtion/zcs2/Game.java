@@ -853,8 +853,12 @@ public final class Game {
             body.append("Home to ").append(fmt(s.residents)).append(". Still here: ").append(fmt(w.stats.popBySettlement[s.id]))
                     .append(". The dead here: ").append(fmt(w.stats.zBySettlement[s.id]));
             if (s.grid >= 0) body.append(w.strat.gridOn[s.grid] ? ". Power on" : ". No power");
+            body.append(". The people are ").append(w.media.mood(s.id));
+            if (w.society.militia[s.id] > 0) body.append(", ").append(w.society.militia[s.id]).append(" in militias");
+            body.append(w.command.describe(s.id));
             boolean canEvac = (s.kind == Region.S_CITY || s.kind == Region.S_TOWN) && w.mode != World.MODE_SURVIVOR;
-            actions = canEvac ? new String[]{"i:evac", w.gov.evacuating(s.id) ? "Stop evacuating" : "Evacuate", "i:zoom", "Go there", "i:close", "Close"}
+            actions = canEvac ? new String[]{"i:evac", w.gov.evacuating(s.id) ? "Stop evacuating" : "Evacuate",
+                    "i:quar", w.command.quarantined(s.id) ? "Lift quarantine" : "Quarantine", "i:zoom", "Go there", "i:close", "Close"}
                     : new String[]{"i:zoom", "Go there", "i:close", "Close"};
         } else if (inspFormation != null) {
             Forces.Formation f = inspFormation;
@@ -891,7 +895,7 @@ public final class Game {
         g.text(title, m * 2, y + ui.dp(24), ui.dp(16), Gfx.ALIGN_LEFT, true);
         g.color(Ui.DIM);
         g.text(sub, m * 2, y + ui.dp(42), ui.dp(12), Gfx.ALIGN_LEFT, false);
-        ui.wrap(body.toString(), m * 2, y + ui.dp(62), textW, ui.dp(12), Ui.TEXT, 6);
+        ui.wrap(body.toString(), m * 2, y + ui.dp(62), textW, ui.dp(12), Ui.TEXT, 10);
         int n = actions.length / 2;
         float aw = (W - m * 4 - ui.dp(8) * (n - 1)) / n;
         for (int k = 0; k < n; k++)
@@ -1272,6 +1276,9 @@ public final class Game {
                 if (inspEnt >= 0 && w.e.squad[inspEnt] >= 0) inspSquad = w.sq.get(w.e.squad[inspEnt]);
                 inspEnt = inspVeh = inspFac = inspSettle = -1;
                 tool = "orders";
+                return;
+            case "i:quar":
+                w.command.setQuarantine(inspSettle, !w.command.quarantined(inspSettle));
                 return;
             case "i:evac":
                 w.gov.setEvac(inspSettle, !w.gov.evacuating(inspSettle));

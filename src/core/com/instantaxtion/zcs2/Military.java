@@ -106,7 +106,7 @@ public final class Military {
         if (!w.strategic) retaskArmour();
         if (bridgeT <= 0) {
             bridgeT = 10;
-            w.strat.considerBridges();
+            if (w.command.bridgesAuthorised) w.strat.considerBridges();
         }
     }
 
