@@ -179,7 +179,7 @@ public final class Ecology extends Module {
         float starve = w.c.rule("starvePerDay", 0.02f) / 1440f;
         float nestDays = w.c.rule("nestDays", 2f) * 1440f;
         int nestMin = (int) w.rule("nestMin", 400);
-        float overrun = w.c.rule("overrunRatio", 20);
+        float overrun = w.rule("overrunRatio", 20);
         float strainDays = w.c.rule("strainDays", 1.5f) * 1440f;
         // (only awake sectors: a sleeping one has no dead, no hunger, no nest and no strain, and stays so)
         SectorIndex idx = sec.idx;

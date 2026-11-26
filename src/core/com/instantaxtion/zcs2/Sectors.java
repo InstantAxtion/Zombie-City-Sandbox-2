@@ -291,6 +291,8 @@ public final class Sectors {
         float bite = w.c.rule("indoorBite", 0.003f), dens = w.rule("indoorDensity", 10000), turnTime = w.c.rule("turnTime", 180), clear = w.c.rule("clearRate", 0.015f);
         maxBite = w.c.rule("maxBitePerHour", 0.05f);
         float spillAt = w.rule("sectorSpill", 3000);
+        // (a national map: where the dead outnumber the few people left this many times, the rest move on; 0: off)
+        float wanderOver = w.rule("wanderOver", 0);
         Ents e = w.e;
         Spatial sp = w.sp;
         int individuals = e.live;
@@ -381,9 +383,10 @@ public final class Sectors {
             if (!w.strategic && (hot[s] > 0 || cam[s])) emerge(s, zO, cO, arm, roomForMore);
             if (panic[s] > 0) panic[s] = Math.max(0, panic[s] - 0.01f * dt);
             // the unwatched dead wander towards people and lights
-            if (zIn[s] > 0 && popIn[s] == 0 && hot[s] <= 0) migrate(s, dt);
+            if (zIn[s] > 0 && popIn[s] == 0 && hot[s] <= 0) migrate(s, dt, 0);
             else if (hot[s] <= 0 && overrun(s) && Rng.unit(w.seed, w.tick, s * 37L + 9) < dt / 240f)
-                w.strat.formHorde(s, (zIn[s] - (int) (popIn[s] * w.c.rule("overrunRatio", 20))) / 2);
+                w.strat.formHorde(s, (zIn[s] - (int) (popIn[s] * w.rule("overrunRatio", 20))) / 2);
+            else if (wanderOver > 0 && hot[s] <= 0 && zIn[s] > popIn[s] * wanderOver) migrate(s, dt, (int) (popIn[s] * wanderOver));
             else if (zIn[s] > spillAt && hot[s] <= 0) spill(s, dt, spillAt);
             if (hot[s] > 0) hot[s] -= dt;
         }
@@ -398,7 +401,7 @@ public final class Sectors {
      */
     private boolean overrun(int s) {
         return zIn[s] >= w.ecology.hordeThreshold(s) && w.ecology.hunger[s] > 0.5f && !w.ecology.nest[s]
-                && zIn[s] > popIn[s] * w.c.rule("overrunRatio", 20) * 2;
+                && zIn[s] > popIn[s] * w.rule("overrunRatio", 20) * 2;
     }
 
     /** A holdout: people who've held their streets for days barricade themselves in (set by the society systems). */
@@ -505,7 +508,8 @@ public final class Sectors {
         return null;
     }
 
-    private void migrate(int s, float dt) {
+    /** The dead in s (all but keep of them) drift towards people and lights, or shamble about. */
+    private void migrate(int s, float dt, int keep) {
         float best = attraction(s);
         int bd = -1;
         for (int d = 0; d < 8; d++) {
@@ -528,11 +532,12 @@ public final class Sectors {
             rate = w.rule("shambleRate", 0.003f);
         }
         int t = neighbour(s, bd);
-        int m = Math.min(zIn[s], stoch((zIn[s] * rate + 0.2f) * dt * w.weather.zombieSpeed() * w.ecology.migrateFactor(s), s * 13L));
+        int m = Math.min(zIn[s] - keep, stoch((zIn[s] * rate + 0.2f) * dt * w.weather.zombieSpeed() * w.ecology.migrateFactor(s), s * 13L));
         if (m <= 0) return;
         // a big mass on the move becomes a horde you can see on the map
-        if (zIn[s] >= w.ecology.hordeThreshold(s) && popIn[t] == 0 && settlement[s] < 0) {
-            w.strat.formHorde(s, zIn[s] / 2);
+        // (on a national map, into fields with a few people, as a horde walks through them)
+        if (zIn[s] >= w.ecology.hordeThreshold(s) && (popIn[t] == 0 || popIn[t] < w.rule("hordeArrivePeople", 0)) && settlement[s] < 0) {
+            w.strat.formHorde(s, (zIn[s] - keep) / 2);
             return;
         }
         // a precinct's cordon on its district's edge turns most of them back

@@ -30,14 +30,9 @@ public final class Balance {
         public long people0;
     }
 
-    /** One outbreak of n of the dead in the capital, played until it's over or the days run out. */
-    public static Run play(Content c, int map, long seed, int n, int maxDays) {
+    /** A new sandbox game with n of the dead painted over the capital in pieces, no individuals kept (all of them in the sectors in fast-forward). */
+    public static World setup(Content c, int map, long seed, int n) {
         World w = Setup.newGame(c, map, RegionGen.COAST, seed, c.scenario("sandbox"), 1);
-        Run r = new Run();
-        r.zombies = n;
-        r.map = map;
-        r.seed = seed;
-        r.people0 = Audit.people(w);
         Region.Settlement cap = w.r.city();
         float rad = Math.min(cap.radius * 16f * 0.8f, 200 + (float) Math.sqrt(n) * 14);
         w.maxIndividuals = 0;
@@ -49,6 +44,17 @@ public final class Balance {
             int part = k == pieces - 1 ? n - (pieces - 1) * (n / pieces) : n / pieces;
             Tools.paintZombies(w, x, y, part, Math.max(150, rad / (float) Math.sqrt(pieces)), -1);
         }
+        return w;
+    }
+
+    /** One outbreak of n of the dead in the capital, played until it's over or the days run out. */
+    public static Run play(Content c, int map, long seed, int n, int maxDays) {
+        World w = setup(c, map, seed, n);
+        Run r = new Run();
+        r.zombies = n;
+        r.map = map;
+        r.seed = seed;
+        r.people0 = Audit.people(w);
         w.setStrategic(true);
         r.result = ONGOING;
         int steps = (int) (maxDays * 1440 / World.STRATEGIC_DT);

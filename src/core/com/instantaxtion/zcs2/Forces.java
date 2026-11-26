@@ -288,7 +288,7 @@ public final class Forces extends Module {
         if (!f.alive) return false;
         if (byRail(f, x, y)) return true;
         RoadGraph g = w.r.roads;
-        int a = g.nearestNode(f.hq.x, f.hq.y, 2000), b = g.nearestNode(x, y, 2000);
+        int a = g.nearestNode(f.hq.x, f.hq.y, w.reach(2000)), b = g.nearestNode(x, y, w.reach(2000));
         if (a < 0 || b < 0) return false;
         int[] rt = g.route(a, b);
         if (rt == null) return false;
@@ -310,7 +310,7 @@ public final class Forces extends Module {
         float over = w.rule("troopTrainOver", 4000);
         if (dx * dx + dy * dy < over * over) return false;
         if (w.navy.airliftable(f, x, y)) return false; // flown instead (Navy)
-        int a = rg.nearestNode(f.hq.x, f.hq.y, 700), b = rg.nearestNode(x, y, 2500);
+        int a = rg.nearestNode(f.hq.x, f.hq.y, w.reach(700)), b = rg.nearestNode(x, y, w.reach(2500));
         if (a < 0 || b < 0 || a == b) return false;
         int[] rt = rg.route(a, b);
         if (rt == null || rt.length < 3) return false;
@@ -361,9 +361,26 @@ public final class Forces extends Module {
         }
     }
 
+    /** The dead in the formation's sector or the eight round it, or a horde as close. */
+    private boolean contact(Formation f) {
+        Sectors sec = w.sec;
+        int s0 = w.r.sectorOfPx(f.hq.x, f.hq.y);
+        for (int d = -1; d < 8; d++) {
+            int s = d < 0 ? s0 : sec.neighbour(s0, d);
+            if (s >= 0 && sec.zIn[s] + w.sp.secZ[s] > 0) return true;
+        }
+        float near = 1.5f * Tile.SIZE * w.r.sect;
+        for (Strategic.Horde h : w.strat.hordes)
+            if (h.alive && Math.abs(h.x - f.hq.x) < near && Math.abs(h.y - f.hq.y) < near) return true;
+        return false;
+    }
+
     private void move(Formation f, float dt) {
         RoadGraph g = w.r.roads;
-        float budget = w.rule("formationSpeed", f.t.speed) * dt * (w.weather.zombieSpeed() < 1 ? 0.85f : 1);
+        float speed = w.rule("formationSpeed", f.t.speed), tactical = w.rule("formationTactical", 0);
+        // (a national map: with the dead about, across country at a fighting pace, not a road march)
+        if (tactical > 0 && contact(f)) speed = Math.min(speed, tactical);
+        float budget = speed * dt * (w.weather.zombieSpeed() < 1 ? 0.85f : 1);
         while (budget > 0 && f.route != null && f.ri < f.route.length - 1) {
             int nn = f.route[f.ri + 1];
             int e = g.edgeBetween(f.route[f.ri], nn);

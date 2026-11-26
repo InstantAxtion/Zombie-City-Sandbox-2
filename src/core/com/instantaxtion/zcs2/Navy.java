@@ -308,8 +308,8 @@ public final class Navy extends Module {
         float far = w.rule("airliftDistance", 9000);
         float dx = x - f.hq.x, dy = y - f.hq.y;
         if (dx * dx + dy * dy < far * far) return false;
-        Region.Facility a = airfieldNear(f.hq.x, f.hq.y, 5000, null);
-        return a != null && airfieldNear(x, y, 4000, a) != null;
+        Region.Facility a = airfieldNear(f.hq.x, f.hq.y, w.reach(5000), null);
+        return a != null && airfieldNear(x, y, w.reach(4000), a) != null;
     }
 
     /** Formations sent far go by air when there are working airfields at both ends. */
@@ -319,9 +319,9 @@ public final class Navy extends Module {
             if (!f.alive || f.state != Forces.MOVING || f.route == null || f.ri > 0) continue;
             float dx = f.gx - f.hq.x, dy = f.gy - f.hq.y;
             if (dx * dx + dy * dy < far * far) continue;
-            Region.Facility a = airfieldNear(f.hq.x, f.hq.y, 5000, null);
+            Region.Facility a = airfieldNear(f.hq.x, f.hq.y, w.reach(5000), null);
             if (a == null) continue;
-            Region.Facility b = airfieldNear(f.gx, f.gy, 4000, a);
+            Region.Facility b = airfieldNear(f.gx, f.gy, w.reach(4000), a);
             if (b == null) continue;
             Flight fl = new Flight();
             fl.formation = f.id;

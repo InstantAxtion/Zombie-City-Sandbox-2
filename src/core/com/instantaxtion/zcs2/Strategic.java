@@ -25,12 +25,14 @@ public final class Strategic {
         public int count, infected, from, to = -1, exitNode = -1, ri;
         /** People going back home after an evacuation (from = where they sheltered, to = home). */
         public boolean home;
+        /** In cars (refugeeCarSpeed), not on foot (refugeeSpeed): national maps split each column in two. */
+        public boolean car;
         public int[] route;
         public float x, y;
         public boolean alive = true;
     }
 
-    private final World w;
+    final World w;
     public boolean[] online;
     /** Lost to the dead (repair crews can bring these back once it's quiet; not ones out for other reasons). */
     public boolean[] byDead = new boolean[0];
@@ -318,9 +320,9 @@ public final class Strategic {
     private void hordes() {
         Sectors sec = w.sec;
         // (a horde passes through streets already overrun, a few holdouts among thousands of the dead)
-        float overrun = w.c.rule("overrunRatio", 20);
+        float overrun = w.rule("overrunRatio", 20);
         // (a national map: the few people in a field neither stop a horde nor draw it; 0 on today's maps)
-        float arriveAt = w.rule("hordeArrivePeople", w.national ? 400 : 0);
+        float arriveAt = w.rule("hordeArrivePeople", 0);
         for (int k = 0; k < hordes.size(); k++) {
             Horde h = hordes.get(k);
             if (!h.alive) continue;
@@ -363,6 +365,13 @@ public final class Strategic {
             }
             // choose (and now and then rethink) where to go: the most attractive place within reach
             if (h.keepT > 0) h.keepT -= dt;
+            int skip = -1;
+            if (arriveAt > 0 && h.target >= 0 && s == h.target) {
+                // (a national map: there, and nobody in numbers to stop it: it looks again at once, somewhere else)
+                skip = s;
+                h.target = -1;
+                h.keepT = 0;
+            }
             if (h.target < 0 || (w.tick % 600 == 0 && h.keepT <= 0)) {
                 float best = 0, sense = w.rule("hordeSense", 12288) / (Tile.SIZE * w.r.sect);
                 int sx = s % sec.sw, sy = s / sec.sw;
@@ -375,7 +384,7 @@ public final class Strategic {
                         continue;
                     }
                     if (sec.popIn[t] == 0 && w.sp.secCiv[t] == 0) continue;
-                    if (sec.popIn[t] < arriveAt && w.sp.secCiv[t] == 0) continue; // (a national map: not the fields' few)
+                    if (sec.popIn[t] < arriveAt && w.sp.secCiv[t] == 0 || t == skip) continue; // (a national map: not the fields' few)
                     int dx = t % sec.sw - sx, dy = t / sec.sw - sy;
                     float d = (float) Math.sqrt(dx * dx + dy * dy);
                     if (d > sense) continue;
@@ -392,6 +401,8 @@ public final class Strategic {
                     float bdd = Float.MAX_VALUE;
                     for (Region.Settlement st : w.r.settlements) {
                         if (st.kind != Region.S_CITY && st.kind != Region.S_TOWN) continue;
+                        // (not a town already emptied, nor the one it's standing in the middle of)
+                        if (w.stats.popBySettlement[st.id] < arriveAt || w.r.sectorOfPx(st.cx * 16f, st.cy * 16f) == skip) continue;
                         float dd = dist(st.cx * 16f, st.cy * 16f, h.x, h.y);
                         if (dd < bdd) {
                             bdd = dd;
@@ -620,9 +631,61 @@ public final class Strategic {
         w.retire(i);
     }
 
-    /** People queue on the roads out at this rate (a game hour), more for the big cities. */
+    /**
+     * People queue on the roads out at this rate (a game hour), more for the big cities. On a national map, so many
+     * for each highway out of the town (evacPerHourPerExit), half that for each lesser road out.
+     */
     private float roadsOut(Region.Settlement s) {
+        float perExit = w.rule("evacPerHourPerExit", 0);
+        if (perExit > 0) return perExit * exits(s.id) * (0.5f + w.gov.trust / 100f);
         return w.c.rule(s.kind == Region.S_CITY ? "evacPerHourCity" : "evacPerHourTown", s.kind == Region.S_CITY ? 9000 : 2500) * (0.5f + w.gov.trust / 100f);
+    }
+
+    private float[] exits;
+
+    /**
+     * Roads out of a settlement: each highway leaving its streets counts 1, each lesser road 0.5 (at least 0.5).
+     * Worked out once, from the road graph.
+     */
+    public float exits(int st) {
+        if (exits == null) {
+            float[] e = new float[w.r.settlements.size()];
+            RoadGraph g = w.r.roads;
+            Sectors sec = w.sec;
+            for (int k = 0; k < g.edgeCount; k++) {
+                int a = sec.settlement[w.r.sectorOfPx(g.nx[g.ea[k]], g.ny[g.ea[k]])], b = sec.settlement[w.r.sectorOfPx(g.nx[g.eb[k]], g.ny[g.eb[k]])];
+                if (a == b) continue;
+                float v = g.ekind[k] == RoadGraph.HIGHWAY ? 1 : 0.5f;
+                if (a >= 0) e[a] += v;
+                if (b >= 0) e[b] += v;
+            }
+            for (int k = 0; k < e.length; k++) e[k] = Math.max(0.5f, e[k]);
+            exits = e;
+        }
+        return exits[st];
+    }
+
+    /** A column sets off; on a national map those with cars (refugeeCarShare) go as a column of their own. */
+    private void launch(Column c) {
+        float share = w.rule("refugeeCarShare", 0);
+        int cars = (int) (c.count * share);
+        if (cars > 0 && cars < c.count) {
+            Column k = new Column();
+            k.car = true;
+            k.count = cars;
+            k.infected = (int) ((long) c.infected * cars / c.count);
+            k.from = c.from;
+            k.to = c.to;
+            k.exitNode = c.exitNode;
+            k.home = c.home;
+            k.route = c.route;
+            k.x = c.x;
+            k.y = c.y;
+            c.count -= k.count;
+            c.infected -= k.infected;
+            columns.add(k);
+        }
+        columns.add(c);
     }
 
     private void evacuation() {
@@ -723,7 +786,7 @@ public final class Strategic {
             }
             c.x = w.r.roads.nx[c.route[0]];
             c.y = w.r.roads.ny[c.route[0]];
-            columns.add(c);
+            launch(c);
         }
         homecoming();
         fromAbroad();
@@ -763,7 +826,7 @@ public final class Strategic {
                     got += m;
                 }
                 if (got <= 0) continue;
-                int from = host.hubNode >= 0 ? host.hubNode : w.r.roads.nearestNode(host.cx * 16f, host.cy * 16f, 1500);
+                int from = host.hubNode >= 0 ? host.hubNode : w.r.roads.nearestNode(host.cx * 16f, host.cy * 16f, w.reach(1500));
                 int[] rt = from >= 0 ? w.r.roads.route(from, home.hubNode) : null;
                 if (rt == null) {
                     settleHome(a, got);
@@ -779,7 +842,7 @@ public final class Strategic {
                 c.route = rt;
                 c.x = w.r.roads.nx[rt[0]];
                 c.y = w.r.roads.ny[rt[0]];
-                columns.add(c);
+                launch(c);
                 if (got >= 100) w.news.tally("home:" + a, "People are going home to " + home.name + "|Going home to " + home.name + ": {n} more column{s}, {m} {mpeople}", 1, got, home.cx * 16f, home.cy * 16f, News.CALL);
             }
         }
@@ -838,7 +901,7 @@ public final class Strategic {
             c.route = rt;
             c.x = w.r.roads.nx[rt[0]];
             c.y = w.r.roads.ny[rt[0]];
-            columns.add(c);
+            launch(c);
             if (n >= 100) w.news.tally("abroad:" + a, "People who fled abroad are coming home to " + home.name + "|Back from abroad to " + home.name + ": {n} more column{s}, {m} {mpeople}", 1, n, home.cx * 16f, home.cy * 16f, News.CALL);
         }
     }
@@ -893,7 +956,7 @@ public final class Strategic {
                     w.news.count("turnHome:" + c.from, "A refugee column turns round and heads home to " + home.name + "|%d more refugee column{s} turned round for home", 1, c.x, c.y);
                 }
             }
-            float budget = w.rule("refugeeSpeed", 28) * dt; // px per second: people on foot, cars, buses
+            float budget = w.rule(c.car ? "refugeeCarSpeed" : "refugeeSpeed", 28) * dt; // px per second: on foot, or cars and buses
             while (budget > 0 && c.ri < c.route.length - 1) {
                 int nn = c.route[c.ri + 1];
                 int e = g.edgeBetween(c.route[c.ri], nn);

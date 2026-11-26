@@ -940,6 +940,8 @@ public final class SaveIO {
             intArr(o, c.route);
             o.writeFloat(c.x); o.writeFloat(c.y); o.writeBoolean(c.alive);
         }
+        // (national maps: which columns are in cars)
+        if (s.w.national) for (Strategic.Column c : s.columns) o.writeBoolean(c.car);
         o.writeInt(s.strain); o.writeFloat(s.strainClock); o.writeFloat(s.crashX); o.writeFloat(s.crashY);
         o.writeInt(s.evacuatedOut); o.writeInt(s.evacuatedArrived);
         ints(o, s.pending, s.pending.length);
@@ -971,6 +973,7 @@ public final class SaveIO {
             c.x = in.readFloat(); c.y = in.readFloat(); c.alive = in.readBoolean();
             s.columns.add(c);
         }
+        if (s.w.national) for (Strategic.Column c : s.columns) c.car = in.readBoolean();
         s.strain = in.readInt(); s.strainClock = in.readFloat(); s.crashX = in.readFloat(); s.crashY = in.readFloat();
         s.evacuatedOut = in.readInt(); s.evacuatedArrived = in.readInt();
         readInts(in, s.pending);

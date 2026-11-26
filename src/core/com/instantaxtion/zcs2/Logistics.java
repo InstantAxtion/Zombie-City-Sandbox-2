@@ -259,9 +259,9 @@ public final class Logistics extends Module {
         Region.Facility src = from >= 0 ? r.facilities.get(from) : null;
         if (mode == TRUCK) {
             int a;
-            if (src != null) a = r.roads.nearestNode(src.x, src.y, 1500);
+            if (src != null) a = r.roads.nearestNode(src.x, src.y, w.reach(1500));
             else a = nearestEntry(dst.x, dst.y);
-            int b = r.roads.nearestNode(dst.x, dst.y, 1500);
+            int b = r.roads.nearestNode(dst.x, dst.y, w.reach(1500));
             if (a < 0 || b < 0) return;
             c.route = r.roads.route(a, b);
             if (c.route == null) return;
@@ -428,7 +428,7 @@ public final class Logistics extends Module {
             int e = g.edgeBetween(c.route[c.ri], nn);
             if (e >= 0 && !g.ealive[e]) {
                 // the bridge is gone: another way round, or back where it came from
-                int dst = c.mode == TRAIN ? c.route[c.route.length - 1] : g.nearestNode(target(c)[0], target(c)[1], 1500);
+                int dst = c.mode == TRAIN ? c.route[c.route.length - 1] : g.nearestNode(target(c)[0], target(c)[1], w.reach(1500));
                 int[] rt = g.route(c.route[c.ri], dst);
                 if (rt != null) {
                     c.route = rt;
@@ -524,7 +524,7 @@ public final class Logistics extends Module {
     /** A caravan of food from a survivor settlement at (x, y) to a town's store. */
     public boolean trade(int colony, float x, float y, Region.Facility store, float food) {
         Region r = w.r;
-        int a = r.roads.nearestNode(x, y, 3000), b = r.roads.nearestNode(store.x, store.y, 1500);
+        int a = r.roads.nearestNode(x, y, w.reach(3000)), b = r.roads.nearestNode(store.x, store.y, w.reach(1500));
         if (a < 0 || b < 0) return false;
         int[] rt = r.roads.route(a, b);
         if (rt == null) return false;

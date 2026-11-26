@@ -341,6 +341,14 @@ public final class World {
         return c.rule(key, def, national);
     }
 
+    /**
+     * A search radius (px) for the nearest road junction, railway station or airfield to a formation, convoy or
+     * airlift, scaled by the reachScale rule (1 on today's maps; national maps have far fewer roads in the fields).
+     */
+    public float reach(float px) {
+        return px * rule("reachScale", 1);
+    }
+
     public String clock() {
         float h = hour();
         int hh = (int) h, mm = (int) ((h - hh) * 60);

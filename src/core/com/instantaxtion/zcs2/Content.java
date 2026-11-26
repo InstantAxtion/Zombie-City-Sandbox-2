@@ -364,7 +364,8 @@ public final class Content {
 
     /** Overrides a rule (for balancing tools; the game reads content.ini). */
     public void setRule(String key, float value) {
-        rules.put(key, value);
+        if (key.endsWith("@national")) nationalRules.put(key.substring(0, key.length() - 9), value);
+        else rules.put(key, value);
     }
 
     /** A number from the [rules] section, as on today's maps (World.rule picks the national value on a national map). */
