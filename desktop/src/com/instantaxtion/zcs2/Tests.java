@@ -1879,5 +1879,263 @@ public final class Tests {
                 check(g.chunkEdge.length >= g.edgeCount, "every edge in a bucket");
             }
         });
+        chunkTests();
+    }
+
+    // ------------------------------------------------------------------ street-level chunks (docs/SCALE_PLAN.md P6)
+
+    /** Chunks worth testing on the Country nation: the capital's middle, every place's middle, a random spread. */
+    static List<int[]> sampleChunks(Nation n, int random) {
+        List<int[]> out = new ArrayList<int[]>();
+        java.util.Set<Integer> seen = new java.util.HashSet<Integer>();
+        Region.Settlement cap = n.capital();
+        for (int dy = -8; dy < 8; dy++)
+            for (int dx = -8; dx < 8; dx++) addChunk(n, out, seen, cap.cx / 64 + dx, cap.cy / 64 + dy);
+        for (Region.Settlement s : n.settlements)
+            for (int dy = -1; dy <= 1; dy++)
+                for (int dx = -1; dx <= 1; dx++) addChunk(n, out, seen, s.cx / 64 + dx, s.cy / 64 + dy);
+        Rng r = new Rng(42);
+        for (int i = 0; i < random; i++) addChunk(n, out, seen, r.nextInt(n.sw), r.nextInt(n.sw));
+        return out;
+    }
+
+    private static void addChunk(Nation n, List<int[]> out, java.util.Set<Integer> seen, int cx, int cy) {
+        if (cx < 0 || cy < 0 || cx >= n.sw || cy >= n.sw || !seen.add(cy * n.sw + cx)) return;
+        out.add(new int[]{cx, cy});
+    }
+
+    private static boolean site(Nation n, int s) {
+        return n.secSettlement[s] >= 0 && n.district[s] == Nation.D_NONE;
+    }
+
+    private static boolean roadTile(int t) {
+        return t == Tile.ROAD || t == Tile.HIGHWAY || t == Tile.BRIDGE;
+    }
+
+    private static void chunkTests() {
+        test("chunks: the same bytes in any order, on 1 or 4 threads", new T() {
+            public void run() throws Exception {
+                final Nation n = country();
+                final List<int[]> cs = sampleChunks(n, 150);
+                final long[] one = new long[cs.size()];
+                for (int i = cs.size() - 1; i >= 0; i--) one[i] = ChunkGen.generate(n, cs.get(i)[0], cs.get(i)[1]).checksum();
+                final long[] four = new long[cs.size()];
+                final int[] order = new int[cs.size()];
+                for (int i = 0; i < order.length; i++) order[i] = i;
+                Rng r = new Rng(9);
+                for (int i = order.length - 1; i > 0; i--) {
+                    int j = r.nextInt(i + 1), t = order[i];
+                    order[i] = order[j];
+                    order[j] = t;
+                }
+                Thread[] ts = new Thread[4];
+                for (int t = 0; t < 4; t++) {
+                    final int t0 = t;
+                    ts[t] = new Thread(new Runnable() {
+                        public void run() {
+                            for (int k = t0; k < order.length; k += 4) {
+                                int i = order[k];
+                                four[i] = ChunkGen.generate(n, cs.get(i)[0], cs.get(i)[1]).checksum();
+                            }
+                        }
+                    });
+                    ts[t].start();
+                }
+                for (Thread t : ts) t.join();
+                for (int i = 0; i < one.length; i++) check(one[i] == four[i], "chunk " + cs.get(i)[0] + "," + cs.get(i)[1] + " differs between runs");
+                // and from the same nation built again (on one thread and on two): nothing is kept between nations
+                Nation a = NationGen.generate(20480, RegionGen.COAST, 4, 2), b = NationGen.generate(20480, RegionGen.COAST, 4, 1);
+                for (int k = 0; k < 49; k++) {
+                    int cx = a.capital().cx / 64 - 3 + k % 7, cy = a.capital().cy / 64 - 3 + k / 7;
+                    check(ChunkGen.generate(a, cx, cy).checksum() == ChunkGen.generate(b, cx, cy).checksum(), "a rebuilt nation makes another chunk");
+                }
+                System.out.printf("        %d chunks identical in reverse order on one thread and shuffled on four%n", one.length);
+            }
+        });
+        test("chunks: roads line up across chunk seams", new T() {
+            public void run() {
+                Nation n = country();
+                RoadGraph g = n.roads;
+                int seams = 0;
+                for (int[] p : sampleChunks(n, 100)) {
+                    int cx = p[0], cy = p[1], s = cy * n.sw + cx;
+                    if (cx + 1 >= n.sw || cy + 1 >= n.sw) continue;
+                    Chunk a = ChunkGen.generate(n, cx, cy);
+                    for (int dir = 0; dir < 2; dir++) {
+                        int bx = cx + (dir == 0 ? 1 : 0), by = cy + (dir == 0 ? 0 : 1);
+                        if (site(n, s) || site(n, by * n.sw + bx)) continue;
+                        Chunk b = ChunkGen.generate(n, bx, by);
+                        float seam = (dir == 0 ? bx : by) * 64 * 16f; // px
+                        for (int k = g.chunkEdgeStart[s]; k < g.chunkEdgeStart[s + 1]; k++) {
+                            int e = g.chunkEdge[k];
+                            float ax = g.nx[g.ea[e]], ay = g.ny[g.ea[e]], ex = g.nx[g.eb[e]], ey = g.ny[g.eb[e]];
+                            float u0 = dir == 0 ? ax : ay, u1 = dir == 0 ? ex : ey;
+                            if ((u0 - seam) * (u1 - seam) >= 0) continue; // doesn't cross this seam
+                            float f = (seam - u0) / (u1 - u0);
+                            float along = dir == 0 ? ay + (ey - ay) * f : ax + (ex - ax) * f;
+                            int at = (int) Math.floor(along / 16) - (dir == 0 ? cy : cx) * 64;
+                            if (at < 1 || at > 62) continue;
+                            // the tiles either side of the seam where the road crosses it are road on both sides
+                            int ta = dir == 0 ? a.t(63, at) : a.t(at, 63), tb = dir == 0 ? b.t(0, at) : b.t(at, 0);
+                            check(roadTile(ta) && roadTile(tb), "edge " + e + " breaks at the seam of chunks " + cx + "," + cy + " and " + bx + "," + by
+                                    + ": " + Tile.NAMES[ta] + " / " + Tile.NAMES[tb]);
+                            seams++;
+                        }
+                        // and along the whole seam, road meets road (a diagonal road may shift by a tile)
+                        int mismatch = 0, road = 0;
+                        for (int k = 0; k < 64; k++) {
+                            boolean ra = roadTile(dir == 0 ? a.t(63, k) : a.t(k, 63)), rb = roadTile(dir == 0 ? b.t(0, k) : b.t(k, 0));
+                            if (ra || rb) road++;
+                            if (ra != rb) mismatch++;
+                        }
+                        check(mismatch <= Math.max(4, road / 3), mismatch + " of " + road + " road tiles don't match at the seam of " + cx + "," + cy);
+                    }
+                }
+                check(seams > 500, "only " + seams + " roads crossing seams looked at");
+                System.out.printf("        %d road crossings of seams line up%n", seams);
+            }
+        });
+        test("chunks: residents add up to each sector's, and nothing is built on water", new T() {
+            public void run() {
+                Nation n = country();
+                long people = 0, unhoused = 0;
+                int chunks = 0, buildings = 0;
+                boolean[] wet = new boolean[Chunk.AREA];
+                for (int[] p : sampleChunks(n, 600)) {
+                    int s = p[1] * n.sw + p[0];
+                    Chunk c = ChunkGen.generate(n, p[0], p[1], wet);
+                    check(c.residents() + c.elsewhere == n.residents[s], "chunk " + p[0] + "," + p[1] + " houses " + c.residents() + " + " + c.elsewhere + " of " + n.residents[s]);
+                    if (!site(n, s)) {
+                        unhoused += c.elsewhere;
+                        if (n.built(s)) check(c.elsewhere == 0, "a town chunk has nowhere for " + c.elsewhere + " people");
+                    }
+                    for (int b = 0; b < c.bCount; b++) {
+                        check(c.bres[b] >= 0, "negative residents");
+                        for (int y = c.by[b]; y < c.by[b] + c.bh[b]; y++)
+                            for (int x = c.bx[b]; x < c.bx[b] + c.bw[b]; x++) {
+                                check(!wet[y * 64 + x], Region.BNAMES[c.bkind[b]] + " on water in chunk " + p[0] + "," + p[1]);
+                                check(c.bld[y * 64 + x] == b + 1 && c.t(x, y) == Tile.BUILDING, "a building's tiles");
+                            }
+                        check(c.doorX[b] >= 0 && Tile.walkable(c.t(c.doorX[b], c.doorY[b])), "a building without a door");
+                        int id = c.id(b);
+                        check(Chunk.isChunkBuilding(id) && Chunk.chunkOf(id) == s && Chunk.localOf(id) == b, "building ids");
+                    }
+                    for (int i = 0; i < Chunk.AREA; i++) {
+                        int v = c.bld[i];
+                        if (v < 0) check(!wet[i], "national building " + Region.BNAMES[n.bkind[-v - 1]] + " on water in chunk " + p[0] + "," + p[1]);
+                    }
+                    people += c.residents();
+                    buildings += c.bCount;
+                    chunks++;
+                }
+                check(unhoused == 0, unhoused + " people outside sites found no house");
+                System.out.printf("        %d chunks, %d buildings, %d residents, all matching their sectors%n", chunks, buildings, people);
+            }
+        });
+        test("chunks: generated in under 1.5 ms each at p95 (5 ms allowed on a busy machine)", new T() {
+            public void run() {
+                Nation n = country();
+                List<int[]> cs = sampleChunks(n, 800);
+                for (int i = 0; i < 300; i++) ChunkGen.generate(n, cs.get(i)[0], cs.get(i)[1]); // warm up
+                double[] ms = new double[cs.size()];
+                long mem = 0;
+                int D = Nation.DISTRICT_NAMES.length;
+                int[] dChunks = new int[D], dBuild = new int[D], dRes = new int[D], dFloors = new int[D], dMax = new int[D];
+                for (int i = 0; i < cs.size(); i++) {
+                    long t0 = System.nanoTime();
+                    Chunk c = ChunkGen.generate(n, cs.get(i)[0], cs.get(i)[1]);
+                    ms[i] = (System.nanoTime() - t0) / 1e6;
+                    mem += c.memoryBytes();
+                    int s = cs.get(i)[1] * n.sw + cs.get(i)[0], d = n.built(s) ? n.district[s] : 0;
+                    if (site(n, s)) continue;
+                    dChunks[d]++;
+                    dBuild[d] += c.bCount;
+                    dRes[d] += c.residents();
+                    for (int b = 0; b < c.bCount; b++) {
+                        dFloors[d] += c.bfloors[b];
+                        dMax[d] = Math.max(dMax[d], c.bfloors[b]);
+                    }
+                }
+                double[] sorted = ms.clone();
+                java.util.Arrays.sort(sorted);
+                double p50 = sorted[sorted.length / 2], p95 = sorted[(int) (sorted.length * 0.95)], max = sorted[sorted.length - 1];
+                System.out.printf("        %d chunks: p50 %.2f ms, p95 %.2f ms, max %.2f ms; %.1f KB per chunk%n", ms.length, p50, p95, max, mem / 1024.0 / ms.length);
+                for (int d = 0; d < D; d++) {
+                    if (dChunks[d] == 0) continue;
+                    System.out.printf("        %-11s %4d chunks: %5.1f buildings each, %5.1f residents per building, %4.1f floors on average (top %d)%n",
+                            Nation.DISTRICT_NAMES[d], dChunks[d], dBuild[d] / (float) dChunks[d], dBuild[d] == 0 ? 0 : dRes[d] / (float) dBuild[d],
+                            dBuild[d] == 0 ? 0 : dFloors[d] / (float) dBuild[d], dMax[d]);
+                }
+                check(p95 < 5, "p95 " + p95 + " ms");
+                check(mem / ms.length < 40 * 1024, "chunks take " + mem / ms.length + " bytes");
+                // downtown towers, suburbs of one or two floors
+                check(dMax[Nation.D_CORE] >= 30 && dFloors[Nation.D_SUBURB] / (float) Math.max(1, dBuild[Nation.D_SUBURB]) < 2.2f, "heights by district");
+            }
+        });
+        test("chunks: the cache evicts, pins, waits and regenerates the same chunk", new T() {
+            public void run() throws Exception {
+                final Nation n = country();
+                final ChunkCache cache = new ChunkCache(n, 64);
+                int cx = n.capital().cx / 64, cy = n.capital().cy / 64;
+                long first = cache.get(cx, cy).checksum();
+                cache.pin(cx + 1, cy);
+                cache.get(cx + 1, cy);
+                for (int k = 0; k < 150; k++) cache.get(cx - 20 + k % 15, cy + 5 + k / 15);
+                check(cache.size() <= 64, "the cache holds " + cache.size());
+                check(!cache.contains(cx, cy), "the old chunk was evicted");
+                check(cache.contains(cx + 1, cy), "the pinned chunk was kept");
+                check(cache.get(cx, cy).checksum() == first, "regenerated after eviction, it is the same");
+                cache.unpin(cx + 1, cy);
+                // the overlay: applied on first use, again from scratch when its version changes, and after eviction
+                final int[] version = {1};
+                final int target = cy * n.sw + cx;
+                cache.setOverlay(new ChunkCache.Overlay() {
+                    public int version(int c) {
+                        return c == target ? version[0] : 0;
+                    }
+
+                    public void apply(Chunk c) {
+                        if (c.index != target) return;
+                        c.tile[0] = Tile.BARRICADE;
+                        if (version[0] >= 2) c.tile[1] = Tile.RUBBLE;
+                    }
+                });
+                Chunk o = cache.get(cx, cy);
+                check(o.tile[0] == Tile.BARRICADE && o.tile[1] != Tile.RUBBLE, "the overlay applied");
+                version[0] = 2;
+                o = cache.get(cx, cy);
+                check(o.tile[0] == Tile.BARRICADE && o.tile[1] == Tile.RUBBLE && o.overlayVersion == 2, "the newer overlay applied");
+                long withOverlay = o.checksum();
+                check(cache.evict(cx, cy), "evicted");
+                check(cache.get(cx, cy).checksum() == withOverlay, "regenerated and the overlay applied again: the same");
+                cache.setOverlay(null);
+                // four threads asking for the same new chunk at once: made once, the others wait
+                final int nx = cx + 30, ny = cy - 30;
+                long before = cache.generated;
+                Thread[] ts = new Thread[4];
+                final long[] got = new long[4];
+                for (int t = 0; t < 4; t++) {
+                    final int t0 = t;
+                    ts[t] = new Thread(new Runnable() {
+                        public void run() {
+                            got[t0] = cache.get(nx, ny).checksum();
+                        }
+                    });
+                    ts[t].start();
+                }
+                for (Thread t : ts) t.join();
+                check(cache.generated - before == 1, "made " + (cache.generated - before) + " times");
+                check(got[0] == got[1] && got[1] == got[2] && got[2] == got[3], "all four got the same chunk");
+                // the prefetcher fills the cache and nothing else
+                cache.prefetchAround(cx - 40, cy + 40, 2);
+                cache.drain();
+                check(cache.contains(cx - 40, cy + 40) && cache.contains(cx - 42, cy + 42), "prefetched");
+                check(cache.peek(cx - 41, cy + 41).checksum() == ChunkGen.generate(n, cx - 41, cy + 41).checksum(), "a prefetched chunk is the chunk");
+                cache.shutdown();
+                System.out.printf("        generated %d, waited %d, prefetched %d, evicted %d; capacity for a 256 MB heap: %d chunks%n",
+                        cache.generated, cache.waits, cache.prefetched, cache.evicted, ChunkCache.capacityFor(256L << 20));
+            }
+        });
     }
 }
+
