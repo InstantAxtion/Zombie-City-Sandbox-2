@@ -55,6 +55,11 @@ public final class Military {
 
     private void gunship(float x, float y) {
         Vehicles v = w.veh;
+        // only so many crews and aircraft are ready at once: more go up as the alert rises
+        int up = 0;
+        for (int j = 0; j < v.top; j++)
+            if ((v.state[j] == Vehicles.V_ORBIT || v.state[j] == Vehicles.V_FLY) && v.type(j).flies && v.type(j).weapon != null && v.role[j] != Vehicles.R_STRIKE) up++;
+        if (up >= 1 + w.gov.level) return;
         for (int i = 0; i < v.top; i++) {
             if (v.state[i] != Vehicles.V_PARKED || !v.type(i).flies || v.type(i).weapon == null || v.role[i] == Vehicles.R_STRIKE) continue;
             if (v.ammo[i] <= 0 || v.fuel[i] < 0.5f) continue;

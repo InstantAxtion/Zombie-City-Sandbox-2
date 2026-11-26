@@ -36,7 +36,7 @@ one person.
 - **Play as anyone** (chosen on the New Game screen; the AI runs everything else):
   - *God*: every tool. Paint the dead, place forces, strike, order anyone, decide everything.
   - *President*: alert level, martial law, mobilisation, curfews, quarantines, evacuations, air strikes,
-    artillery, bridges, and every formation.
+    artillery, bridges, and every formation, or hand the army (or single formations) to the AI general.
   - *Military commander*: the formations, air strikes, artillery and bridges; the civil government decides the
     rest.
   - *Incident commander*: one city's police and the soldiers sent there, its evacuation, and asking for the army.
@@ -99,8 +99,11 @@ layers, timelapse and replays).
 
 `tools/balance.sh 5000,50000,100000,250000 8 2304 30 4` plays each outbreak size on many seeds in fast-forward
 and prints the spread of outcomes (days to contain or fall, share of the country lost, losses); every run goes to
-`build/balance.csv`. On the combined game at the time of writing: 5,000 dead are put down within hours;
-50,000-100,000 are a fight of days to weeks; 250,000 is a long war that is won in about half of the runs.
+`build/balance.csv` (a run counts as lost when a third of the country's people are gone). At the time of writing
+(8 seeds, the default map, 30 days): 5,000 dead are put down in well under a day; 50,000-250,000 are a war of two
+to four weeks that is usually won, with a fifth to a quarter of the country bitten or killed, and is sometimes lost
+or still going after a month. The alert, curfews, shelter orders and evacuations then come down, outside units go
+home and people return to their towns.
 
 The game draws with Android's Canvas by default. Settings has "Renderer (next start)": choosing GPU (OpenGL ES
 2.0, experimental) takes effect when the app next starts. On its first frame the GPU renderer draws a test pattern

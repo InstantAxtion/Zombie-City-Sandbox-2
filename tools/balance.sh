@@ -7,4 +7,4 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 mkdir -p build/balance
 javac -nowarn -encoding UTF-8 -d build/balance $(find src/core desktop/src -name "*.java") 2>&1 | grep -v "^Picked up" || true
-java -Xmx3g -cp build/balance com.instantaxtion.zcs2.Balance "$@" 2>&1 | grep -v "^Picked up"
+java -Xmx2g -cp build/balance com.instantaxtion.zcs2.Balance "$@" 2>&1 | grep -v "^Picked up"

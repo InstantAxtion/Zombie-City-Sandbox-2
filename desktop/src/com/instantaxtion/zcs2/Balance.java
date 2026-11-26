@@ -60,7 +60,8 @@ public final class Balance {
                 r.result = CONTAINED;
                 break;
             }
-            if (people < r.people0 * 0.05f) {
+            // the war is lost when a third of the country's people are gone
+            if (people < r.people0 * 0.67f) {
                 r.result = FALLEN;
                 break;
             }
@@ -68,6 +69,7 @@ public final class Balance {
         r.days = (float) (w.time / 1440.0);
         // people still alive anywhere (at home, on the roads, or got out) against those at the start
         r.lostShare = 1 - Math.min(1f, Audit.people(w) / (float) r.people0);
+        if (r.result == ONGOING && r.lostShare >= 0.33f) r.result = FALLEN;
         r.deaths = w.stats.civDeaths;
         r.police = w.stats.armedDeaths[Ents.COP];
         r.army = w.stats.armedDeaths[Ents.SOLDIER];

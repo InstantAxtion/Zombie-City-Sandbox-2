@@ -34,6 +34,7 @@ public final class Navy extends Module {
     public Navy(World w) {
         super(w);
         coastal = new boolean[w.sec.n];
+        boolean[] deepHere = new boolean[w.sec.n];
         coastNews = new boolean[w.r.settlements.size()];
         // which sectors touch open water (boats can come in)
         Region r = w.r;
@@ -47,7 +48,24 @@ public final class Navy extends Module {
                     if (t == Tile.DEEP) deep++;
                     all++;
                 }
-            coastal[s] = deep > 0 && water > all / 10 && water < all * 9 / 10;
+            coastal[s] = water > all / 25 && water < all * 9 / 10;
+            if (deep == 0) coastal[s] = false;
+            deepHere[s] = deep > 0;
+        }
+        // a shore with deep water off it (in the next sector out) is reachable by boat too
+        for (int s = 0; s < w.sec.n; s++) {
+            if (coastal[s]) continue;
+            int x0 = (s % w.sec.sw) * Region.SECT, y0 = (s / w.sec.sw) * Region.SECT, water = 0, all = 0;
+            for (int y = y0; y < y0 + Region.SECT; y += 8)
+                for (int x = x0; x < x0 + Region.SECT; x += 8) {
+                    if (Tile.water(r.t(x, y))) water++;
+                    all++;
+                }
+            if (water == 0 || water > all * 9 / 10) continue;
+            for (int d = 0; d < 8; d++) {
+                int t = w.sec.neighbour(s, d);
+                if (t >= 0 && deepHere[t]) coastal[s] = true;
+            }
         }
         // destroyers by the naval station
         Content.VType dt = w.c.vtype("destroyer");
@@ -207,7 +225,7 @@ public final class Navy extends Module {
             rescued += k;
             if (!coastNews[st]) {
                 coastNews[st] = true;
-                w.news.radio("Coast guard: boats are taking people off the shore at " + w.r.settlements.get(st).name, sec.cx(s), sec.cy(s), News.COMMAND);
+                w.news.radio("Coast guard and navy: boats are taking people off the shore at " + w.r.settlements.get(st).name, sec.cx(s), sec.cy(s), News.COMMAND);
             }
         }
     }
@@ -233,7 +251,7 @@ public final class Navy extends Module {
         float far = w.c.rule("airliftDistance", 9000);
         float dx = x - f.hq.x, dy = y - f.hq.y;
         if (dx * dx + dy * dy < far * far) return false;
-        Region.Facility a = airfieldNear(f.hq.x, f.hq.y, 2500, null);
+        Region.Facility a = airfieldNear(f.hq.x, f.hq.y, 5000, null);
         return a != null && airfieldNear(x, y, 4000, a) != null;
     }
 
@@ -244,7 +262,7 @@ public final class Navy extends Module {
             if (!f.alive || f.state != Forces.MOVING || f.route == null || f.ri > 0) continue;
             float dx = f.gx - f.hq.x, dy = f.gy - f.hq.y;
             if (dx * dx + dy * dy < far * far) continue;
-            Region.Facility a = airfieldNear(f.hq.x, f.hq.y, 2500, null);
+            Region.Facility a = airfieldNear(f.hq.x, f.hq.y, 5000, null);
             if (a == null) continue;
             Region.Facility b = airfieldNear(f.gx, f.gy, 4000, a);
             if (b == null) continue;

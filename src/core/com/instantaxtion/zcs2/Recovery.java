@@ -56,7 +56,8 @@ public final class Recovery extends Module {
         else if (natPeak >= 50) {
             natClearT += dt;
             if (natClearT >= 360) {
-                w.news.headline("No more of the dead are reported anywhere in the country. The worst is over.", -1, -1);
+                String lost = w.stats.lossSummary();
+                w.news.headline("No more of the dead are reported anywhere in the country. The worst is over." + (lost.length() > 0 ? " People bitten or killed: " + lost + "." : ""), -1, -1);
                 natPeak = 0;
                 natClearT = 0;
             }

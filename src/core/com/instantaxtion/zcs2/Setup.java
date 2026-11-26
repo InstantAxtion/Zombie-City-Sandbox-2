@@ -417,7 +417,7 @@ public final class Setup {
                 h.ty = w.sec.cy(h.target);
                 h.keepT = 1440 * 30;
                 // in waves, a couple of days apart
-                h.waitT = (wave++) * 1440 * 2.2f;
+                h.waitT = (0.5f + 2.2f * wave++) * 1440;
             }
             w.gov.level = 2;
             originX = r.city().cx * 16f;

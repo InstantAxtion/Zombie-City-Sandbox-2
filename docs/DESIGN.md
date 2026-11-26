@@ -165,6 +165,33 @@ Systems added as modules, each saved with the game and run in fast-forward too:
 They interact: hunger brings looting, looters and dry towns start fires, fire crews without mains water are weaker,
 phones down slow the calls and the officials' picture, rumours move people onto the roads where the dead are.
 
+## The shape of an outbreak over weeks
+
+- *Pacing.* Indoors, only so many of the dead can reach the people sheltering at once, and a street (sector) loses
+  at most `maxBitePerHour` of its people an hour however many are outside; the bitten turn over hours
+  (`turnTime`), not minutes. More than `sectorSpill` dead in one sector spill into the next streets. Residents put
+  down a few of the dead where they far outnumber them. Fights as numbers (`aggregateKill`, `aggregateLoss`) cost
+  ammunition (`roundsPerKill`), and formations draw it from depots close behind them and from convoys (escorted,
+  so harder to stop than a town's food lorries).
+- *Imperfect information, both ways.* `Command` believes a share of the truth, inflated a little by panic online,
+  catching up with a lag; officials take `reportClearLag` times longer to believe the dead are gone. In
+  fast-forward nobody is taking 911 calls, so stale calls no longer hold the picture up.
+- *Coming down.* The president lowers the alert a step at a time once the picture has stayed well below the mark
+  for `lowerAfter`; curfews, shelter orders, evacuations and quarantines are lifted after quiet spells; outside
+  units go home over the border (`Recovery`); a town clear for two hours is declared safe with what it cost; and
+  people come home from wherever they sheltered (`Strategic.homecoming`), counted once in `Strategic.refuge`.
+- *The general.* Every half minute `Forces.command` makes a plan: towns by the reported dead, hordes and nests in
+  open country by reconnaissance, formations in proportion to each, each to its own part of the line
+  (`frontFor`); free formations join the biggest fights; idle ones go home. The player as President or Military
+  commander commands the army until they hand it over (`Actions.generalCommands`) or release single formations.
+- *Evacuation.* The roads out of a town carry `evacPerHourTown`/`evacPerHourCity` an hour; a destination takes
+  refugees up to `hostShare` of its people; the bitten among each town's leavers are counted per town.
+- *The news.* A line is said once; things that happen again and again are said the first time and then added
+  up in one line every few hours (`News.tally`). Rumours start where people are frightened, one town at a time.
+- *Campaign goals* are judged from the first full count, over time (`Roles.goals`): the capital's own people alive
+  at home or safe elsewhere; the coast's people safe inland; the dead in the fallen state down to one in a
+  hundred for two hours; the capital lost only if the dead hold a fifth of its streets for half a day.
+
 ## Balance over many runs
 
 `desktop/src/.../Balance.java` (and `tools/balance.sh`) plays outbreak sizes over many seeds in fast-forward and

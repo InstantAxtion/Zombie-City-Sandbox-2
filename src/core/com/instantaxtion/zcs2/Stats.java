@@ -65,6 +65,21 @@ public final class Stats {
         if (events.size() > 300) events.remove(0);
     }
 
+    /** Where people were lost, biggest first ("412,000 in their homes, 31,000 on the roads"), or "" if nobody was. */
+    public String lossSummary() {
+        StringBuilder sb = new StringBuilder();
+        boolean[] used = new boolean[lossBy.length];
+        for (int n = 0; n < lossBy.length; n++) {
+            int best = -1;
+            for (int i = 0; i < lossBy.length; i++) if (!used[i] && lossBy[i] > 0 && (best < 0 || lossBy[i] > lossBy[best])) best = i;
+            if (best < 0) break;
+            used[best] = true;
+            if (sb.length() > 0) sb.append(", ");
+            sb.append(WorldView.fmt(lossBy[best])).append(' ').append(LOSS_CAUSES[best]);
+        }
+        return sb.toString();
+    }
+
     void noteKiller(int i) {
         Ents e = w.e;
         int k = e.kills[i], uid = e.uid[i];
