@@ -44,6 +44,8 @@ public final class Game {
     boolean customContent;
     long ngSeed;
     private volatile Region preview;
+    /** A real-scale map's preview: its coarse layer (no tiles are made for the preview). */
+    private volatile Nation previewNation;
     private GImage previewImg;
     private volatile boolean previewBusy;
     private long previewKey = -1;
@@ -686,7 +688,8 @@ public final class Game {
             g.fillRoundRect(pxx, y, ps, ps, ui.dp(6));
         }
         Region pr = preview;
-        if (pr == null || previewKey != key()) {
+        Nation pn = previewNation;
+        if (pr == null && pn == null || previewKey != key()) {
             if (captions) {
                 g.color(Ui.DIM);
                 g.text(previewFailed == key() ? "Couldn't draw the map: try another seed" : "Drawing the map...", pxx + ps / 2, y + ps / 2, ui.dp(Ui.M), Gfx.ALIGN_CENTER, false);
@@ -694,27 +697,37 @@ public final class Game {
             return false;
         }
         if (previewImg == null) {
-            int st = pr.W > 1024 ? 4 : 2, iw = pr.W / st;
-            previewImg = pf.newImage(iw, iw);
-            int[] pix = new int[iw * iw];
-            for (int yy = 0; yy < iw; yy++) for (int xx = 0; xx < iw; xx++) pix[yy * iw + xx] = MapPainter.tileColor(pr, xx * st, yy * st, false);
-            previewImg.setPixels(pix, iw, iw);
+            if (pr != null) {
+                int st = pr.W > 1024 ? 4 : 2, iw = pr.W / st;
+                previewImg = pf.newImage(iw, iw);
+                int[] pix = new int[iw * iw];
+                for (int yy = 0; yy < iw; yy++) for (int xx = 0; xx < iw; xx++) pix[yy * iw + xx] = MapPainter.tileColor(pr, xx * st, yy * st, false);
+                previewImg.setPixels(pix, iw, iw);
+            } else {
+                // from the coarse layer only
+                int iw = 768;
+                previewImg = pf.newImage(iw, iw);
+                previewImg.setPixels(NationPainter.preview(pn, iw), iw, iw);
+            }
         }
         g.image(previewImg, pxx, y, ps, ps);
         if (!captions) return true;
-        float k = ps / pr.W;
+        java.util.List<Region.Settlement> setts = pr != null ? pr.settlements : pn.settlements;
+        String pname = pr != null ? pr.name : pn.name;
+        int nstates = pr != null ? pr.states.size() : pn.states.size();
+        float k = ps / (pr != null ? pr.W : pn.size);
         // the caption first: the names keep above it
         long people = 0;
-        for (Region.Settlement s : pr.settlements) people += s.residents;
+        for (Region.Settlement s : setts) people += s.residents;
         // the country's name, and its people and states: on one line if it fits, else on two
-        String cap = pr.name + ": " + WorldView.people(people) + " people, " + pr.states.size() + " states";
-        String sub = WorldView.people(people) + " people, " + pr.states.size() + " states";
+        String cap = pname + ": " + WorldView.people(people) + " people, " + nstates + " states";
+        String sub = WorldView.people(people) + " people, " + nstates + " states";
         boolean two = g.textWidth(cap, ui.dp(12), false) > ps - ui.dp(12);
         float bh = ui.dp(two ? 40 : 24);
 
         int placed = 0;
         for (int pass = 0; pass < 3; pass++)
-            for (Region.Settlement s : pr.settlements) {
+            for (Region.Settlement s : setts) {
                 int rank = s.capital ? 0 : s.kind == Region.S_CITY ? 1 : 2;
                 if (rank != pass || (rank == 2 && (s.kind != Region.S_TOWN || ps < ui.dp(260)))) continue;
                 float size = ui.dp(s.capital ? 13 : s.kind == Region.S_CITY ? 11.5f : 10);
@@ -737,7 +750,7 @@ public final class Game {
         g.fillRect(pxx, y + ps - bh, ps, bh);
         g.color(0xFFFFFFFF);
         if (two) {
-            g.text(Ui.fit(g, pr.name, ps - ui.dp(12), ui.dp(12), true), pxx + ui.dp(6), y + ps - ui.dp(24), ui.dp(12), Gfx.ALIGN_LEFT, true);
+            g.text(Ui.fit(g, pname, ps - ui.dp(12), ui.dp(12), true), pxx + ui.dp(6), y + ps - ui.dp(24), ui.dp(12), Gfx.ALIGN_LEFT, true);
             g.text(Ui.fit(g, sub, ps - ui.dp(12), ui.dp(12), false), pxx + ui.dp(6), y + ps - ui.dp(8), ui.dp(12), Gfx.ALIGN_LEFT, false);
         } else g.text(cap, pxx + ui.dp(6), y + ps - ui.dp(8), ui.dp(12), Gfx.ALIGN_LEFT, false);
         return true;
@@ -751,6 +764,12 @@ public final class Game {
         return ngSeed * 31 + ngPreset * 7 + ngSize;
     }
 
+    /** A real-scale map size (built by NationGen). */
+    static boolean national(int size) {
+        for (int s : Nation.SIZES) if (s == size) return true;
+        return false;
+    }
+
     private void requestPreview() {
         final long k = key();
         if (previewKey == k || previewBusy || previewFailed == k || screen == S_LOADING) return;
@@ -760,8 +779,16 @@ public final class Game {
         Thread t = new Thread(new Runnable() {
             public void run() {
                 try {
-                    Region r = RegionGen.generate(size, preset, seed);
-                    preview = r;
+                    if (national(size)) {
+                        // a real-scale map: the preview is its coarse layer
+                        Nation n = NationGen.generate(size, preset, seed, settings.simThreads());
+                        preview = null;
+                        previewNation = n;
+                    } else {
+                        Region r = RegionGen.generate(size, preset, seed);
+                        previewNation = null;
+                        preview = r;
+                    }
                     previewKey = k;
                 } catch (Throwable e) {
                     previewFailed = k;

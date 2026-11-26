@@ -11,6 +11,9 @@ public interface Platform {
     /** Screen density: 1 on a 160 dpi screen, about 2.5-3.5 on a modern phone. */
     float density();
 
+    /** The most heap the app may use, in bytes: caches and pictures are sized from it. */
+    long maxMemory();
+
     InputStream openAsset(String name) throws IOException;
 
     InputStream openRead(String name) throws IOException;
