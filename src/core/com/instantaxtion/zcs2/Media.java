@@ -99,8 +99,8 @@ public final class Media extends Module {
     private void flee(int st, float share) {
         Sectors sec = w.sec;
         float hid = hidden();
-        for (int s = 0; s < sec.n; s++) {
-            if (sec.settlement[s] != st || sec.popIn[s] == 0 || sec.zIn[s] > 0) continue;
+        for (int s : sec.idx.bySettlement[st]) {
+            if (sec.popIn[s] == 0 || sec.zIn[s] > 0) continue;
             float want = sec.popIn[s] * share;
             int m = Math.min(sec.popIn[s], (int) want + (Rng.unit(w.seed, w.tick, s * 5L + 3) < want % 1f ? 1 : 0));
             if (m <= 0) continue;
@@ -164,7 +164,8 @@ public final class Media extends Module {
             default:
                 w.news.headline("RUMOUR: a cure is being given out at the hospitals. Crowds are gathering.", -1, -1);
                 // the infected and the healthy crowd together: the hospitals fill
-                for (int s = 0; s < w.sec.n; s++) {
+                // (only awake sectors hold any of the infected)
+                for (int s = w.sec.idx.first(); s >= 0; s = w.sec.idx.next(s)) {
                     int st = w.sec.settlement[s];
                     if (st < 0 || w.sec.inf[s] < 2) continue;
                     int hs = w.strat.hospitalSector(st);

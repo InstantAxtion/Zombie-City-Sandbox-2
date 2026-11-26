@@ -93,7 +93,8 @@ public final class Recovery extends Module {
         int killed = 0, nests = 0;
         float bx = -1, by = -1;
         int bk = 0;
-        for (int s = 0; s < sec.n; s++) {
+        // (only awake sectors hold any of the dead)
+        for (int s = sec.idx.first(); s >= 0; s = sec.idx.next(s)) {
             int z = sec.zIn[s];
             if (z <= 0 || z > 400 || sec.hot[s] > 0 && !w.strategic) continue;
             float share = sec.settlement[s] >= 0 ? 0.35f : 0.2f;

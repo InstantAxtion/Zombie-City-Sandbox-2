@@ -94,46 +94,63 @@ public final class Sectors {
 
     /** Which neighbouring sectors can be walked to (bit d for direction d of the eight). Water and walls cut it. */
     public void connectivity() {
-        for (int s = 0; s < n; s++) connect[s] = 0;
+        connectSectors(0, 0, sw - 1, sh - 1);
+    }
+
+    /**
+     * The same after tiles changed only within tiles (tx0, ty0)-(tx1, ty1) (a wall, a blown bridge): the sectors
+     * round them only, with the same result as the whole map's.
+     */
+    public void connectivity(int tx0, int ty0, int tx1, int ty1) {
+        int st = w.r.sect;
+        connectSectors(Math.max(0, tx0 / st - 1), Math.max(0, ty0 / st - 1), Math.min(sw - 1, tx1 / st + 1), Math.min(sh - 1, ty1 / st + 1));
+    }
+
+    private void connectSectors(int sx0, int sy0, int sx1, int sy1) {
         int[] dx = {1, -1, 0, 0, 1, 1, -1, -1}, dy = {0, 0, 1, -1, 1, -1, 1, -1};
         Region r = w.r;
         int per = r.sect / Region.NAV;
-        for (int s = 0; s < n; s++) {
-            int sx = s % sw, sy = s / sw;
-            for (int d = 0; d < 4; d++) {
-                int tx = sx + dx[d], ty = sy + dy[d];
-                if (tx < 0 || ty < 0 || tx >= sw || ty >= sh) continue;
-                // look along the shared border for a pair of open cells
-                boolean open = false;
-                for (int k = 0; k < per && !open; k++) {
-                    int ax, ay, bx, by;
-                    if (dx[d] != 0) {
-                        ax = dx[d] > 0 ? (sx + 1) * per - 1 : sx * per;
-                        bx = ax + dx[d];
-                        ay = by = sy * per + k;
-                    } else {
-                        ay = dy[d] > 0 ? (sy + 1) * per - 1 : sy * per;
-                        by = ay + dy[d];
-                        ax = bx = sx * per + k;
+        for (int sy = sy0; sy <= sy1; sy++)
+            for (int sx = sx0; sx <= sx1; sx++) {
+                int s = sy * sw + sx;
+                connect[s] &= (byte) 0xF0;
+                for (int d = 0; d < 4; d++) {
+                    int tx = sx + dx[d], ty = sy + dy[d];
+                    if (tx < 0 || ty < 0 || tx >= sw || ty >= sh) continue;
+                    // look along the shared border for a pair of open cells
+                    boolean open = false;
+                    for (int k = 0; k < per && !open; k++) {
+                        int ax, ay, bx, by;
+                        if (dx[d] != 0) {
+                            ax = dx[d] > 0 ? (sx + 1) * per - 1 : sx * per;
+                            bx = ax + dx[d];
+                            ay = by = sy * per + k;
+                        } else {
+                            ay = dy[d] > 0 ? (sy + 1) * per - 1 : sy * per;
+                            by = ay + dy[d];
+                            ax = bx = sx * per + k;
+                        }
+                        if (r.navOpen(ax, ay) && r.navOpen(bx, by)) open = true;
                     }
-                    if (r.navOpen(ax, ay) && r.navOpen(bx, by)) open = true;
+                    if (open) connect[s] |= (byte) (1 << d);
                 }
-                if (open) connect[s] |= (byte) (1 << d);
             }
-        }
-        for (int s = 0; s < n; s++) {
-            int sx = s % sw, sy = s / sw;
-            for (int d = 4; d < 8; d++) {
-                int tx = sx + dx[d], ty = sy + dy[d];
-                if (tx < 0 || ty < 0 || tx >= sw || ty >= sh) continue;
-                int hx = dx[d] > 0 ? 0 : 1, vy = dy[d] > 0 ? 2 : 3;
-                // diagonal: through either orthogonal neighbour
-                int viaH = sy * sw + tx, viaV = ty * sw + sx;
-                boolean a = (connect[s] & (1 << hx)) != 0 && (connect[viaH] & (1 << vy)) != 0;
-                boolean b = (connect[s] & (1 << vy)) != 0 && (connect[viaV] & (1 << hx)) != 0;
-                if (a || b) connect[s] |= (byte) (1 << d);
+        // diagonals read the orthogonal bits of the sector and its neighbours: one ring further
+        for (int sy = Math.max(0, sy0 - 1); sy <= Math.min(sh - 1, sy1 + 1); sy++)
+            for (int sx = Math.max(0, sx0 - 1); sx <= Math.min(sw - 1, sx1 + 1); sx++) {
+                int s = sy * sw + sx;
+                connect[s] &= (byte) 0x0F;
+                for (int d = 4; d < 8; d++) {
+                    int tx = sx + dx[d], ty = sy + dy[d];
+                    if (tx < 0 || ty < 0 || tx >= sw || ty >= sh) continue;
+                    int hx = dx[d] > 0 ? 0 : 1, vy = dy[d] > 0 ? 2 : 3;
+                    // diagonal: through either orthogonal neighbour
+                    int viaH = sy * sw + tx, viaV = ty * sw + sx;
+                    boolean a = (connect[s] & (1 << hx)) != 0 && (connect[viaH] & (1 << vy)) != 0;
+                    boolean b = (connect[s] & (1 << vy)) != 0 && (connect[viaV] & (1 << hx)) != 0;
+                    if (a || b) connect[s] |= (byte) (1 << d);
+                }
             }
-        }
     }
 
     public int neighbour(int s, int d) {

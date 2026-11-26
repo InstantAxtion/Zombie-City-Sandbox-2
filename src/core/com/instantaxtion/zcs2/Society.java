@@ -106,18 +106,41 @@ public final class Society extends Module {
 
     // ------------------------------------------------------------------ holdouts
 
+    /** The holdout sectors, ascending. */
+    private int[] holdoutList = new int[0];
+
+    private void listHoldouts() {
+        Sectors sec = w.sec;
+        int m = 0;
+        for (int s = 0; s < sec.n; s++) if (sec.holdout[s]) m++;
+        holdoutList = new int[m];
+        m = 0;
+        for (int s = 0; s < sec.n; s++) if (sec.holdout[s]) holdoutList[m++] = s;
+    }
+
     private void holdouts(float dt) {
         Sectors sec = w.sec;
         float after = w.c.rule("holdoutAfter", 1440);
         int announced = 0;
-        // (awake sectors only: a holdout keeps its district awake, and a threat wakes the district and the ring
-        // round it; a sleeping sector's hold timer stands still)
-        for (int s = sec.idx.first(); s >= 0; s = sec.idx.next(s)) {
+        // (the awake sectors and the holdouts, in map order: a threat wakes a district and the ring round it, so a
+        // sleeping sector's hold timer stands still; only a holdout can change while its district sleeps)
+        int[] hl = holdoutList;
+        int hi = 0;
+        for (int a = sec.idx.first(); ; ) {
+            int s;
+            if (hi < hl.length && (a < 0 || hl[hi] <= a)) {
+                s = hl[hi++];
+                if (s == a) a = sec.idx.next(a);
+            } else if (a >= 0) {
+                s = a;
+                a = sec.idx.next(a);
+            } else break;
             if (sec.home[s] < 200) continue;
             if (sec.holdout[s]) {
                 if (sec.popIn[s] < sec.home[s] * 0.08f) {
                     sec.holdout[s] = false;
                     holdT[s] = 0;
+                    listHoldouts();
                 }
                 continue;
             }
@@ -129,6 +152,7 @@ public final class Society extends Module {
             if (threatened && sec.popIn[s] >= sec.home[s] * 0.3f) holdT[s] += dt;
             if (holdT[s] >= after) {
                 sec.holdout[s] = true;
+                listHoldouts();
                 w.stats.holdouts++;
                 if (announced++ == 0 && w.stats.holdouts <= 6) {
                     int st = sec.settlement[s];
@@ -429,6 +453,7 @@ public final class Society extends Module {
             if (got == 0) continue;
             sec.popIn[sec.touch(best)] += got;
             sec.holdout[best] = true;
+            listHoldouts();
             Colony c = new Colony();
             c.sector = best;
             c.start = got;
@@ -649,6 +674,7 @@ public final class Society extends Module {
                 sec.holdout[s] = h;
             }
         }
+        listHoldouts();
         n = in.readInt();
         for (int i = 0; i < n; i++) {
             int m = in.readInt();

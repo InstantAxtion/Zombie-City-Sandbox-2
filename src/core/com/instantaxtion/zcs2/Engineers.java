@@ -189,7 +189,7 @@ public final class Engineers extends Module {
             }
         if (x1 < 0) return false;
         r.rebuildNav(x0 - 1, y0 - 1, x1 + 1, y1 + 1);
-        w.sec.connectivity();
+        w.sec.connectivity(x0 - 1, y0 - 1, x1 + 1, y1 + 1);
         w.r.closeBarricadedRoads(x0, y0, x1, y1);
         return true;
     }

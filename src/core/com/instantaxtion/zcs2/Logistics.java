@@ -546,7 +546,7 @@ public final class Logistics extends Module {
     private void settle(int st, int healthy, int infected) {
         Sectors sec = w.sec;
         List<Integer> homes = new ArrayList<Integer>();
-        for (int s = 0; s < sec.n; s++) if (sec.settlement[s] == st && sec.home[s] > 0 && sec.zIn[s] == 0) homes.add(s);
+        for (int s : sec.idx.bySettlement[st]) if (sec.home[s] > 0 && sec.zIn[s] == 0) homes.add(s);
         if (homes.isEmpty()) {
             w.strat.leftCountry(-1, healthy + infected);
             return;

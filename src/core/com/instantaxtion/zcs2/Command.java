@@ -166,10 +166,12 @@ public final class Command extends Module {
                     alerted[in.settlement] = true;
                 }
         int[] sectors = new int[n], infected = new int[n];
-        for (int s = 0; s < w.sec.n; s++) {
+        SectorIndex idx = w.sec.idx;
+        for (int st = 0; st < n && st < idx.bySettlement.length; st++) sectors[st] = idx.bySettlement[st].length;
+        // (only awake sectors hold any of the dead)
+        for (int s = idx.first(); s >= 0; s = idx.next(s)) {
             int st = w.sec.settlement[s];
             if (st < 0 || st >= n) continue;
-            sectors[st]++;
             if (w.sec.zIn[s] + w.sp.secZ[s] > 0) infected[st]++;
         }
         float detectUp = w.c.rule("reportShare", 0.8f), detectDown = w.c.rule("reportShareNoPhones", 0.3f);

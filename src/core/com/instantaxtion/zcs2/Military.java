@@ -204,7 +204,8 @@ public final class Military {
     private void autoStrike() {
         if (!airfield()) return;
         int best = -1, bz = 0;
-        for (int s = 0; s < w.sec.n; s++) {
+        // (only awake sectors hold any of the dead)
+        for (int s = w.sec.idx.first(); s >= 0; s = w.sec.idx.next(s)) {
             int z = w.sp.secZ[s] + w.sec.zIn[s];
             if (z < 250 || w.sec.popIn[s] > 50) continue;
             if (w.sp.secCiv[s] + w.sp.secCop[s] + w.sp.secSol[s] > 0) continue;

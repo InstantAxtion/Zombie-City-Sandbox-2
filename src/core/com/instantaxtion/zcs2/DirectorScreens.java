@@ -147,23 +147,25 @@ final class DirectorScreens {
         Sectors sec = w.sec;
         byte[] zd = d.lapseDead.get(frame), pp = d.lapsePeople.get(frame);
         // the hour's picture: people as a warm haze, the dead as red, smoothed
-        if (lapseImg == null || lapsePx.length != sec.n) {
-            lapsePx = new int[sec.n];
-            lapseImg = g0.pf.newImage(sec.sw, sec.sh);
+        int ln = d.lapseN;
+        if (lapseImg == null || lapsePx.length != ln) {
+            lapsePx = new int[ln];
+            lapseImg = g0.pf.newImage(d.lapseW, d.lapseH);
             lapseShown = -1;
         }
         if (lapseShown != frame) {
-            for (int s = 0; s < sec.n; s++) {
+            for (int s = 0; s < ln; s++) {
                 int pv = pp[s] & 255, zv = zd[s] & 255;
                 int c = 0;
                 if (zv > 0) c = (Math.min(235, 70 + zv) << 24) | 0xD81C1C;
                 else if (pv > 0) c = ((int) Math.min(200, pv * 0.7f) << 24) | 0xF0E2C0;
                 lapsePx[s] = c;
             }
-            lapseImg.setPixels(lapsePx, sec.sw, sec.sh);
+            lapseImg.setPixels(lapsePx, d.lapseW, d.lapseH);
             lapseShown = frame;
         }
-        g.image(lapseImg, x0, y0, size * sec.sw * w.r.sect / w.r.W, size * sec.sh * w.r.sect / w.r.H);
+        int cellTiles = w.r.sect * (d.coarse ? SectorIndex.D : 1);
+        g.image(lapseImg, x0, y0, size * d.lapseW * cellTiles / w.r.W, size * d.lapseH * cellTiles / w.r.H);
         for (Region.Settlement s : w.r.settlements) {
             if (s.kind != Region.S_CITY) continue;
             g.color(0xFFFFFFFF);
@@ -171,7 +173,7 @@ final class DirectorScreens {
         }
         float t = d.lapseTime.get(frame);
         long dead = 0, people = 0;
-        for (int s = 0; s < sec.n; s++) {
+        for (int s = 0; s < ln; s++) {
             dead += Director.unlog(zd[s]);
             people += Director.unlog(pp[s]);
         }

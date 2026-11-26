@@ -1033,7 +1033,7 @@ public final class Strategic {
         }
         if (x0 <= x1) {
             w.r.rebuildNav(x0 - 2, y0 - 2, x1 + 2, y1 + 2);
-            w.sec.connectivity();
+            w.sec.connectivity(x0 - 2, y0 - 2, x1 + 2, y1 + 2);
             // anyone left standing over the water falls in
             Ents e = w.e;
             for (int i = 0; i < e.top; i++)

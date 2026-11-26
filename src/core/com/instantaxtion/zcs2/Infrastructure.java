@@ -189,8 +189,8 @@ public final class Infrastructure extends Module {
             // the hungry and the thirsty take to the roads; looting starts; trust falls
             if (sh == 2 || dry) {
                 float rate = (sh == 2 ? 0.0002f : 0) + (dry ? 0.0003f : 0);
-                for (int k = 0; k < w.sec.n; k++) {
-                    if (w.sec.settlement[k] != st || w.sec.popIn[k] == 0) continue;
+                for (int k : w.sec.idx.bySettlement[st]) {
+                    if (w.sec.popIn[k] == 0) continue;
                     float want = w.sec.popIn[k] * rate * dt;
                     int m = Math.min(w.sec.popIn[k], (int) want + (Rng.unit(w.seed, w.tick, k * 5L + 3) < want % 1f ? 1 : 0));
                     w.sec.popIn[k] -= m;

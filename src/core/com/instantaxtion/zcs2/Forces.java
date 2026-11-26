@@ -783,7 +783,8 @@ public final class Forces extends Module {
         int nestMin = jobs.size() > 4 ? 600 : jobs.isEmpty() ? 60 : 250;
         for (int pass = 0; pass < 6; pass++) {
             int best = -1, bz = nestMin;
-            for (int s = 0; s < sec.n; s++) {
+            // (only awake sectors hold any of the dead)
+            for (int s = sec.idx.first(); s >= 0; s = sec.idx.next(s)) {
                 if (sec.settlement[s] >= 0 || sec.zIn[s] <= bz) continue;
                 boolean taken = false;
                 for (Job j : jobs)
@@ -969,8 +970,7 @@ public final class Forces extends Module {
         Sectors sec = w.sec;
         int[] top = new int[k + 1];
         java.util.Arrays.fill(top, -1);
-        for (int q = 0; q < sec.n; q++) {
-            if (sec.settlement[q] != s.id) continue;
+        for (int q : sec.idx.bySettlement[s.id]) {
             int z = sec.zIn[q] + w.sp.secZ[q];
             if (z <= 0) continue;
             for (int i = 0; i <= k; i++) {
@@ -1023,8 +1023,7 @@ public final class Forces extends Module {
     public float[] infectionCentre(Region.Settlement s) {
         float sx = 0, sy = 0;
         int n = 0;
-        for (int k = 0; k < w.sec.n; k++) {
-            if (w.sec.settlement[k] != s.id) continue;
+        for (int k : w.sec.idx.bySettlement[s.id]) {
             int z = w.sec.zIn[k] + w.sp.secZ[k];
             if (z <= 0) continue;
             sx += w.sec.cx(k) * z;

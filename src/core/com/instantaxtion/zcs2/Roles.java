@@ -420,12 +420,13 @@ public final class Roles extends Module {
             // door to door: the streets with none of the dead in them go first, at what the officers can manage
             float want = w.c.rule("districtEvacPerHour", 1500) / 60f * dt + evacCarry;
             int total = 0;
-            for (int s = 0; s < w.sec.n; s++) if (inDistrict(s) && w.sec.zIn[s] == 0) total += w.sec.popIn[s];
+            int[] dl = districtSectors();
+            for (int s : dl) if (w.sec.zIn[s] == 0) total += w.sec.popIn[s];
             int moved = 0;
             if (total > 0) {
                 float share = Math.min(1, want / total);
-                for (int s = 0; s < w.sec.n; s++) {
-                    if (!inDistrict(s) || w.sec.zIn[s] > 0 || w.sec.popIn[s] == 0) continue;
+                for (int s : dl) {
+                    if (w.sec.zIn[s] > 0 || w.sec.popIn[s] == 0) continue;
                     int m = Math.min(w.sec.popIn[s], (int) (w.sec.popIn[s] * share));
                     w.sec.popIn[s] -= m;
                     moved += m;
@@ -535,7 +536,8 @@ public final class Roles extends Module {
 
 
     private boolean noInfected() {
-        for (int s = 0; s < w.sec.n; s++) if (w.sec.inf[s] >= 1) return false;
+        // (only awake sectors hold any of the infected)
+        for (int s = w.sec.idx.first(); s >= 0; s = w.sec.idx.next(s)) if (w.sec.inf[s] >= 1) return false;
         return true;
     }
 
@@ -608,8 +610,8 @@ public final class Roles extends Module {
         if (district == null) {
             district = new boolean[w.sec.n];
             Region.Facility me = w.r.facilities.get(target);
-            for (int k = 0; k < w.sec.n; k++) {
-                if (w.sec.settlement[k] != me.settlement || w.sec.home[k] == 0) continue;
+            for (int k : w.sec.idx.settlementSectors(me.settlement)) {
+                if (w.sec.home[k] == 0) continue;
                 float x = w.sec.cx(k), y = w.sec.cy(k);
                 float dm = (me.x - x) * (me.x - x) + (me.y - y) * (me.y - y);
                 boolean mine = dm < 1600f * 1600f;
@@ -617,13 +619,28 @@ public final class Roles extends Module {
                     if (mine && f != me && f.kind == Region.F_POLICE && f.settlement == me.settlement && (f.x - x) * (f.x - x) + (f.y - y) * (f.y - y) < dm) mine = false;
                 district[k] = mine;
             }
+            int m = 0;
+            for (boolean b : district) if (b) m++;
+            districtList = new int[m];
+            m = 0;
+            for (int k = 0; k < district.length; k++) if (district[k]) districtList[m++] = k;
         }
         return s >= 0 && s < district.length && district[s];
     }
 
+    private int[] districtList;
+    private static final int[] NONE = new int[0];
+
+    /** The sectors of the player's precinct district, ascending (none if there isn't one now). */
+    private int[] districtSectors() {
+        if (role != PRECINCT || target < 0 || !campaign()) return NONE;
+        inDistrict(-1); // (works the district out the first time)
+        return districtList;
+    }
+
     private int districtAlive() {
         int n = 0;
-        for (int s = 0; s < w.sec.n; s++) if (inDistrict(s)) n += w.sec.popIn[s] + w.sp.secCiv[s] + (int) w.sec.inf[s];
+        for (int s : districtSectors()) n += w.sec.popIn[s] + w.sp.secCiv[s] + (int) w.sec.inf[s];
         return n;
     }
 
@@ -764,8 +781,8 @@ public final class Roles extends Module {
     /** The share of a settlement's streets (sectors) with a real number of the dead in them. */
     public float infestedShare(int st) {
         int all = 0, bad = 0;
-        for (int s = 0; s < w.sec.n; s++) {
-            if (w.sec.settlement[s] != st || w.sec.home[s] == 0) continue;
+        for (int s : w.sec.idx.bySettlement[st]) {
+            if (w.sec.home[s] == 0) continue;
             all++;
             if (w.sec.zIn[s] + w.sp.secZ[s] >= 20) bad++;
         }
@@ -838,7 +855,8 @@ public final class Roles extends Module {
 
     public int deadInState(int st) {
         int n = 0;
-        for (int s = 0; s < w.sec.n; s++) {
+        // (only awake sectors hold any of the dead)
+        for (int s = w.sec.idx.first(); s >= 0; s = w.sec.idx.next(s)) {
             int set = w.sec.settlement[s];
             int state = set >= 0 ? w.r.settlements.get(set).state : stateOfSector(s);
             if (state == st) n += w.sec.zIn[s] + w.sp.secZ[s];

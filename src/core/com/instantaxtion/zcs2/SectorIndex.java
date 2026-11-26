@@ -8,7 +8,7 @@ package com.instantaxtion.zcs2;
  * - districts of 8x8 sectors with sums of the dead, the living and the infected;
  * - which districts are awake this second. A district is awake if any of its sectors (or of the eight districts
  *   round it) has anything the once-a-second work would change: the dead or the infected indoors, a hot timer,
- *   panic, hunger, a nest, a strain, a holdout, a fire, anyone out on its streets, a vehicle, the camera. Every
+ *   panic, hunger, a nest, a strain, a fire, anyone out on its streets, a vehicle, the camera. Every
  *   other sector is left exactly as it is by that work, so skipping it changes no outcome.
  *
  * The set for a second is worked out at the start of Sectors.update. Anything that raises a sector's counts later
@@ -27,6 +27,8 @@ public final class SectorIndex {
     /** Stagger quiet districts in fast-forward: on by default on national maps only. */
     public boolean stagger;
     public static final int STAGGER = 4;
+    /** Above this many sectors a map is national: staggering, and the Director's district-sized heatmaps. */
+    public static final int NATIONAL = 50000;
 
     private final World w;
     private final Sectors sec;
@@ -103,7 +105,7 @@ public final class SectorIndex {
             }
         hospitals = new int[hl.size()];
         for (int k = 0; k < hospitals.length; k++) hospitals[k] = hl.get(k);
-        stagger = n > 50000;
+        stagger = n > NATIONAL;
         reset();
     }
 
@@ -239,6 +241,37 @@ public final class SectorIndex {
         }
     }
 
+    private int[] noSettlement;
+
+    /** The sectors of settlement st, ascending; for st < 0, the sectors outside every settlement. */
+    public int[] settlementSectors(int st) {
+        if (st >= 0) return bySettlement[st];
+        if (noSettlement == null) {
+            int m = 0;
+            for (int s = 0; s < n; s++) if (sec.settlement[s] < 0) m++;
+            noSettlement = new int[m];
+            m = 0;
+            for (int s = 0; s < n; s++) if (sec.settlement[s] < 0) noSettlement[m++] = s;
+        }
+        return noSettlement;
+    }
+
+    /** The sectors of every settlement st with pick[st], ascending (the order of a scan of the map). */
+    public int[] sectorsOf(boolean[] pick) {
+        int m = 0;
+        for (int st = 0; st < bySettlement.length; st++) if (pick[st]) m += bySettlement[st].length;
+        int[] out = new int[m];
+        int k = 0, lists = 0;
+        for (int st = 0; st < bySettlement.length; st++)
+            if (pick[st]) {
+                System.arraycopy(bySettlement[st], 0, out, k, bySettlement[st].length);
+                k += bySettlement[st].length;
+                lists++;
+            }
+        if (lists > 1) java.util.Arrays.sort(out);
+        return out;
+    }
+
     // ------------------------------------------------------------------ the people, wherever they may be
 
     /** Sum of popIn and (int) inf over every sector that may hold anyone (the same as over the whole map). */
@@ -263,7 +296,6 @@ public final class SectorIndex {
     /** A sector the once-a-second work would leave exactly as it is (the modules add to this as they need). */
     boolean quiet(int s) {
         if (sec.zIn[s] != 0 || sec.inf[s] > 0 || sec.hot[s] > 0 || sec.panic[s] > 0 || sec.firstZ[s] >= 0) return false;
-        if (sec.holdout != null && sec.holdout[s]) return false;
         Ecology e = w.ecology;
         if (e != null && (e.hunger[s] > 0 || e.nestT[s] > 0 || e.nest[s] || e.strain[s] != 0)) return false;
         if (w.fires != null && w.fires.burning(s)) return false;
@@ -322,7 +354,8 @@ public final class SectorIndex {
         for (int i = 0; i < e.top; i++)
             if (e.loc[i] == Ents.FREE || e.loc[i] == Ents.BODY) act[district(w.r.sectorOfPx(e.x[i], e.y[i]))] = true;
         Vehicles v = w.veh;
-        for (int i = 0; i < v.top; i++) if (v.state[i] != Vehicles.V_NONE) act[district(w.r.sectorOfPx(v.x[i], v.y[i]))] = true;
+        // (a vehicle with people aboard: they get out where it is; an empty one changes nothing)
+        for (int i = 0; i < v.top; i++) if (v.state[i] != Vehicles.V_NONE && v.crewN[i] > 0) act[district(w.r.sectorOfPx(v.x[i], v.y[i]))] = true;
         for (int k = 0; k < camN; k++) act[district(camList[k])] = true;
         boolean st = stagger && w.strategic;
         // the new set: the active districts and the ring round them
@@ -373,7 +406,6 @@ public final class SectorIndex {
             for (int s = y * sw + x0, e = y * sw + x1; s < e; s++) {
                 if (sec.zIn[s] > 0 && sec.popIn[s] > 0) return true;
                 if (sec.inf[s] > 0 || sec.hot[s] > 0 || sec.cam[s]) return true;
-                if (sec.holdout != null && sec.holdout[s]) return true;
                 if (w.sp.secCiv[s] + w.sp.secCop[s] + w.sp.secSol[s] > 0) return true;
             }
         return false;

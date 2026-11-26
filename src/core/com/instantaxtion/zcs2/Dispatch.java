@@ -65,7 +65,8 @@ public final class Dispatch {
         Spatial sp = w.sp;
         float now = (float) w.time;
         // new calls: the dead where people can see them, after the time it takes someone to call
-        for (int s = 0; s < sec.n; s++) {
+        // (only awake sectors hold any of the dead)
+        for (int s = sec.idx.first(); s >= 0; s = sec.idx.next(s)) {
             int zHere = sp.secZ[s] + (sec.zIn[s] >= 2 ? Math.max(1, sec.zIn[s] / 3) : 0);
             if (zHere == 0) continue;
             boolean witnesses = sp.secCiv[s] > 0 || sec.popIn[s] > 0 || sp.secCop[s] + sp.secSol[s] > 0;
@@ -165,7 +166,7 @@ public final class Dispatch {
     /** Per town: when the dead inside it pass 150, the police hold a perimeter instead of answering calls inside. */
     private void perimeters() {
         int[] z = new int[w.r.settlements.size()];
-        for (int s = 0; s < w.sec.n; s++) {
+        for (int s = w.sec.idx.first(); s >= 0; s = w.sec.idx.next(s)) {
             int st = w.sec.settlement[s];
             if (st >= 0) z[st] += w.sp.secZ[s] + w.sec.zIn[s];
         }
@@ -367,11 +368,23 @@ public final class Dispatch {
         return best;
     }
 
+    private boolean[] bad;
+    private int[] badList = new int[64];
+    private int badN;
+
     /** A cordon of posts round each town's infected sectors, on the roads, held by police. */
     private void cordons() {
         // which sectors are infected
-        boolean[] bad = new boolean[w.sec.n];
-        for (int s = 0; s < w.sec.n; s++) bad[s] = w.sp.secZ[s] + w.sec.zIn[s] >= 3;
+        // (only awake sectors hold any of the dead: the flags of the last call are cleared, these set)
+        if (bad == null) bad = new boolean[w.sec.n];
+        for (int k = 0; k < badN; k++) bad[badList[k]] = false;
+        badN = 0;
+        for (int s = w.sec.idx.first(); s >= 0; s = w.sec.idx.next(s))
+            if (w.sp.secZ[s] + w.sec.zIn[s] >= 3) {
+                bad[s] = true;
+                if (badN == badList.length) badList = java.util.Arrays.copyOf(badList, badN * 2);
+                badList[badN++] = s;
+            }
         List<Post> want = new ArrayList<Post>();
         RoadGraph g = w.r.roads;
         for (int st = 0; st < w.r.settlements.size() && st < perimeter.length; st++) {
@@ -379,8 +392,8 @@ public final class Dispatch {
             // junctions just outside infected sectors (in an uninfected one, next to an infected one)
             float sx = 0, sy = 0;
             int sn = 0;
-            for (int s = 0; s < w.sec.n; s++)
-                if (bad[s] && w.sec.settlement[s] == st) {
+            for (int s : w.sec.idx.bySettlement[st])
+                if (bad[s]) {
                     sx += w.sec.cx(s);
                     sy += w.sec.cy(s);
                     sn++;

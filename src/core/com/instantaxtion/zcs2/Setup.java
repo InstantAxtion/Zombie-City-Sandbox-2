@@ -282,7 +282,7 @@ public final class Setup {
             // its people mostly got away before it fell: they're refugees in the capital now
             Region.Settlement cap = r.city();
             List<Integer> capSecs = new ArrayList<Integer>();
-            for (int s = 0; s < w.sec.n; s++) if (w.sec.settlement[s] == cap.id && w.sec.home[s] > 0) capSecs.add(s);
+            for (int s : w.sec.idx.bySettlement[cap.id]) if (w.sec.home[s] > 0) capSecs.add(s);
             for (int s : secs) {
                 int set = w.sec.settlement[s];
                 if (set >= 0 && r.settlements.get(set).capital || capSecs.isEmpty()) continue;
@@ -535,7 +535,7 @@ public final class Setup {
      */
     private static void hiddenBitten(World w, int st, int not, int homes, int lo, int hi, long salt) {
         List<Integer> cand = new ArrayList<Integer>();
-        for (int s = 0; s < w.sec.n; s++) if (w.sec.settlement[s] == st && w.sec.popIn[s] > 200 && s != not) cand.add(s);
+        for (int s : w.sec.idx.bySettlement[st]) if (w.sec.popIn[s] > 200 && s != not) cand.add(s);
         for (int k = 0; k < homes && !cand.isEmpty(); k++) {
             int s = cand.remove(Rng.hashInt(w.seed, k, salt, cand.size()));
             int m = Math.min(w.sec.popIn[s], lo + Rng.hashInt(w.seed, k, salt + 1, hi - lo + 1));
@@ -551,7 +551,7 @@ public final class Setup {
      */
     private static void latent(World w, int st, int homes, int lo, int hi, float from, float to, long salt) {
         List<Integer> cand = new ArrayList<Integer>();
-        for (int s = 0; s < w.sec.n; s++) if (w.sec.settlement[s] == st && w.sec.popIn[s] > 300) cand.add(s);
+        for (int s : w.sec.idx.bySettlement[st]) if (w.sec.popIn[s] > 300) cand.add(s);
         for (int k = 0; k < homes && !cand.isEmpty(); k++) {
             int s = cand.remove(Rng.hashInt(w.seed, k, salt, cand.size()));
             int m = lo + Rng.hashInt(w.seed, k, salt + 1, hi - lo + 1);
@@ -618,7 +618,8 @@ public final class Setup {
     /** How far (px) the nearest of the dead is from (x, y): walking, in the buildings, the bitten, or a horde (worth more). */
     static float clearance(World w, float x, float y) {
         float best = Float.MAX_VALUE;
-        for (int s = 0; s < w.sec.n; s++) {
+        // (only awake sectors hold any of the dead or the infected)
+        for (int s = w.sec.idx.first(); s >= 0; s = w.sec.idx.next(s)) {
             if (w.sec.zIn[s] <= 0 && w.sec.inf[s] < 1) continue;
             float dx = w.sec.cx(s) - x, dy = w.sec.cy(s) - y;
             best = Math.min(best, (float) Math.sqrt(dx * dx + dy * dy) - 256);

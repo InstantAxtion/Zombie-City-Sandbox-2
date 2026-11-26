@@ -152,7 +152,8 @@ public final class Navy extends Module {
             if (retarget) {
                 // the biggest mass of the dead near the shore, away from the living
                 int best = -1, bz = 0;
-                for (int s = 0; s < sec.n; s++) {
+                // (only awake sectors hold any of the dead)
+                for (int s = sec.idx.first(); s >= 0; s = sec.idx.next(s)) {
                     int z = sec.zIn[s] + w.sp.secZ[s];
                     if (z < 60 || sec.popIn[s] > 300 || w.sp.secCiv[s] + w.sp.secCop[s] + w.sp.secSol[s] > 0) continue;
                     float dx = sec.cx(s) - sh.x, dy = sec.cy(s) - sh.y;
@@ -234,10 +235,14 @@ public final class Navy extends Module {
     private void coastGuard(float dt) {
         float rate = w.c.rule("coastGuard", 0.0015f);
         Sectors sec = w.sec;
-        for (int s = 0; s < sec.n; s++) {
+        // (the sectors of the towns being evacuated, in map order)
+        boolean[] ev = new boolean[w.r.settlements.size()];
+        boolean any = false;
+        for (int st = 0; st < ev.length; st++) any |= ev[st] = w.gov.evacuating(st);
+        if (!any) return;
+        for (int s : sec.idx.sectorsOf(ev)) {
             if (sec.popIn[s] <= 0 || sec.zIn[s] > 0) continue;
             int st = sec.settlement[s];
-            if (st < 0 || !w.gov.evacuating(st)) continue;
             // boats reach a town on the coast from its waterfront (the sectors at or next to the water)
             if (!coastal[s] && !(wet[s] && w.roles.coastal(w.r.settlements.get(st)))) continue;
             float m = sec.popIn[s] * rate * dt;

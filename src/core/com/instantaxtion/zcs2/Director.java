@@ -60,10 +60,28 @@ public final class Director extends Module {
     // heatmaps
     public final float[] peak, deaths;
 
+    /**
+     * On national maps the heatmaps and the timelapse are kept by district (8x8 sectors: 6 KB a game hour instead of
+     * 400 KB), sampled every 3 game hours after day 3. Today's maps keep them by sector.
+     */
+    public final boolean coarse;
+    /** Cells of the heatmaps and the timelapse, and the grid they make (lapseW x lapseH). */
+    public final int lapseN, lapseW, lapseH;
+
     public Director(World w) {
         super(w);
-        peak = new float[w.sec.n];
-        deaths = new float[w.sec.n];
+        SectorIndex idx = w.sec.idx;
+        coarse = w.sec.n > SectorIndex.NATIONAL;
+        lapseN = coarse ? idx.dn : w.sec.n;
+        lapseW = coarse ? idx.dw : w.sec.sw;
+        lapseH = coarse ? idx.dh : w.sec.sh;
+        peak = new float[lapseN];
+        deaths = new float[lapseN];
+    }
+
+    /** The heatmaps' cell for sector s (the sector itself, or its district on national maps). */
+    public int cell(int s) {
+        return coarse ? w.sec.idx.district(s) : s;
     }
 
     @Override
@@ -84,7 +102,7 @@ public final class Director extends Module {
 
     /** Someone died here (people and the dead alike, for the heatmap). */
     public void died(float x, float y) {
-        deaths[w.r.sectorOfPx(x, y)] += 1;
+        deaths[cell(w.r.sectorOfPx(x, y))] += 1;
     }
 
     @Override
@@ -106,16 +124,31 @@ public final class Director extends Module {
             events.add(e);
         }
         Sectors sec = w.sec;
-        for (int s = 0; s < sec.n; s++) {
-            int z = sec.zIn[s] + w.sp.secZ[s];
-            if (z > peak[s]) peak[s] = z;
+        SectorIndex idx = sec.idx;
+        if (coarse) {
+            // (the districts' sums from the start of this second; a sleeping district has none of the dead)
+            for (int d = 0; d < idx.dn; d++) if (idx.districtAwake(d) && idx.dead[d] > peak[d]) peak[d] = idx.dead[d];
+        } else {
+            // (only awake sectors hold any of the dead)
+            for (int s = idx.first(); s >= 0; s = idx.next(s)) {
+                int z = sec.zIn[s] + w.sp.secZ[s];
+                if (z > peak[s]) peak[s] = z;
+            }
         }
         if (w.time >= nextSample) {
-            nextSample = Math.floor(w.time / 60.0) * 60 + 60;
-            byte[] zd = new byte[sec.n], pp = new byte[sec.n];
-            for (int s = 0; s < sec.n; s++) {
-                zd[s] = log(sec.zIn[s] + w.sp.secZ[s]);
-                pp[s] = log(sec.popIn[s] + w.sp.secCiv[s]);
+            int every = coarse && w.day() > 3 ? 180 : 60;
+            nextSample = Math.floor(w.time / every) * every + every;
+            byte[] zd = new byte[lapseN], pp = new byte[lapseN];
+            if (coarse) {
+                for (int d = 0; d < idx.dn; d++) {
+                    zd[d] = idx.districtAwake(d) ? log(idx.dead[d]) : 0;
+                    pp[d] = log(idx.living[d]);
+                }
+            } else {
+                for (int s = 0; s < sec.n; s++) {
+                    zd[s] = log(sec.zIn[s] + w.sp.secZ[s]);
+                    pp[s] = log(sec.popIn[s] + w.sp.secCiv[s]);
+                }
             }
             lapseDead.add(zd);
             lapsePeople.add(pp);
@@ -179,7 +212,7 @@ public final class Director extends Module {
         n = in.readInt();
         for (int k = 0; k < n; k++) {
             lapseTime.add(in.readFloat());
-            byte[] a = new byte[w.sec.n], b = new byte[w.sec.n];
+            byte[] a = new byte[lapseN], b = new byte[lapseN];
             in.readFully(a);
             in.readFully(b);
             lapseDead.add(a);

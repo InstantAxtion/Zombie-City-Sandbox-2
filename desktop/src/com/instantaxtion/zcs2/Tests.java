@@ -123,6 +123,10 @@ public final class Tests {
                     4353128960234585427L, 4567398096660548914L},
             {-1721982705396361131L, 9219531030924546278L, 4412387060594296491L, -865739393895964551L, 3803384062503442605L, -7342890733388141648L, 3566668564866714374L,
                     -2951662884326940493L, -7072163388537179399L, -7727612019171383751L, 5614533364594415527L},
+            {-1465179186680380596L, 8227843642441718321L, 285757551291793357L, -380420814358312822L, 2879917600093470640L, -8023923503762793095L, -8017755759418999973L,
+                    -377389648791905707L, 5142781637961082539L, 5142781637961082539L, 5142781637961082539L},
+            {6493268719251661163L, -4807905444415488894L, 335026452890832671L, 715436973407186635L, 2167615332472839890L, -4399105381242418700L, 2078588419354071614L,
+                    -7012544782068767713L, -491901226332450542L},
     };
 
     /**
@@ -144,12 +148,25 @@ public final class Tests {
             camOver(w, Setup.originX, Setup.originY);
             streetSecs = 60;
             days = 6;
-        } else {
+        } else if (which == 2) {
             w = game(7, 2304, "sandbox", 2);
             Tools.paintZombies(w, Setup.originX, Setup.originY, 4000, 900, -1);
             camOver(w, Setup.originX + 2000, Setup.originY);
             streetSecs = 30;
             days = 8;
+        } else if (which == 3) {
+            // a coast lost to hordes, an evacuation, the game's end
+            w = game(7, 2304, "evacuate", 2);
+            camOver(w, Setup.originX, Setup.originY);
+            streetSecs = 30;
+            days = 8;
+        } else {
+            // the dead everywhere at once, then put down: districts fall asleep and wake again
+            w = game(7, 1536, "random", 2);
+            Tools.paintZombies(w, Setup.originX, Setup.originY, 20000, 900, -1);
+            camOver(w, Setup.originX, Setup.originY);
+            streetSecs = 45;
+            days = 6;
         }
         java.util.List<Long> out = new java.util.ArrayList<Long>();
         for (int k = 0; k < 3; k++) {

@@ -196,7 +196,25 @@ public final class Fires extends Module {
     private void untended(float dt) {
         float rate = w.c.rule("fireUntended", 0.5f) / 100000f / 60f;
         Sectors sec = w.sec;
-        for (int s = 0; s < sec.n; s++) {
+        // (only the towns in the dark, and frightened streets, which are awake: in map order, merged)
+        int ns = w.r.settlements.size();
+        boolean[] darkSt = new boolean[ns];
+        for (int st = 0; st < ns; st++) {
+            int[] l = sec.idx.bySettlement[st];
+            if (l.length > 0 && sec.grid[l[0]] >= 0) darkSt[st] = !w.strat.lit(l[0]) || w.infra.waterOut(st);
+        }
+        int[] darkL = sec.idx.sectorsOf(darkSt);
+        int di = 0;
+        for (int a = sec.idx.first(); ; ) {
+            // the next sector of either list
+            int s;
+            if (di < darkL.length && (a < 0 || darkL[di] <= a)) {
+                s = darkL[di++];
+                if (s == a) a = sec.idx.next(a);
+            } else if (a >= 0) {
+                s = a;
+                a = sec.idx.next(a);
+            } else break;
             int p = sec.popIn[s];
             if (p < 200 || sec.grid[s] < 0) continue;
             boolean dark = !w.strat.lit(s) || (sec.settlement[s] >= 0 && w.infra.waterOut(sec.settlement[s]));
