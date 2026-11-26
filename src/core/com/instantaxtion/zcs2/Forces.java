@@ -734,10 +734,14 @@ public final class Forces extends Module {
 
     // ------------------------------------------------------------------ drawing
 
+    private final float[] head = new float[6];
+
     @Override
     public void draw(Gfx g, Camera cam, WorldView view) {
         if (cam.zoom > 0.6f) return;
-        float s = cam.zoom < 0.08f ? 9 : 12;
+        float dp = cam.dp;
+        // a NATO-style frame, about 18 dp wide
+        float s = (cam.zoom < 0.08f ? 6.5f : 7.5f) * dp;
         // the front: a line through formations holding near each other
         for (Formation a : formations) {
             if (!a.alive || a.state != HOLDING) continue;
@@ -745,14 +749,17 @@ public final class Forces extends Module {
                 if (b.id <= a.id || !b.alive || b.state != HOLDING) continue;
                 float dx = a.hq.x - b.hq.x, dy = a.hq.y - b.hq.y;
                 if (dx * dx + dy * dy > 4500 * 4500) continue;
-                g.color(0xB0FFD040);
-                g.line(cam.toScreenX(a.hq.x), cam.toScreenY(a.hq.y), cam.toScreenX(b.hq.x), cam.toScreenY(b.hq.y), 3);
+                float ax = cam.toScreenX(a.hq.x), ay = cam.toScreenY(a.hq.y), bx = cam.toScreenX(b.hq.x), by = cam.toScreenY(b.hq.y);
+                g.color(0x90000000);
+                g.line(ax, ay, bx, by, 5 * dp);
+                g.color(0xE0FFD040);
+                WorldView.dashedLine(g, ax, ay, bx, by, 2.6f * dp, 7 * dp);
             }
         }
         for (Formation f : formations) {
             if (!f.alive) continue;
             float x = cam.toScreenX(f.hq.x), y = cam.toScreenY(f.hq.y);
-            if (x < -40 || y < -40 || x > cam.sw + 40 || y > cam.sh + 40) continue;
+            if (x < -60 * dp || y < -60 * dp || x > cam.sw + 60 * dp || y > cam.sh + 60 * dp) continue;
             if (f.state == RAIL && f.route != null) {
                 // a troop train: carriages behind the engine, back along the line
                 RoadGraph rg = w.r.rails;
@@ -760,10 +767,12 @@ public final class Forces extends Module {
                 float px = f.hq.x, py = f.hq.y;
                 float bx = rg.nx[f.route[back]], by = rg.ny[f.route[back]];
                 float dx = px - bx, dy = py - by, dl = (float) Math.sqrt(dx * dx + dy * dy) + 0.01f;
-                float carz = Math.max(3, 26 * cam.zoom);
+                float carz = Math.max(5 * dp, 26 * cam.zoom), spacing = Math.max(34 * cam.zoom, carz * 1.25f) / cam.zoom;
                 for (int k = 0; k < 6; k++) {
-                    float cx = cam.toScreenX(px - dx / dl * k * 34), cy = cam.toScreenY(py - dy / dl * k * 34);
-                    g.color(k == 0 ? 0xFF202020 : 0xFF4E5A3A);
+                    float cx = cam.toScreenX(px - dx / dl * k * spacing), cy = cam.toScreenY(py - dy / dl * k * spacing);
+                    g.color(0xFF0C0C0C);
+                    g.fillRect(cx - carz / 2 - dp * 0.6f, cy - carz / 3 - dp * 0.6f, carz + dp * 1.2f, carz * 0.66f + dp * 1.2f);
+                    g.color(k == 0 ? 0xFF2A2A2A : 0xFF6E6840);
                     g.fillRect(cx - carz / 2, cy - carz / 3, carz, carz * 0.66f);
                 }
             }
@@ -771,54 +780,60 @@ public final class Forces extends Module {
                 // an arrow to where it's going
                 float tx = cam.toScreenX(f.gx), ty = cam.toScreenY(f.gy);
                 float dx = tx - x, dy = ty - y, dl = (float) Math.sqrt(dx * dx + dy * dy);
-                if (dl > s * 2) {
-                    g.color(0xB0FFFFFF);
-                    g.line(x, y, tx, ty, 2);
-                    float ux = dx / dl, uy = dy / dl, ah = Math.min(14, dl * 0.3f);
-                    float[] head = {tx, ty, tx - ux * ah - uy * ah * 0.5f, ty - uy * ah + ux * ah * 0.5f, tx - ux * ah + uy * ah * 0.5f, ty - uy * ah - ux * ah * 0.5f};
+                if (dl > s * 3) {
+                    float ux = dx / dl, uy = dy / dl, ah = 9 * dp;
+                    g.color(0x90000000);
+                    g.line(x + ux * s * 1.6f, y + uy * s * 1.6f, tx, ty, 4 * dp);
+                    g.color(0xE8FFFFFF);
+                    WorldView.dashedLine(g, x + ux * s * 1.6f, y + uy * s * 1.6f, tx - ux * ah, ty - uy * ah, 2 * dp, 6 * dp);
+                    head[0] = tx;
+                    head[1] = ty;
+                    head[2] = tx - ux * ah - uy * ah * 0.55f;
+                    head[3] = ty - uy * ah + ux * ah * 0.55f;
+                    head[4] = tx - ux * ah + uy * ah * 0.55f;
+                    head[5] = ty - uy * ah - ux * ah * 0.55f;
                     g.fillPoly(head, 3);
                 }
             }
-            // a unit symbol: a box, coloured by side, marked by kind
-            int col = f.faction == Ents.COP ? 0xFF3B6FD8 : 0xFF6E8A48;
+            // a unit symbol: a frame, coloured by side (police blue, army khaki), marked by kind
+            int col = f.faction == Ents.COP ? 0xFF3B6FD8 : 0xFF8A8250;
             if (f.state == BROKEN) col = 0xFF8A5040;
-            g.color(0xFF101010);
-            g.fillRect(x - s * 1.4f - 1.5f, y - s - 1.5f, s * 2.8f + 3, s * 2 + 3);
+            float hw = s * 1.3f, hh = s * 0.85f;
+            g.color(0xF0101010);
+            g.fillRect(x - hw - 1.5f * dp, y - hh - 1.5f * dp, hw * 2 + 3 * dp, hh * 2 + 3 * dp);
             g.color(col);
-            g.fillRect(x - s * 1.4f, y - s, s * 2.8f, s * 2);
+            g.fillRect(x - hw, y - hh, hw * 2, hh * 2);
             // NATO-style marks: infantry a cross, armour an oval track, artillery a dot, marines a cross and an anchor bar,
-            // police a P; above the box, its size (II battalion, X brigade, I company or battery)
+            // police a P; above the frame, its size (II battalion, X brigade, I company or battery)
             g.color(0xFFFFFFFF);
+            float lw = Math.max(1.2f, 1.1f * dp);
             String id = f.t.id;
             if (id.equals("armour")) {
-                g.strokeRect(x - s * 0.9f, y - s * 0.45f, s * 1.8f, s * 0.9f, 1.5f);
-                g.strokeCircle(x - s * 0.45f, y, s * 0.4f, 1.2f);
-                g.strokeCircle(x + s * 0.45f, y, s * 0.4f, 1.2f);
-            } else if (id.equals("artillery")) g.fillCircle(x, y, s * 0.35f);
-            else if (id.equals("police_reserve")) g.text("P", x, y + s * 0.4f, s * 1.1f, Gfx.ALIGN_CENTER, true);
+                g.strokeRect(x - hw * 0.65f, y - hh * 0.45f, hw * 1.3f, hh * 0.9f, lw);
+            } else if (id.equals("artillery")) g.fillCircle(x, y, hh * 0.35f);
+            else if (id.equals("police_reserve")) g.text("P", x, y + hh * 0.5f, hh * 1.4f, Gfx.ALIGN_CENTER, true);
             else {
-                g.line(x - s * 1.4f, y - s, x + s * 1.4f, y + s, 1.5f);
-                g.line(x - s * 1.4f, y + s, x + s * 1.4f, y - s, 1.5f);
-                if (id.equals("marines")) g.fillRect(x - s * 0.8f, y + s * 0.55f, s * 1.6f, s * 0.25f);
+                g.line(x - hw, y - hh, x + hw, y + hh, lw);
+                g.line(x - hw, y + hh, x + hw, y - hh, lw);
+                if (id.equals("marines")) g.fillRect(x - hw * 0.6f, y + hh * 0.5f, hw * 1.2f, hh * 0.25f);
             }
             String echelon = id.equals("guard_brigade") ? "X" : id.equals("artillery") || id.equals("police_reserve") ? "I" : "II";
-            g.color(0xFF101010);
-            g.text(echelon, x + 1, y - s - 2, s, Gfx.ALIGN_CENTER, true);
-            g.color(0xFFFFFFFF);
-            g.text(echelon, x, y - s - 3, s, Gfx.ALIGN_CENTER, true);
-            // strength: a bar under the box
+            view.label(g, echelon, x, y - hh - 3.5f * dp, 9.5f, 0xFFFFFFFF, Gfx.ALIGN_CENTER, true);
+            // strength: a bar under the frame
             float frac = f.start > 0 ? Math.min(1, f.strength() / (float) f.start) : 1;
             g.color(0xFF101010);
-            g.fillRect(x - s * 1.4f, y + s + 2, s * 2.8f, 3);
+            g.fillRect(x - hw - dp * 0.5f, y + hh + 2.5f * dp, hw * 2 + dp, 3.5f * dp);
             g.color(frac > 0.6f ? 0xFF60D060 : frac > 0.3f ? 0xFFE0C040 : 0xFFE04040);
-            g.fillRect(x - s * 1.4f, y + s + 2, s * 2.8f * frac, 3);
+            g.fillRect(x - hw, y + hh + 3 * dp, hw * 2 * frac, 2.5f * dp);
             if (view.selectedFormation == f) {
                 g.color(0xFFFFE040);
-                g.strokeRect(x - s * 1.4f - 4, y - s - 4, s * 2.8f + 8, s * 2 + 8, 2);
+                g.strokeRect(x - hw - 4 * dp, y - hh - 4 * dp, hw * 2 + 8 * dp, hh * 2 + 8 * dp, 2 * dp);
             }
-            if (cam.zoom > 0.05f || f.player) {
-                g.color(0xE0FFFFFF);
-                g.text(shortName(f) + "  " + f.strength(), x, y + s + 16, 10, Gfx.ALIGN_CENTER, false);
+            if (cam.zoom > 0.05f || f.player || view.selectedFormation == f) {
+                String lab = shortName(f) + "  " + f.strength();
+                float tw = g.textWidth(lab, 10 * dp, false), ly = y + hh + 17 * dp;
+                if (view.place(x - tw / 2, ly - 10 * dp, x + tw / 2, ly + 3 * dp) || view.selectedFormation == f)
+                    view.label(g, lab, x, ly, 10, 0xFFF0F0F0, Gfx.ALIGN_CENTER, false);
             }
         }
     }

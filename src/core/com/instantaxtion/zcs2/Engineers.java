@@ -203,22 +203,20 @@ public final class Engineers extends Module {
     @Override
     public void draw(Gfx g, Camera cam, WorldView view) {
         if (cam.zoom > 1.2f) return;
+        float dp = cam.dp, h = 8 * dp;
         for (Region.Facility f : w.r.facilities) {
             if (f.kind != Region.F_FOB) continue;
             float x = cam.toScreenX(f.x), y = cam.toScreenY(f.y);
-            if (x < -30 || y < -30 || x > cam.sw + 30 || y > cam.sh + 30) continue;
+            if (x < -30 * dp || y < -30 * dp || x > cam.sw + 30 * dp || y > cam.sh + 30 * dp) continue;
             boolean on = w.strat.online(f.id);
-            g.color(0xC0000000);
-            g.fillRect(x - 10, y - 10, 20, 20);
-            g.color(on ? 0xFF6E8A48 : 0xFF5A3030);
-            g.fillRect(x - 9, y - 9, 18, 18);
+            g.color(0xE0000000);
+            g.fillRect(x - h - 1.5f * dp, y - h - 1.5f * dp, h * 2 + 3 * dp, h * 2 + 3 * dp);
+            g.color(on ? 0xFF8A8250 : 0xFF5A3030);
+            g.fillRect(x - h, y - h, h * 2, h * 2);
             g.color(0xFFE04040);
-            g.fillRect(x - 6, y - 2, 12, 4);
-            g.fillRect(x - 2, y - 6, 4, 12);
-            if (cam.zoom > 0.3f) {
-                g.color(0xE0FFFFFF);
-                g.text(f.name, x, y + 22, 10, Gfx.ALIGN_CENTER, false);
-            }
+            g.fillRect(x - h * 0.65f, y - h * 0.2f, h * 1.3f, h * 0.4f);
+            g.fillRect(x - h * 0.2f, y - h * 0.65f, h * 0.4f, h * 1.3f);
+            if (cam.zoom > 0.3f) view.label(g, f.name, x, y + h + 13 * dp, 10, 0xFFF0F0F0, Gfx.ALIGN_CENTER, false);
         }
     }
 }

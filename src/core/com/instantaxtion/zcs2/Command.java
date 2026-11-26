@@ -371,24 +371,29 @@ public final class Command extends Module {
     public void draw(Gfx g, Camera cam, WorldView view) {
         // checkpoints round quarantined towns
         if (cam.zoom > 0.9f) return;
+        float dp = cam.dp;
         for (int st = 0; st < quarantine.length; st++) {
             if (!quarantine[st]) continue;
             Region.Settlement s = w.r.settlements.get(st);
             for (int node : s.edgeNodes) {
                 float x = cam.toScreenX(w.r.roads.nx[node]), y = cam.toScreenY(w.r.roads.ny[node]);
-                if (x < -20 || y < -20 || x > cam.sw + 20 || y > cam.sh + 20) continue;
+                if (x < -20 * dp || y < -20 * dp || x > cam.sw + 20 * dp || y > cam.sh + 20 * dp) continue;
                 g.color(0xFF101010);
-                g.fillRect(x - 7, y - 3, 14, 6);
+                g.fillRect(x - 7 * dp, y - 3 * dp, 14 * dp, 6 * dp);
                 g.color(0xFFE0C020);
-                g.fillRect(x - 6, y - 2, 4, 4);
-                g.fillRect(x + 2, y - 2, 4, 4);
+                g.fillRect(x - 6 * dp, y - 2 * dp, 4 * dp, 4 * dp);
+                g.fillRect(x + 2 * dp, y - 2 * dp, 4 * dp, 4 * dp);
             }
-            if (cam.zoom < 0.4f) {
-                float x = cam.toScreenX(s.cx * 16f), y = cam.toScreenY(s.cy * 16f);
-                g.color(0xFFE0C020);
-                g.strokeCircle(x, y, s.radius * 16f * cam.zoom * 1.1f, 2);
-                g.text("QUARANTINE", x, y + 18, 11, Gfx.ALIGN_CENTER, true);
-            }
+            if (cam.zoom >= 0.4f) continue;
+            float x = cam.toScreenX(s.cx * 16f), y = cam.toScreenY(s.cy * 16f), r = Math.max(14 * dp, (s.radius + 12) * 16f * cam.zoom);
+            if (x < -r * 1.5f || y < -r * 1.5f || x > cam.sw + r * 1.5f || y > cam.sh + r * 1.5f) continue;
+            g.color(0x18FFC020);
+            g.fillCircle(x, y, r);
+            g.color(0x80000000);
+            g.strokeCircle(x, y, r, 4 * dp);
+            g.color(0xE8FFC020);
+            g.strokeCircle(x, y, r, 2 * dp);
+            view.label(g, "QUARANTINE", x, y - r - 5 * dp, 10.5f, 0xFFFFD060, Gfx.ALIGN_CENTER, true);
         }
     }
 

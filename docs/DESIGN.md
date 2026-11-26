@@ -34,7 +34,7 @@ All in one package, `com.instantaxtion.zcs2`. The core (`src/core`) never touche
 | Player | `Tools`, `Setup`, `Actions`, `Roles` | Everything the player can do (every change goes through `Actions`, which records it); building a new game, its scenario and the player's role; the country-scale campaign goals |
 | Director | `Director`, `Replay`, `DirectorScreens` | The record of inputs, replays from a game's start, the timelapse, heatmaps; the replay list, timelapse and scenario editor screens |
 | Checking | `Audit`, `SaveIO` | Invariants and state hashes; saves |
-| Presentation | `Gfx`, `GImage`, `Platform`, `Camera`, `MapPainter`, `WorldView`, `Ui`, `Game`, `Settings`, `Texts` | Drawing at every zoom, the interface, the screens |
+| Presentation | `Gfx`, `GImage`, `Platform`, `Camera`, `MapPainter`, `WorldView`, `Ui`, `Icons`, `Game`, `Settings`, `Texts` | Drawing at every zoom, the interface, the screens |
 | Sound | `Synth`, `Mixer` | Every effect and the score, synthesised; mixing |
 | Android | `MainActivity`, `GameView`, `AndroidGfx`, `AndroidImage`, `AndroidPlatform` | The shell |
 | Desktop | `DesktopMain`, `DesktopGfx`, `DesktopPlatform`, `Tests`, `Probe`, `Shot`, `UiShot` | Window, tests and tools |
@@ -95,6 +95,17 @@ bridge flags). Vehicles route with A* on it (with per-edge penalties) and drive 
 ahead in their lane, queueing behind whoever is in front. A car stuck for 3.5 seconds squeezes past. They run down
 the dead at speed and get mobbed when they stop among them. Blowing a bridge removes its edges: routes go round,
 and the river becomes a line hordes can't cross (sector connectivity is recomputed).
+
+## Drawing for a phone
+
+Everything that marks something on the map is sized in dp (`Camera.dp`), not world pixels, so a person, a car, a
+unit symbol or a label reads the same on any screen at any zoom; labels have outlines (`Gfx.textHalo`) and are
+placed most important first, skipping any that would land on another. The ground is painted into 32-tile chunks at
+four levels of detail (4, 9, 16 and 28 pixels a tile) within a time budget each frame and a memory budget overall.
+Soft things are small pictures scaled up with smoothing: glow sprites (street lights, fire, sirens, smoke), the
+infection's bleed and the heatmaps (two pixels a sector, blurred), the glow of crowds (the 64 px grid round the
+view). The interface's bars cover the screen's edges, and the camera knows it (`Camera.setInsets`), so "the whole
+country" fits the map area between them; sideways, the tools become a rail and the inspector a side sheet.
 
 ## Saves version the format, not the rules
 

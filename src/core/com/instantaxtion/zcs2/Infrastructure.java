@@ -344,31 +344,37 @@ public final class Infrastructure extends Module {
     @Override
     public void draw(Gfx g, Camera cam, WorldView view) {
         if (cam.zoom > 0.5f) return;
+        float dp = cam.dp, r = 7 * dp;
         for (Region.Settlement s : w.r.settlements) {
             int st = s.id;
             boolean dry = waterOut(st), phone = phoneOut(st), food = shortage[st] > 0;
             if (!dry && !phone && !food) continue;
-            float x = cam.toScreenX(s.cx * 16f), y = cam.toScreenY(s.cy * 16f) + (s.kind == Region.S_CITY ? 18 : 12);
-            if (x < -60 || y < -40 || x > cam.sw + 60 || y > cam.sh + 40) continue;
-            float bx = x - 28;
+            if (s.kind != Region.S_CITY && cam.zoom < 0.04f) continue;
+            float x = cam.toScreenX(s.cx * 16f), y = cam.toScreenY(s.cy * 16f) - (s.kind == Region.S_CITY ? 26 : 20) * dp;
+            if (x < -60 * dp || y < -40 * dp || x > cam.sw + 60 * dp || y > cam.sh + 40 * dp) continue;
+            int n = (food ? 1 : 0) + (dry ? 1 : 0) + (phone ? 1 : 0);
+            float bx = x - (n - 1) * r * 1.2f;
             if (food) {
-                badge(g, bx, y, shortage[st] == 2 ? 0xFFE04030 : 0xFFE0A030, "F");
-                bx += 19;
+                badge(g, bx, y, r, shortage[st] == 2 ? 0xFFE04030 : 0xFFE0A030, "F");
+                bx += r * 2.4f;
             }
             if (dry) {
-                badge(g, bx, y, 0xFF3070D0, "W");
-                bx += 19;
+                badge(g, bx, y, r, 0xFF3070D0, "W");
+                bx += r * 2.4f;
             }
-            if (phone) badge(g, bx, y, 0xFF8060B0, "T");
+            if (phone) badge(g, bx, y, r, 0xFF8060B0, "T");
         }
     }
 
-    private static void badge(Gfx g, float x, float y, int color, String letter) {
-        g.color(0xC0000000);
-        g.fillCircle(x, y, 8.5f);
+    /** A warning disc: something this town has run out of (food, water, phones), struck through. */
+    private static void badge(Gfx g, float x, float y, float r, int color, String letter) {
+        g.color(0xE0000000);
+        g.fillCircle(x, y, r * 1.2f);
         g.color(color);
-        g.fillCircle(x, y, 7.5f);
+        g.fillCircle(x, y, r);
         g.color(0xFFFFFFFF);
-        g.text(letter, x, y + 3.5f, 10, Gfx.ALIGN_CENTER, true);
+        g.text(letter, x, y + r * 0.45f, r * 1.25f, Gfx.ALIGN_CENTER, true);
+        g.color(0xE0FF4040);
+        g.line(x - r * 0.75f, y + r * 0.75f, x + r * 0.75f, y - r * 0.75f, Math.max(1.5f, r * 0.22f));
     }
 }

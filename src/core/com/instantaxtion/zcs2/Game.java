@@ -176,59 +176,81 @@ public final class Game {
 
     // ------------------------------------------------------------------ main menu
 
+    private float menuT, keptX, keptY, keptZ;
+    private boolean menuCam;
+
     private void menu(Gfx g) {
         int W = g.width(), H = g.height();
-        if (w != null && view != null) {
-            cam.setScreen(W, H, w.r.px());
-            cam.zoom = cam.minZoom;
-            cam.cx = cam.cy = w.r.px() / 2f;
-            view.draw(g, cam, 0.016f);
-            g.color(0xB0080A0E);
-            g.fillRect(0, 0, W, H);
-        } else {
-            g.color(0xFF0E1116);
-            g.fillRect(0, 0, W, H);
-            // a stain spreading over a grid of streets
-            g.color(0xFF161B22);
-            for (int i = 0; i < 24; i++) {
-                g.fillRect(0, i * H / 24f, W, ui.dp(2));
-                g.fillRect(i * W / 12f, 0, ui.dp(2), H);
-            }
-            g.color(0x30A01818);
-            g.fillCircle(W * 0.7f, H * 0.3f, W * 0.5f);
-            g.color(0x30C02020);
-            g.fillCircle(W * 0.62f, H * 0.36f, W * 0.3f);
+        menuT += 0.016f;
+        g.color(Ui.SCREEN);
+        g.fillRect(0, 0, W, H);
+        // streets, faintly, until a map is ready
+        g.color(0xFF161B22);
+        for (int i = 0; i < 24; i++) {
+            g.fillRect(0, i * H / 24f, W, ui.dp(2));
+            g.fillRect(i * W / 12f, 0, ui.dp(2), H);
         }
-        float cx = W / 2f;
-        float y = H * 0.18f;
+        // behind it all, a map drifting slowly by: the game's own, or the next one's
+        if (w != null && view != null) {
+            if (!menuCam) {
+                // keep where the player was looking, for when they go back
+                menuCam = true;
+                keptX = cam.cx;
+                keptY = cam.cy;
+                keptZ = cam.zoom;
+            }
+            cam.setInsets(0, 0, 0, 0);
+            cam.setScreen(W, H, w.r.px());
+            cam.dp = ui.d;
+            float z = Math.max(cam.minZoom * 2.2f, 0.035f);
+            float rad = w.r.px() * 0.18f;
+            cam.zoom = z;
+            cam.cx = w.r.city().cx * 16f + (float) Math.cos(menuT * 0.05f) * rad;
+            cam.cy = w.r.city().cy * 16f + (float) Math.sin(menuT * 0.04f) * rad;
+            view.draw(g, cam, 0.016f);
+        } else {
+            requestPreview();
+            if (previewRegion() != null) {
+                float ps = Math.max(W, H) * 1.9f;
+                float px = -(ps - W) / 2 + (float) Math.sin(menuT * 0.05f) * (ps - W) * 0.4f;
+                float py = -(ps - H) / 2 + (float) Math.cos(menuT * 0.037f) * (ps - H) * 0.4f;
+                drawPreview(g, px, py, ps, false);
+            }
+        }
+        // darken towards the bottom where the buttons are, and a little at the top behind the title
+        g.color(0x900A0D12);
+        g.fillRect(0, 0, W, H);
+        boolean land = W > H * 1.15f;
+        float cx = land ? W * 0.3f : W / 2f;
+        float y = land ? H * 0.38f : H * 0.2f;
         g.color(0xFFE0453A);
-        g.text("ZOMBIE CITY", cx, y, ui.dp(38), Gfx.ALIGN_CENTER, true);
+        g.textHalo("ZOMBIE CITY", cx, y, ui.dp(38), Gfx.ALIGN_CENTER, true, 0xC0000000, ui.dp(2));
         g.color(0xFFFFFFFF);
-        g.text("SANDBOX 2", cx, y + ui.dp(42), ui.dp(30), Gfx.ALIGN_CENTER, true);
-        g.color(Ui.DIM);
-        g.text("The outbreak goes national", cx, y + ui.dp(70), ui.dp(14), Gfx.ALIGN_CENTER, false);
-        float bw = Math.min(W - ui.dp(48), ui.dp(320)), bh = ui.dp(50), bx = cx - bw / 2;
-        y = H * 0.4f;
+        g.textHalo("SANDBOX 2", cx, y + ui.dp(40), ui.dp(28), Gfx.ALIGN_CENTER, true, 0xC0000000, ui.dp(2));
+        g.color(0xFFC8D0DA);
+        g.textHalo("The outbreak goes national", cx, y + ui.dp(68), ui.dp(Ui.L), Gfx.ALIGN_CENTER, false, 0xC0000000, ui.dp(1.5f));
+        // the buttons: in the bottom third (or the right half, sideways)
+        float bw = Math.min((land ? W * 0.42f : W) - ui.dp(48), ui.dp(340)), bh = ui.dp(52), gap = ui.dp(10);
+        float bx = land ? W * 0.75f - bw / 2 : W / 2f - bw / 2;
+        boolean two = w != null || pf.exists("autosave.sav");
+        float smallH = ui.dp(44);
+        float total = (two ? bh + gap : 0) + bh + gap + (smallH + gap) * 3;
+        y = land ? (H - total) / 2 : H - total - ui.dp(36);
         if (w != null) {
             ui.bigButton("resume", bx, y, bw, bh, "Back to the game", Ui.ON);
-            y += bh + ui.dp(12);
+            y += bh + gap;
         } else if (pf.exists("autosave.sav")) {
             ui.bigButton("continue", bx, y, bw, bh, "Continue", Ui.ON);
-            y += bh + ui.dp(12);
+            y += bh + gap;
         }
         ui.bigButton("new", bx, y, bw, bh, "New game", Ui.ACCENT);
-        y += bh + ui.dp(12);
-        float half = (bw - ui.dp(10)) / 2;
-        ui.button("load", bx, y, half, bh * 0.85f, "Load game", false);
-        ui.button("replays", bx + half + ui.dp(10), y, half, bh * 0.85f, "Replays", false);
-        y += bh * 0.85f + ui.dp(10);
-        ui.button("settings", bx, y, half, bh * 0.8f, "Settings", false);
-        ui.button("help", bx + half + ui.dp(10), y, half, bh * 0.8f, "How to play", false);
-        y += bh * 0.8f + ui.dp(10);
-        ui.button("notes", bx, y, half, bh * 0.8f, "What's new", false);
-        ui.button("quit", bx + half + ui.dp(10), y, half, bh * 0.8f, "Quit", false);
-        g.color(0x80FFFFFF);
-        g.text("Version " + Texts.VERSION, cx, H - ui.dp(16), ui.dp(11), Gfx.ALIGN_CENTER, false);
+        y += bh + gap;
+        float half = (bw - gap) / 2;
+        String[][] small = {{"load", "Load game"}, {"replays", "Replays"}, {"settings", "Settings"}, {"help", "How to play"}, {"notes", "What's new"}, {"quit", "Quit"}};
+        for (int k = 0; k < small.length; k++)
+            ui.button(small[k][0], bx + (k % 2) * (half + gap), y + (k / 2) * (smallH + gap), half, smallH, small[k][1], false, 13);
+        g.color(0x90FFFFFF);
+        g.text("Version " + Texts.VERSION, W / 2f, H - ui.dp(14), ui.dp(Ui.S), Gfx.ALIGN_CENTER, false);
     }
 
     // ------------------------------------------------------------------ new game
@@ -305,90 +327,169 @@ public final class Game {
         }
     }
 
+    /** The role list is open over the New Game screen. */
+    boolean roleSheet;
+
+    private static String roleIcon(int r) {
+        switch (r) {
+            case Roles.GOD: return "dead";
+            case Roles.PRESIDENT: return "town";
+            case Roles.MILITARY: return "army";
+            case Roles.INCIDENT: return "orders";
+            case Roles.PRECINCT: return "police";
+            case Roles.SQUAD: return "send";
+            case Roles.OFFICER: return "police";
+            default: return "people";
+        }
+    }
+
     private void newGame(Gfx g) {
         int W = g.width(), H = g.height();
-        g.color(0xFF0E1116);
+        g.color(Ui.SCREEN);
         g.fillRect(0, 0, W, H);
         float m = ui.dp(14), y;
-        ui.button("back", m, ui.dp(10), ui.dp(70), ui.dp(34), "Back", false, 13);
-        ui.title("New game", m + ui.dp(84), ui.dp(34));
-        y = ui.dp(54);
-        float cw = (W - m * 2 - ui.dp(8) * (TABS.length - 1)) / TABS.length;
-        for (int i = 0; i < TABS.length; i++) ui.button("mode:" + i, m + i * (cw + ui.dp(8)), y, cw, ui.dp(38), TABS[i], ngMode == i, 13);
+        boolean land = W > H * 1.15f;
+        // portrait: one column. Sideways: the list, then the choices, then the map
+        float colW = land ? W * 0.38f - m * 1.5f : W - m * 2;
+        float rightX = land ? W * 0.38f + m * 0.5f : m;
+        float rightW = land ? W * 0.31f - m : W - m * 2;
+        ui.button("back", m, ui.dp(10), ui.dp(70), ui.dp(36), "Back", false, 13);
+        ui.title("New game", m + ui.dp(84), ui.dp(35));
+        y = ui.dp(56);
+        float cw = (colW - ui.dp(6) * (TABS.length - 1)) / TABS.length;
+        for (int i = 0; i < TABS.length; i++) ui.button("mode:" + i, m + i * (cw + ui.dp(6)), y, cw, ui.dp(38), TABS[i], ngMode == i, 13);
         y += ui.dp(46);
         List<Content.Scenario> list = scenariosFor(ngMode);
         if (ngScenario >= list.size()) ngScenario = 0;
-        float ch = ui.dp(64);
-        boolean twoCol = W > ui.dp(560);
-        float colW = twoCol ? (W - m * 2 - ui.dp(8)) / 2 : W - m * 2;
-        // the list scrolls if it's long; at most four rows show
-        int rows = twoCol ? (list.size() + 1) / 2 : list.size();
-        int shown = Math.min(rows, 4);
-        float listH = shown * (ch + ui.dp(6));
-        maxScroll = Math.max(0, rows - shown) * (ch + ui.dp(6));
+        // the list: a fixed area (so nothing below jumps between tabs), cards as tall as their text, scrolling
+        float listH = land ? H - y - m : Math.max(ui.dp(150), H * 0.3f);
+        float total = 0;
+        for (Content.Scenario s : list) total += ui.cardH(s.desc, colW) + ui.dp(6);
+        maxScroll = Math.max(0, total - listH);
         float off = Math.min(scroll, maxScroll);
         g.save();
-        g.clip(0, y, W, listH);
+        g.clip(0, y, land ? m + colW + ui.dp(8) : W, listH);
+        float cy = y - off;
         for (int i = 0; i < list.size(); i++) {
             Content.Scenario s = list.get(i);
-            float cx = m + (twoCol ? (i % 2) * (colW + ui.dp(8)) : 0);
-            float cy = y + (twoCol ? i / 2 : i) * (ch + ui.dp(6)) - off;
-            if (cy + ch < y || cy > y + listH) continue;
-            ui.card("scen:" + i, cx, cy, colW, ch, s.name, s.desc, i == ngScenario);
+            float ch = ui.cardH(s.desc, colW);
+            if (cy + ch >= y && cy <= y + listH) ui.card("scen:" + i, m, cy, colW, ch, s.name, s.desc, i == ngScenario);
+            cy += ch + ui.dp(6);
         }
         g.restore();
         if (list.isEmpty()) {
             g.color(Ui.DIM);
-            g.text("Nothing here yet: make one with \"Make your own\".", W / 2f, y + ui.dp(30), ui.dp(13), Gfx.ALIGN_CENTER, false);
-            listH = ui.dp(50);
+            g.text("Nothing here yet: make one with \"Make your own\".", m + colW / 2, y + ui.dp(30), ui.dp(Ui.M), Gfx.ALIGN_CENTER, false);
         }
-        if (rows > shown) {
-            g.color(Ui.DIM);
-            g.text("drag the list for more", W - m, y + listH + ui.dp(8), ui.dp(10), Gfx.ALIGN_RIGHT, false);
+        if (maxScroll > 0) {
+            // a scroll bar
+            float th = listH * listH / (listH + maxScroll);
+            g.color(0x60FFFFFF);
+            g.fillRoundRect(m + colW + ui.dp(3), y + (listH - th) * off / maxScroll, ui.dp(3), th, ui.dp(1.5f));
         }
-        y += listH + ui.dp(12);
-        // who you are
+        float ry = land ? ui.dp(10) : y + listH + ui.dp(10);
+        // who you are: a row that opens the list of roles
         Content.Scenario sc = chosenScenario();
         int role = chosenRole();
-        float half = (W - m * 2 - ui.dp(8)) / 2;
-        ui.button("role", m, y, W - m * 2, ui.dp(40), "Play as: " + Roles.NAMES[role], false, 14);
-        y += ui.dp(44);
-        y += ui.wrap(Roles.DESC[role], m, y + ui.dp(10), W - m * 2, ui.dp(11), Ui.DIM, 2) + ui.dp(4);
-        // the map
-        float bw = (W - m * 2 - ui.dp(16)) / 3;
-        ui.button("preset", m, y, bw, ui.dp(38), RegionGen.PRESETS[ngPreset], false, 13);
-        ui.button("size", m + bw + ui.dp(8), y, bw, ui.dp(38), RegionGen.SIZE_NAMES[ngSize], false, 13);
-        ui.button("seed", m + (bw + ui.dp(8)) * 2, y, bw, ui.dp(38), "New seed", false, 13);
-        y += ui.dp(44);
-        ui.button("code", m, y, half, ui.dp(34), "Enter a code", false, 12);
-        ui.button("editor", m + half + ui.dp(8), y, half, ui.dp(34), "Make your own", false, 12);
-        y += ui.dp(38);
+        float rh = ui.dp(48);
+        ui.button("rolesheet", rightX, ry, rightW, rh, "", false);
+        g.color(0xFF2A3644);
+        g.fillCircle(rightX + ui.dp(24), ry + rh / 2, ui.dp(15));
+        Icons.draw(g, roleIcon(role), rightX + ui.dp(24), ry + rh / 2, ui.dp(16), Ui.TEXT);
         g.color(Ui.DIM);
-        g.text("Code " + challengeCode(), m, y + ui.dp(10), ui.dp(11), Gfx.ALIGN_LEFT, false);
-        String best = bestText(challengeCode());
-        if (best != null) {
-            g.color(Ui.GOOD);
-            g.text(best, W - m, y + ui.dp(24), ui.dp(11), Gfx.ALIGN_RIGHT, false);
-            y += ui.dp(14);
-        }
-        y += ui.dp(16);
-        // the preview
+        g.text("Play as", rightX + ui.dp(48), ry + ui.dp(18), ui.dp(Ui.S), Gfx.ALIGN_LEFT, false);
+        g.color(Ui.TEXT);
+        g.text(Ui.fit(g, Roles.NAMES[role], rightW - ui.dp(110), ui.dp(Ui.L), true), rightX + ui.dp(48), ry + ui.dp(37), ui.dp(Ui.L), Gfx.ALIGN_LEFT, true);
+        g.color(0xFF8FB8FF);
+        g.text("Change ▸", rightX + rightW - ui.dp(12), ry + rh / 2 + ui.dp(4), ui.dp(Ui.M), Gfx.ALIGN_RIGHT, true);
+        ry += rh;
+        float dh = Ui.lines(g, Roles.DESC[role], rightW, ui.dp(12)) * ui.dp(12) * 1.3f;
+        ui.wrap(Roles.DESC[role], rightX, ry + ui.dp(16), rightW, ui.dp(12), Ui.DIM, 5);
+        ry += Math.min(dh, ui.dp(12) * 1.3f * 5) + ui.dp(12);
+        // the map
+        float bw = (rightW - ui.dp(16)) / 3;
+        ui.button("preset", rightX, ry, bw, ui.dp(40), RegionGen.PRESETS[ngPreset], false, 13);
+        ui.button("size", rightX + bw + ui.dp(8), ry, bw, ui.dp(40), RegionGen.SIZE_NAMES[ngSize], false, 13);
+        ui.button("seed", rightX + (bw + ui.dp(8)) * 2, ry, bw, ui.dp(40), "New map", false, 13);
+        ry += ui.dp(46);
+        // the start, and the challenge code tucked above it
         float startH = ui.dp(52);
-        float avail = H - y - startH - ui.dp(22);
-        float ps = Math.min(W - m * 2, avail);
-        if (ps > ui.dp(60)) drawPreview(g, (W - ps) / 2, y, ps);
-        ui.bigButton("start", m, H - startH - ui.dp(12), W - m * 2, startH, sc == null ? "Start" : "Start: " + sc.name, Ui.ACCENT);
+        float startY = H - startH - ui.dp(12);
+        float codeY = startY - ui.dp(42);
+        float half = (rightW - ui.dp(8)) / 2;
+        ui.button("code", rightX, codeY, half, ui.dp(34), "Enter a code", false, 12);
+        ui.button("editor", rightX + half + ui.dp(8), codeY, half, ui.dp(34), "Make your own", false, 12);
+        String best = bestText(challengeCode());
+        g.color(best != null ? Ui.GOOD : 0xFF707A86);
+        g.text(Ui.fit(g, best != null ? best : "Code " + challengeCode(), rightW, ui.dp(Ui.S), false), rightX, codeY - ui.dp(6), ui.dp(Ui.S), Gfx.ALIGN_LEFT, false);
+        ui.bigButton("start", rightX, startY, rightW, startH, sc == null ? "Start" : Ui.fit(g, "Start: " + sc.name, rightW - ui.dp(20), ui.dp(17), true), Ui.ACCENT);
+        // the preview: below the choices, or in its own column sideways
+        if (land) {
+            float px = rightX + rightW + m, pw = W - px - m;
+            float ps = Math.min(pw, H - ui.dp(20));
+            drawPreview(g, px + (pw - ps) / 2, (H - ps) / 2, ps);
+        } else {
+            float avail = codeY - ry - ui.dp(24);
+            float ps = Math.min(rightW, avail);
+            if (ps > ui.dp(60)) drawPreview(g, rightX + (rightW - ps) / 2, ry, ps);
+        }
+        if (roleSheet) roleSheet(g, sc);
+    }
+
+    /** The roles as a list over the screen: each with what it can do. */
+    private void roleSheet(Gfx g, Content.Scenario sc) {
+        int W = g.width(), H = g.height();
+        g.color(0xC0000000);
+        g.fillRect(0, 0, W, H);
+        ui.area("rolesheet:close", 0, 0, W, H);
+        int[] rs = rolesFor(sc);
+        float m = ui.dp(12), pw = Math.min(W - m * 2, ui.dp(460));
+        float tw = pw - ui.dp(70);
+        float total = ui.dp(54);
+        for (int r : rs) total += ui.dp(30) + Ui.lines(g, Roles.DESC[r], tw, ui.dp(12)) * ui.dp(12) * 1.3f + ui.dp(10);
+        float ph = Math.min(H - m * 2, total);
+        float x = (W - pw) / 2, y = (H - ph) / 2;
+        ui.panel(x, y, pw, ph);
+        g.color(Ui.TEXT);
+        g.text("Play as", x + ui.dp(16), y + ui.dp(32), ui.dp(Ui.XL - 2), Gfx.ALIGN_LEFT, true);
+        ui.button("rolesheet:close", x + pw - ui.dp(44), y + ui.dp(10), ui.dp(34), ui.dp(34), "✕", false, 13);
+        float yy = y + ui.dp(50);
+        int cur = chosenRole();
+        for (int r : rs) {
+            float h = ui.dp(30) + Ui.lines(g, Roles.DESC[r], tw, ui.dp(12)) * ui.dp(12) * 1.3f + ui.dp(6);
+            if (yy + h > y + ph) break;
+            boolean on = r == cur;
+            g.color(on ? 0xFF24426E : ("rolepick:" + r).equals(ui.pressed) ? 0xFF2C3746 : 0xFF202832);
+            g.fillRoundRect(x + ui.dp(8), yy, pw - ui.dp(16), h, ui.dp(8));
+            g.color(0xFF2E3A48);
+            g.fillCircle(x + ui.dp(32), yy + ui.dp(22), ui.dp(14));
+            Icons.draw(g, roleIcon(r), x + ui.dp(32), yy + ui.dp(22), ui.dp(15), on ? 0xFFFFFFFF : 0xFFC8D0DA);
+            g.color(Ui.TEXT);
+            g.text(Roles.NAMES[r], x + ui.dp(56), yy + ui.dp(21), ui.dp(Ui.L - 1), Gfx.ALIGN_LEFT, true);
+            ui.wrap(Roles.DESC[r], x + ui.dp(56), yy + ui.dp(38), tw, ui.dp(12), Ui.DIM, 6);
+            ui.area("rolepick:" + r, x + ui.dp(8), yy, pw - ui.dp(16), h);
+            yy += h + ui.dp(4);
+        }
     }
 
     /** The preview of the chosen map in a square; returns false while it's still being drawn. */
     boolean drawPreview(Gfx g, float pxx, float y, float ps) {
+        return drawPreview(g, pxx, y, ps, true);
+    }
+
+    /** The preview, with or without its names and caption (the menu's backdrop has none). */
+    boolean drawPreview(Gfx g, float pxx, float y, float ps, boolean captions) {
         requestPreview();
-        g.color(0xFF1A2028);
-        g.fillRect(pxx, y, ps, ps);
+        if (captions) {
+            g.color(0xFF1A2028);
+            g.fillRoundRect(pxx, y, ps, ps, ui.dp(6));
+        }
         Region pr = preview;
         if (pr == null || previewKey != key()) {
-            g.color(Ui.DIM);
-            g.text("Drawing the map...", pxx + ps / 2, y + ps / 2, ui.dp(13), Gfx.ALIGN_CENTER, false);
+            if (captions) {
+                g.color(Ui.DIM);
+                g.text("Drawing the map...", pxx + ps / 2, y + ps / 2, ui.dp(Ui.M), Gfx.ALIGN_CENTER, false);
+            }
             return false;
         }
         if (previewImg == null) {
@@ -399,24 +500,21 @@ public final class Game {
             previewImg.setPixels(pix, iw, iw);
         }
         g.image(previewImg, pxx, y, ps, ps);
+        if (!captions) return true;
         float k = ps / pr.W;
         for (Region.Settlement s : pr.settlements) {
             if (s.kind != Region.S_CITY && (s.kind != Region.S_TOWN || ps < ui.dp(260))) continue;
-            float size = ui.dp(s.capital ? 13 : s.kind == Region.S_CITY ? 11 : 9);
-            g.color(0xD0000000);
-            g.text(s.name, pxx + s.cx * k + 1, y + s.cy * k + 1, size, Gfx.ALIGN_CENTER, true);
+            float size = ui.dp(s.capital ? 13 : s.kind == Region.S_CITY ? 11.5f : 10);
             g.color(0xFFFFFFFF);
-            g.text(s.name, pxx + s.cx * k, y + s.cy * k, size, Gfx.ALIGN_CENTER, true);
+            g.textHalo((s.capital ? "★ " : "") + s.name, pxx + s.cx * k, y + s.cy * k, size, Gfx.ALIGN_CENTER, true, 0xD0000000, ui.dp(1.3f));
         }
         long people = 0;
         for (Region.Settlement s : pr.settlements) people += s.residents;
         g.color(0xD0000000);
-        g.fillRect(pxx, y + ps - ui.dp(22), ps, ui.dp(22));
+        g.fillRect(pxx, y + ps - ui.dp(24), ps, ui.dp(24));
         g.color(0xFFFFFFFF);
         String cap = pr.name + ": " + WorldView.people(people) + " people, " + pr.states.size() + " states";
-        float cs = ui.dp(12);
-        while (g.textWidth(cap, cs, false) > ps - ui.dp(12) && cs > ui.dp(7)) cs *= 0.9f;
-        g.text(cap, pxx + ui.dp(6), y + ps - ui.dp(7), cs, Gfx.ALIGN_LEFT, false);
+        g.text(Ui.fit(g, cap, ps - ui.dp(12), ui.dp(12), false), pxx + ui.dp(6), y + ps - ui.dp(8), ui.dp(12), Gfx.ALIGN_LEFT, false);
         return true;
     }
 
@@ -603,6 +701,7 @@ public final class Game {
     }
 
     private void closeWorld() {
+        menuCam = false;
         if (w != null) w.shutdown();
         if (view != null) view.map.clear();
         w = null;
@@ -614,6 +713,13 @@ public final class Game {
 
     private void play(Gfx g, float dt) {
         int W = g.width(), H = g.height();
+        cam.dp = ui.d;
+        if (hideUi) {
+            cam.setInsets(0, 0, 0, 0);
+            freeL = freeT = 0;
+            freeR = W;
+            freeB = H;
+        } else layout(W, H);
         cam.setScreen(W, H, w.r.px());
         // follow
         if (cam.follow >= 0) {
@@ -702,7 +808,7 @@ public final class Game {
         view.draw(g, cam, dt);
         if (!hideUi) hud(g);
         else {
-            ui.button("showui", W - ui.dp(46), ui.dp(10), ui.dp(36), ui.dp(30), "UI", false, 12);
+            ui.button("showui", W - ui.dp(52), ui.dp(10), ui.dp(44), ui.dp(34), "UI", false, 12);
         }
         if (w.ended && screen == S_PLAY && !hideUi) endPanel(g);
     }
@@ -743,97 +849,379 @@ public final class Game {
         return WorldView.fmt(n);
     }
 
+    // ------------------------------------------------------------------ the play screen's layout
+
+    /** Is the screen wider than tall (the side layout: a tool rail on the left, sheets on the right)? */
+    boolean landscape;
+    /** The map area left free by the bars and panels, in pixels. */
+    float freeL, freeT, freeR, freeB;
+    private float topH, railW, paletteW, sheetW;
+
+    /** Works out where the bars go this frame and tells the camera what's covered. */
+    private void layout(int W, int H) {
+        landscape = W > H * 1.15f;
+        topH = ui.dp(landscape ? 46 : 70);
+        float bottom = 0, left = 0, right = 0;
+        boolean pal = palette() != null && !inspectorOpen();
+        if (landscape) {
+            railW = ui.dp(60);
+            paletteW = pal ? Math.min(ui.dp(210), W * 0.27f) : 0;
+            sheetW = inspectorOpen() ? Math.min(ui.dp(340), W * 0.42f) : 0;
+            left = railW + paletteW;
+            right = sheetW;
+        } else {
+            railW = paletteW = sheetW = 0;
+            toolbarH = ui.dp(60);
+            bottom = toolbarH + (inspectorOpen() ? inspectorH : pal ? paletteFixedH() : 0);
+        }
+        freeL = left;
+        freeT = topH;
+        freeR = W - right;
+        freeB = H - bottom;
+        cam.setInsets(left, topH, right, bottom);
+    }
+
+    /** The palette's height: a caption and its rows (the same for a tool whichever option is picked). */
+    private float paletteFixedH() {
+        String[][] p = palette();
+        int rows = 0;
+        if (p != null) for (String[] r : p) if (r.length > 0) rows++;
+        return ui.dp(rows == 0 ? 30 : 22) + ui.dp(46) * rows + ui.dp(rows == 0 ? 0 : 8);
+    }
+
+    // ------------------------------------------------------------------ the HUD
+
+    private String hudKey;
+    private String hudLine;
+    private long headlineSeen = -1;
+    private News.Item headlineItem;
+    private float rippleX, rippleY, rippleT = 9;
+    private float pingX, pingY, pingT = 9;
+    private float detailCueT;
+    private boolean wasDetail = true;
+
+    /** A clock reading for a game time (game minutes since the start): "Day 2  14:05". One formatter for every screen. */
+    static String clockAt(double minutes) {
+        double h = World.START_HOUR + minutes / 60.0;
+        int day = 1 + (int) (h / 24.0);
+        int hh = (int) (h % 24.0), mm = (int) (minutes % 60.0);
+        if (mm < 0) mm += 60;
+        return "Day " + day + "  " + (hh < 10 ? "0" : "") + hh + ":" + (mm < 10 ? "0" : "") + mm;
+    }
+
     private void hud(Gfx g) {
         int W = g.width(), H = g.height();
-        float m = ui.dp(8), bh = ui.dp(38);
-        // top bar
-        g.color(0xC0101318);
-        g.fillRect(0, 0, W, ui.dp(78));
-        ui.block(0, 0, W, ui.dp(78));
-        ui.button("pause", m, m, bh, bh, "≡", false, 18);
+        float m = ui.dp(8);
+        // what happens on the map under the bars first: the tap ripple, an order's flag
+        rippleT += 0.016f;
+        pingT += 0.016f;
+        if (rippleT < 0.45f) {
+            float k = rippleT / 0.45f;
+            g.color(MapPainter.alpha(0xFFFFFFFF, (1 - k) * 0.8f));
+            g.strokeCircle(rippleX, rippleY, ui.dp(8 + 26 * k), ui.dp(2));
+        }
+        if (pingT < 2.5f) view.flag(g, cam.toScreenX(pingX), cam.toScreenY(pingY), 0xFFFFE040);
+        alertArrows(g);
+        outbreakMarker(g);
+        cues(g, W);
+        topBar(g, W);
+        float y = topH;
+        // the latest headline: one line, for a few seconds
+        News.Item hl = w.news.headline;
+        if (hl != headlineItem) {
+            headlineItem = hl;
+            headlineSeen = System.currentTimeMillis();
+        }
+        if (hl != null && System.currentTimeMillis() - headlineSeen < 6000 && w.time - hl.time < 60) {
+            float hh = ui.dp(28), x0 = freeL + m, x1 = freeR - m;
+            float a = Math.min(1, (6000 - (System.currentTimeMillis() - headlineSeen)) / 600f);
+            g.color(MapPainter.alpha(0xFF5A1414, 0.92f * a));
+            g.fillRoundRect(x0, y + m * 0.5f, x1 - x0, hh, ui.dp(8));
+            g.color(MapPainter.alpha(0xFFFF8A70, a));
+            g.fillRoundRect(x0, y + m * 0.5f, ui.dp(4), hh, ui.dp(2));
+            g.color(MapPainter.alpha(0xFFFFEDE6, a));
+            float ts = ui.dp(12.5f);
+            g.text(Ui.fit(g, hl.text, x1 - x0 - ui.dp(20), ts, true), x0 + ui.dp(12), y + m * 0.5f + hh / 2 + ts * 0.36f, ts, Gfx.ALIGN_LEFT, true);
+            ui.area("radio", x0, y + m * 0.5f, x1 - x0, hh);
+            y += hh + m * 0.5f;
+        }
+        // the map's key, under the bar on the left; the minimap on the right
+        float ky = y + m;
+        if (legendOpen || view.overlay > WorldView.OV_INFECTION) {
+            float lw = Math.min(ui.dp(230), (freeR - freeL) - ui.dp(140));
+            ky += legendPanel(g, freeL + m, ky, lw) + m;
+        } else {
+            ui.iconButton("legend", freeL + m, ky, ui.dp(36), ui.dp(36), "help", "", false);
+        }
+        boolean mm = settings.minimap && cam.zoom > 0.25f && !w.strategic;
+        if (mm) minimap(g, freeR - ui.dp(104) - m, y + m, ui.dp(104));
+        // pass-and-play: whose turn it is, and the hand-over
+        if (w.roles.players > 1 && replay == null) {
+            ui.button("handover", freeL + m + ui.dp(44), y + m, ui.dp(64), ui.dp(34), "P" + (w.roles.current + 1) + " ▸", false, 12);
+        }
+        bottomBars(g);
+        if (w.mode == World.MODE_SURVIVOR && w.playerEnt >= 0 && replay == null) joystick(g);
+        radioFeed(g, W);
+        if (settings.debug) {
+            g.color(0xC0FFFFFF);
+            g.text((int) fps + " fps  " + fmt(w.e.live) + " simulated  zoom " + String.format("%.3f", cam.zoom), freeL + m, freeB - ui.dp(6), ui.dp(Ui.S), Gfx.ALIGN_LEFT, false);
+        }
+        if (view.aimX >= 0) aimPanel(g);
+    }
+
+    /** For the first hours: where it started, pulsing, and a way back there if it's out of view. */
+    private void outbreakMarker(Gfx g) {
+        if (replay != null || w.time > 120 || startX <= 0) return;
+        float x = cam.toScreenX(startX), y = cam.toScreenY(startY);
+        float pulse = (view.time * 0.8f) % 1f;
+        boolean in = x > freeL && x < freeR && y > freeT && y < freeB;
+        if (in) {
+            for (int k = 0; k < 2; k++) {
+                float p = (pulse + k * 0.5f) % 1f;
+                g.color(MapPainter.alpha(0xFFFF5040, (1 - p) * 0.9f));
+                g.strokeCircle(x, y, ui.dp(14 + p * 46), ui.dp(2.5f));
+            }
+            if (cam.zoom > 0.1f) view.label(g, "It starts here", x, y - ui.dp(30), 12, 0xFFFFD0C8, Gfx.ALIGN_CENTER, true);
+        } else if (w.time < 60) {
+            float bw = ui.dp(170), bh = ui.dp(36);
+            float bx = (freeL + freeR - bw) / 2, by = freeB - bh - ui.dp(80);
+            ui.bigButton("golive", bx, by, bw, bh, "To the outbreak", 0xE0B03028);
+        }
+    }
+
+    /** The bar along the top: menu, the time and weather, the alert level, the numbers, who you are, the speed. */
+    private void topBar(Gfx g, int W) {
+        float m = ui.dp(8), bh = ui.dp(40);
+        g.color(Ui.BAR);
+        g.fillRect(0, 0, W, topH);
+        g.color(0x20FFFFFF);
+        g.fillRect(0, topH - 1, W, 1);
+        ui.block(0, 0, W, topH);
+        float by = (landscape ? topH : ui.dp(46)) / 2 - bh / 2;
+        ui.button("pause", m, by, bh, bh, "", false);
+        Icons.draw(g, "menu", m + bh / 2, by + bh / 2, ui.dp(18), Ui.TEXT);
+        // speed, fixed widths at the right
+        float sw = ui.dp(44), spw = ui.dp(54);
+        float sx = W - m - spw - ui.dp(6) - sw;
+        ui.button("playpause", sx, by, sw, bh, "", paused);
+        Icons.draw(g, paused ? "play" : "pause", sx + sw / 2, by + bh / 2, ui.dp(16), Ui.TEXT);
+        ui.button("speed", sx + sw + ui.dp(6), by, spw, bh, SPEED_NAMES[speedIdx], w.strategic, 13);
+        // the time, the weather (named), the alert level
+        float x = m + bh + ui.dp(10);
+        float cy1 = by + ui.dp(17), cy2 = by + ui.dp(34);
         g.color(Ui.TEXT);
-        g.text(w.clock(), m + bh + ui.dp(10), m + ui.dp(16), ui.dp(15), Gfx.ALIGN_LEFT, true);
-        g.color(Ui.DIM);
-        float wx = m + bh + ui.dp(10) + g.textWidth(Gov.LEVELS[w.gov.level] + "  ", ui.dp(11), true);
-        String wt = w.weather.status();
-        float room = W - m - ui.dp(44) * 2 - ui.dp(14) - wx;
-        while (wt.length() > 4 && g.textWidth(wt, ui.dp(11), false) > room) wt = wt.substring(0, wt.lastIndexOf(' ') > 0 ? wt.lastIndexOf(' ') : wt.length() - 1);
-        g.text(wt, wx, m + ui.dp(33), ui.dp(11), Gfx.ALIGN_LEFT, false);
+        g.text(w.clock(), x, cy1, ui.dp(Ui.L), Gfx.ALIGN_LEFT, true);
+        Icons.draw(g, Icons.weather(w.weather.state), x + ui.dp(7), cy2 - ui.dp(4), ui.dp(13), 0xFFD8E0EA);
+        String wt = Weather.NAMES[w.weather.state] + " " + Math.round(w.weather.temperature()) + "°";
+        g.color(0xFFD8E0EA);
+        g.text(wt, x + ui.dp(17), cy2, ui.dp(Ui.S), Gfx.ALIGN_LEFT, false);
+        float lx = x + ui.dp(17) + g.textWidth(wt, ui.dp(Ui.S), false) + ui.dp(8);
         int lvl = w.gov.level;
         int lc = lvl <= 0 ? Ui.GOOD : lvl == 1 ? Ui.WARN : lvl == 2 ? 0xFFE07030 : 0xFFE0453A;
-        g.color(lc);
-        g.text(Gov.LEVELS[lvl], m + bh + ui.dp(10), m + ui.dp(33), ui.dp(11), Gfx.ALIGN_LEFT, true);
-        // speed
-        float sw = ui.dp(44);
-        float sx = W - m - sw * 2 - ui.dp(6);
-        ui.button("playpause", sx, m, sw, bh, paused ? "▶" : "II", paused, 15);
-        ui.button("speed", sx + sw + ui.dp(6), m, sw, bh, SPEED_NAMES[speedIdx], w.strategic, 13);
-        // the numbers
-        int people = w.livingCivilians();
-        String line = "People " + WorldView.people(people) + "   Dead " + WorldView.people(w.totalZombies()) + "   Police " + fmt(w.sq.count(Ents.COP) + w.forces.total(Ents.COP))
-                + "   Army " + fmt(w.sq.count(Ents.SOLDIER) + w.forces.total(Ents.SOLDIER));
-        g.color(Ui.TEXT);
-        float ts = ui.dp(12.5f);
-        while (g.textWidth(line, ts, false) > W - m * 2 && ts > ui.dp(8)) ts *= 0.92f;
-        g.text(line, m, ui.dp(68), ts, Gfx.ALIGN_LEFT, false);
-        // the latest headline
-        News.Item hl = w.news.headline;
-        float y = ui.dp(80);
-        if (hl != null && w.time - hl.time < 14) {
-            g.color(0xD0301010);
-            float th = ui.dp(Ui.lines(g, hl.text, W - m * 4, ui.dp(12)) > 1 ? 38 : 24);
-            g.fillRect(0, y, W, th);
-            ui.wrap(hl.text, m * 2, y + ui.dp(16), W - m * 4, ui.dp(12), 0xFFFFE8E0, 2);
-            ui.block(0, y, W, th);
-            y += th;
+        float clockW = Math.max(g.textWidth(w.clock(), ui.dp(Ui.L), true), lx - x);
+        float statsX;
+        if (landscape) {
+            ui.chip(x + clockW + ui.dp(10), (topH - ui.dp(Ui.S) * 1.75f) / 2, Gov.LEVELS[lvl], Ui.S, MapPainter.alpha(lc, 0.25f), lc, true);
+            statsX = x + clockW + ui.dp(18) + g.textWidth(Gov.LEVELS[lvl], ui.dp(Ui.S), true) + ui.dp(12);
+            stats(g, statsX, topH / 2, sx - ui.dp(10));
+        } else {
+            float room = sx - ui.dp(8) - lx;
+            if (room > ui.dp(40)) {
+                String lv = Ui.fit(g, Gov.LEVELS[lvl], room - ui.dp(12), ui.dp(Ui.S), true);
+                ui.chip(lx, cy2 - ui.dp(Ui.S) * 1.25f, lv, Ui.S, MapPainter.alpha(lc, 0.25f), lc, true);
+            }
+            stats(g, m, ui.dp(58), W - m);
+        }
+    }
+
+    /** The numbers as chips with icons: people, the dead, police, army; then who you are. */
+    private void stats(Gfx g, float x, float cy, float maxX) {
+        float ts = ui.dp(12), is = ui.dp(13);
+        String[] v = {WorldView.people(w.livingCivilians()), WorldView.people(w.totalZombies()),
+                fmt(w.sq.count(Ents.COP) + w.forces.total(Ents.COP)), fmt(w.sq.count(Ents.SOLDIER) + w.forces.total(Ents.SOLDIER))};
+        String[] icon = {"people", "dead", "police", "army"};
+        int[] col = {WorldView.C_CIV, 0xFFFF6A5A, 0xFF7FA8FF, WorldView.C_ARMY};
+        for (int k = 0; k < 4; k++) {
+            float tw = g.textWidth(v[k], ts, true);
+            if (x + is + tw + ui.dp(6) > maxX) return;
+            Icons.draw(g, icon[k], x + is / 2, cy, is, col[k]);
+            g.color(Ui.TEXT);
+            g.text(v[k], x + is + ui.dp(4), cy + ts * 0.36f, ts, Gfx.ALIGN_LEFT, true);
+            x += is + ui.dp(4) + tw + ui.dp(12);
         }
         // who you are (or that this is a replay)
         String who = replay != null ? "REPLAY: " + replay.title : w.roles.label();
-        float ww = Math.min(W - ui.dp(140), g.textWidth(who, ui.dp(11), true) + ui.dp(14));
-        g.color(replay != null ? 0xC0602080 : 0x90000000);
-        g.fillRoundRect(m, y + m, ww, ui.dp(20), ui.dp(6));
-        g.color(0xFFFFFFFF);
-        String whoCut = who;
-        while (g.textWidth(whoCut, ui.dp(11), true) > ww - ui.dp(12) && whoCut.length() > 6) whoCut = whoCut.substring(0, whoCut.length() - 2);
-        g.text(whoCut, m + ui.dp(7), y + m + ui.dp(14), ui.dp(11), Gfx.ALIGN_LEFT, true);
-        if (w.roles.players > 1 && replay == null) {
-            // pass-and-play: whose turn it is, and the hand-over
-            String pl = "P" + (w.roles.current + 1) + " ▸";
-            ui.button("handover", m + ww + ui.dp(6), y + m - ui.dp(2), ui.dp(54), ui.dp(24), pl, false, 11);
+        float room = maxX - x;
+        if (room > ui.dp(50)) {
+            String cut = Ui.fit(g, who, room - ui.dp(14), ui.dp(Ui.S), true);
+            float cw = g.textWidth(cut, ui.dp(Ui.S), true) + ui.dp(12), ch = ui.dp(Ui.S) * 1.75f;
+            g.color(replay != null ? 0xD0602080 : 0xFF263040);
+            g.fillRoundRect(maxX - cw, cy - ch / 2, cw, ch, ch / 2);
+            g.color(0xFFE8ECF0);
+            g.text(cut, maxX - cw + ui.dp(6), cy + ui.dp(Ui.S) * 0.36f, ui.dp(Ui.S), Gfx.ALIGN_LEFT, true);
         }
-        if (view.overlay > WorldView.OV_INFECTION) view.legend(g, m, y + m + ui.dp(26), ui.dp(1));
-        // the minimap
-        if (settings.minimap && cam.zoom > 0.08f) minimap(g, W - ui.dp(112) - m, y + m, ui.dp(112));
-        // radio: the last few messages
-        bottomBars(g);
-        float ry = H - toolbarH - paletteH() - ui.dp(8);
-        if (settings.radio) {
-            int shown = 0;
-            for (int i = w.news.log.size() - 1; i >= 0 && shown < 3; i--) {
-                News.Item it = w.news.log.get(i);
-                if (it.kind == News.HEADLINE) continue;
-                if (w.time - it.time > 25) break;
-                float a = (float) Math.max(0, Math.min(1, (25 - (w.time - it.time)) / 5));
-                String t = it.text;
-                float tw = Math.min(W - m * 2, g.textWidth(t, ui.dp(11.5f), false) + ui.dp(12));
-                ry -= ui.dp(22);
-                g.color(((int) (a * 170)) << 24);
-                g.fillRoundRect(m, ry, tw, ui.dp(20), ui.dp(5));
-                int col = it.kind == News.LOSS ? 0xFFFF9A8A : it.kind == News.COMMAND ? 0xFFFFE08A : it.kind == News.CALL ? 0xFFB0D0FF : 0xFFE0E0E0;
-                g.color(((int) (a * 255) << 24) | (col & 0xFFFFFF));
-                g.text(t, m + ui.dp(6), ry + ui.dp(14), ui.dp(11.5f), Gfx.ALIGN_LEFT, false);
-                shown++;
+    }
+
+    /** Short notes over the map: fast-forward, and when the people are counted rather than drawn. */
+    private void cues(Gfx g, int W) {
+        boolean detail = cam.zoom >= 0.3f;
+        if (detail != wasDetail) {
+            wasDetail = detail;
+            detailCueT = 3.5f;
+        }
+        detailCueT -= 0.016f;
+        String cue = null;
+        int bg = 0xD0101318;
+        if (w.strategic) {
+            cue = "▶▶ Fast-forward " + SPEED_NAMES[speedIdx] + ": everyone counted, fights by the numbers";
+            bg = 0xE0603010;
+            // a warm edge round the map while time races
+            g.color(0x50FF8A30);
+            g.fillRect(freeL, freeT, freeR - freeL, ui.dp(3));
+            g.fillRect(freeL, freeB - ui.dp(3), freeR - freeL, ui.dp(3));
+        } else if (detailCueT > 0) {
+            cue = detail ? "Close in: everyone in view is simulated in person" : "Far out: what's out of sight is counted, not drawn";
+        }
+        if (cue == null) return;
+        float ts = ui.dp(Ui.S);
+        String c = Ui.fit(g, cue, freeR - freeL - ui.dp(40), ts, false);
+        float tw = g.textWidth(c, ts, false) + ui.dp(16), th = ui.dp(24);
+        float x = (freeL + freeR - tw) / 2, y = freeT + ui.dp(48);
+        g.color(bg);
+        g.fillRoundRect(x, y, tw, th, th / 2);
+        g.color(0xFFFFFFFF);
+        g.text(c, x + ui.dp(8), y + th / 2 + ts * 0.36f, ts, Gfx.ALIGN_LEFT, false);
+    }
+
+    private boolean legendOpen;
+
+    /** The key to what's on the map: the overlay's colours, and what the marks mean. */
+    private float legendPanel(Gfx g, float x, float y, float wdt) {
+        float h = view.legend(g, x, y, ui.d, wdt);
+        if (h <= 0) h = 0;
+        float yy = y + h;
+        if (legendOpen) {
+            String[] marks = {"Pulsing ring: a 911 call, the dead counted there", "Blue bar: a police cordon post", "Frame with a cross: an army or police formation",
+                    "Red bleed: where the dead are", "Striped bar: people holding out", "Flag: where you sent them"};
+            float lh = ui.dp(16), ph = marks.length * lh + ui.dp(30);
+            g.color(0xE0101318);
+            g.fillRoundRect(x, yy + ui.dp(4), wdt, ph, ui.dp(8));
+            g.color(0xFFFFFFFF);
+            g.text("The marks", x + ui.dp(8), yy + ui.dp(20), ui.dp(12), Gfx.ALIGN_LEFT, true);
+            for (int k = 0; k < marks.length; k++) {
+                g.color(0xFFD0D0D0);
+                g.text(Ui.fit(g, marks[k], wdt - ui.dp(16), ui.dp(Ui.S), false), x + ui.dp(8), yy + ui.dp(38) + k * lh, ui.dp(Ui.S), Gfx.ALIGN_LEFT, false);
+            }
+            yy += ph + ui.dp(4);
+        }
+        ui.area("legend", x, y, wdt, yy - y);
+        return yy - y;
+    }
+
+    private final float[] arrowTip = new float[6];
+    private final Dispatch.Incident[] alertPick = new Dispatch.Incident[3];
+
+    /** Arrows at the edge of the map pointing to the biggest fights out of view; tap one to go there. */
+    private void alertArrows(Gfx g) {
+        if (cam.zoom < 0.15f || w.strategic) return;
+        for (int k = 0; k < alertPick.length; k++) alertPick[k] = null;
+        for (Dispatch.Incident in : w.disp.incidents) {
+            if (!in.open || in.zombies < 10) continue;
+            float sx = cam.toScreenX(in.x), sy = cam.toScreenY(in.y);
+            if (sx > freeL && sx < freeR && sy > freeT && sy < freeB) continue;
+            // keep the four biggest, biggest first
+            for (int k = 0; k < alertPick.length; k++) {
+                if (alertPick[k] == null || in.zombies > alertPick[k].zombies) {
+                    for (int q = alertPick.length - 1; q > k; q--) alertPick[q] = alertPick[q - 1];
+                    alertPick[k] = in;
+                    break;
+                }
             }
         }
-        if (w.mode == World.MODE_SURVIVOR && w.playerEnt >= 0 && replay == null) joystick(g);
-        // fps
-        g.color(0x90FFFFFF);
-        g.text((int) fps + " fps  " + fmt(w.e.live) + " simulated", W - m, ui.dp(94) + (hl != null && w.time - hl.time < 14 ? ui.dp(24) : 0) + (settings.minimap && cam.zoom > 0.08f ? ui.dp(118) : 0), ui.dp(10), Gfx.ALIGN_RIGHT, false);
+        float cx = (freeL + freeR) / 2, cy = (freeT + freeB) / 2, pad = ui.dp(26);
+        for (int k = 0; k < alertPick.length; k++) {
+            Dispatch.Incident in = alertPick[k];
+            if (in == null) continue;
+            float dx = cam.toScreenX(in.x) - cx, dy = cam.toScreenY(in.y) - cy;
+            float hw = (freeR - freeL) / 2 - pad, hh = (freeB - freeT) / 2 - pad - ui.dp(30);
+            float t = Math.min(hw / Math.max(1e-3f, Math.abs(dx)), hh / Math.max(1e-3f, Math.abs(dy)));
+            float ax = cx + dx * t, ay = cy + dy * t;
+            float l = (float) Math.sqrt(dx * dx + dy * dy), ux = dx / l, uy = dy / l;
+            float r = ui.dp(13);
+            int col = in.army ? 0xFFE0A030 : 0xFFE84040;
+            g.color(0xE0101318);
+            g.fillCircle(ax, ay, r + ui.dp(2));
+            g.color(col);
+            g.strokeCircle(ax, ay, r, ui.dp(2));
+            arrowTip[0] = ax + ux * (r + ui.dp(9));
+            arrowTip[1] = ay + uy * (r + ui.dp(9));
+            arrowTip[2] = ax + ux * r - uy * ui.dp(6);
+            arrowTip[3] = ay + uy * r + ux * ui.dp(6);
+            arrowTip[4] = ax + ux * r + uy * ui.dp(6);
+            arrowTip[5] = ay + uy * r - ux * ui.dp(6);
+            g.fillPoly(arrowTip, 3);
+            g.color(0xFFFFFFFF);
+            String c = in.zombies >= 1000 ? (in.zombies / 1000) + "k" : "" + in.zombies;
+            g.text(c, ax, ay + ui.dp(4), ui.dp(Ui.S), Gfx.ALIGN_CENTER, true);
+            ui.area("alert:" + in.id, ax - r * 1.5f, ay - r * 1.5f, r * 3, r * 3);
+        }
+    }
+
+    /** The last few messages over the bottom of the map: what matters, and the latest routine call, dimmer. */
+    private void radioFeed(Gfx g, int W) {
+        if (!settings.radio) return;
+        float m = ui.dp(8);
+        float x0 = freeL + m, x1 = freeR - m;
+        if (w.mode == World.MODE_SURVIVOR && w.playerEnt >= 0 && replay == null && !landscape) x0 = joyCX + ui.dp(64);
+        else if (w.mode == World.MODE_SURVIVOR && w.playerEnt >= 0 && replay == null) x0 = joyCX + ui.dp(64);
+        if (x1 - x0 < ui.dp(120)) return;
+        float ry = freeB - ui.dp(6);
+        if (view.aimX >= 0) ry -= ui.dp(60);
+        int shown = 0;
+        boolean routineShown = false;
+        float ts = ui.dp(Ui.S + 0.5f), lh = ui.dp(22);
+        for (int i = w.news.log.size() - 1; i >= 0 && shown < 3; i--) {
+            News.Item it = w.news.log.get(i);
+            if (it.kind == News.HEADLINE) continue;
+            double age = w.time - it.time;
+            boolean routine = it.kind == News.CALL || it.kind == News.UNIT;
+            if (age > (routine ? 12 : 30)) {
+                if (age > 30) break;
+                continue;
+            }
+            if (routine && routineShown) continue;
+            if (routine) routineShown = true;
+            float a = (float) Math.max(0, Math.min(1, ((routine ? 12 : 30) - age) / 5)) * (routine ? 0.75f : 1);
+            int col = it.kind == News.LOSS ? 0xFFFF8A7A : it.kind == News.COMMAND ? 0xFFFFD87A : it.kind == News.CALL ? 0xFF9EC4FF : 0xFFD8DCE0;
+            String t = Ui.fit(g, it.text, x1 - x0 - ui.dp(18), ts, false);
+            float tw = g.textWidth(t, ts, false) + ui.dp(16);
+            ry -= lh;
+            g.color(MapPainter.alpha(0xFF0C0F14, a * 0.8f));
+            g.fillRoundRect(x0, ry, tw, lh - ui.dp(3), ui.dp(5));
+            g.color(MapPainter.alpha(col, a));
+            g.fillRect(x0, ry + ui.dp(3), ui.dp(3), lh - ui.dp(9));
+            g.text(t, x0 + ui.dp(9), ry + (lh - ui.dp(3)) / 2 + ts * 0.36f, ts, Gfx.ALIGN_LEFT, false);
+            if (it.x >= 0) ui.area("goto:" + i, x0, ry, tw, lh - ui.dp(3));
+            shown++;
+        }
+    }
+
+    /** An aimed strike: what it is, and fire or cancel. */
+    private void aimPanel(Gfx g) {
+        float m = ui.dp(8), h = ui.dp(52);
+        float x0 = freeL + m, x1 = freeR - m, y = freeB - h - m;
+        ui.panel(x0, y, x1 - x0, h);
+        String what = strikeMode.equals("bridge") ? "Blow this bridge?" : strikeMode.equals("art") ? "Artillery here?" : "Air strike here?";
+        g.color(Ui.TEXT);
+        float bw = ui.dp(84);
+        g.text(Ui.fit(g, what, x1 - x0 - bw * 2 - ui.dp(36), ui.dp(Ui.M), true), x0 + ui.dp(12), y + h / 2 + ui.dp(5), ui.dp(Ui.M), Gfx.ALIGN_LEFT, true);
+        ui.bigButton("aim:go", x1 - bw * 2 - ui.dp(16), y + ui.dp(7), bw, h - ui.dp(14), "Fire", Ui.ACCENT);
+        ui.button("aim:no", x1 - bw - ui.dp(8), y + ui.dp(7), bw, h - ui.dp(14), "Cancel", false, 13);
     }
 
     private void minimap(Gfx g, float x, float y, float s) {
-        g.color(0xC0000000);
-        g.fillRect(x - 2, y - 2, s + 4, s + 4);
+        g.color(0xE0000000);
+        g.fillRoundRect(x - ui.dp(3), y - ui.dp(3), s + ui.dp(6), s + ui.dp(6), ui.dp(6));
         g.image(view.map.regionImage, x, y, s, s);
         float k = s / w.r.px();
         float cs = Region.SECT * Tile.SIZE;
@@ -844,11 +1232,12 @@ public final class Game {
             g.fillRect(x + (sec % w.sec.sw) * cs * k, y + (sec / w.sec.sw) * cs * k, cs * k + 0.5f, cs * k + 0.5f);
         }
         for (Strategic.Horde h : w.strat.hordes) {
+            if (!h.alive) continue;
             g.color(0xFFFF4040);
-            g.fillCircle(x + h.x * k, y + h.y * k, 3);
+            g.fillCircle(x + h.x * k, y + h.y * k, ui.dp(2));
         }
         g.color(0xFFFFFFFF);
-        g.strokeRect(x + cam.x0() * k, y + cam.y0() * k, Math.max(3, (cam.x1() - cam.x0()) * k), Math.max(3, (cam.y1() - cam.y0()) * k), 1.5f);
+        g.strokeRect(x + cam.x0() * k, y + cam.y0() * k, Math.max(ui.dp(3), (cam.x1() - cam.x0()) * k), Math.max(ui.dp(3), (cam.y1() - cam.y0()) * k), ui.dp(1.2f));
         ui.area("minimap", x, y, s, s);
         mmX = x;
         mmY = y;
@@ -896,12 +1285,31 @@ public final class Game {
     }
 
     private float paletteH() {
+        if (landscape) return 0;
         if (inspectorOpen()) return inspectorH;
-        String[][] p = palette();
-        return p == null ? 0 : ui.dp(46) * p.length + ui.dp(6);
+        return palette() == null ? 0 : paletteFixedH();
     }
 
-    /** Rows of (id, label) pairs for the current tool's options. */
+    /** A line saying what the current tool does with a tap. */
+    private String paletteCaption() {
+        switch (tool) {
+            case "dead": return "Drag on the map to paint the dead: pick a kind and how many";
+            case "police": return placeVehicle != null ? "Tap a road to place the vehicle" : "Tap the map to place a squad";
+            case "army": return placeVehicle != null ? "Tap a road to place the vehicle" : "Tap the map to place soldiers";
+            case "strike": return "Tap where to aim, then confirm";
+            case "town": return "Tap a town: " + (townMode.equals("info") ? "see how it's doing" : townMode.equals("evac") ? "evacuate it" : townMode.equals("quar") ? "quarantine it" : "send the army");
+            case "send": return "Pick who to send, then tap where they go";
+            case "map": return "Layers of the national map";
+            case "erase": return "Drag to clear the dead away";
+            case "orders":
+                if (inspFormation != null && inspFormation.alive) return Forces.shortName(inspFormation) + " (" + inspFormation.strength() + "): tap where to hold";
+                if (inspSquad != null && inspSquad.alive) return inspSquad.name + ": tap where to go";
+                return w.roles.commandsFormations() ? "Tap a formation or a squad, then where it goes" : "Tap one of your squads, then where it goes";
+            default: return null;
+        }
+    }
+
+    /** Rows of (id, label) pairs for the current tool's options; an id starting with "x:" is shown greyed. */
     private String[][] palette() {
         switch (tool) {
             case "dead": {
@@ -934,24 +1342,23 @@ public final class Game {
                     for (String h : t.homes) if (h.equals("police")) home = true;
                     if (!home || f.pool == null) continue;
                     int have = f.pool[t.units[0].index] / Math.max(1, t.units.length);
-                    row.add("send:" + t.id);
+                    // what the station hasn't got is shown greyed, not offered
+                    row.add((have > 0 ? "send:" : "x:") + t.id);
                     row.add(t.name + " (" + have + ")");
                 }
-                row.add("o:hint");
-                row.add("Pick, then tap where");
                 return new String[][]{row.toArray(new String[0])};
             }
             case "map": {
-                String[] row1 = {"m:jump", cam.zoom > cam.minZoom * 1.5f ? "Whole country" : "Back", "ov:0", "Plain", "ov:1", "Infection", "ov:2", "Utilities"};
+                String[] row1 = {"m:jump", cam.zoom > cam.fitZoom() * 1.5f ? "Whole country" : "Back to where I was", "ov:0", "Plain", "ov:1", "Infection", "ov:2", "Utilities"};
                 String[] row2 = {"ov:3", "Supplies", "ov:4", "Trust", "ov:5", "Forces", "ov:6", "Deaths", "ov:7", "Peak"};
                 return new String[][]{row1, row2};
             }
             case "orders":
                 if (inspFormation != null && inspFormation.alive)
-                    return new String[][]{{"o:hint", Forces.shortName(inspFormation) + " (" + inspFormation.strength() + "): tap where to hold", "o:frelease", "Release", "o:fdone", "Done"}};
+                    return new String[][]{{"o:frelease", "Release", "o:fdone", "Done"}};
                 if (inspSquad != null && inspSquad.alive)
-                    return new String[][]{{"o:hint", inspSquad.name + ": tap where to go", "o:release", "Release", "o:home", "Home"}};
-                return new String[][]{{"o:hint", "Tap a squad, then tap where it should go"}};
+                    return new String[][]{{"o:release", "Release", "o:home", "Send home"}};
+                return new String[][]{{}};
             case "erase":
                 return new String[][]{{"b:10", "Small", "b:50", "Medium", "b:250", "Large"}};
             default:
@@ -974,42 +1381,118 @@ public final class Game {
         return false;
     }
 
+    /** The tools (a bar along the bottom, or a rail down the left side), and the current tool's options. */
     private void bottomBars(Gfx g) {
         int W = g.width(), H = g.height();
         String[] ts = tools();
-        toolbarH = ui.dp(54);
+        if (landscape) {
+            g.color(Ui.BAR);
+            g.fillRect(0, topH, railW, H - topH);
+            g.color(0x20FFFFFF);
+            g.fillRect(railW - 1, topH, 1, H - topH);
+            ui.block(0, topH, railW, H - topH);
+            float bh = Math.min(ui.dp(58), (H - topH - ui.dp(8)) / ts.length);
+            for (int i = 0; i < ts.length; i++) toolButton(ts[i], ui.dp(4), topH + ui.dp(4) + i * bh, railW - ui.dp(8), bh - ui.dp(2));
+            if (inspectorOpen()) {
+                inspector(g, W - sheetW, topH, sheetW, H - topH);
+                return;
+            }
+            String[][] rows = palette();
+            if (rows == null) return;
+            sidePalette(g, rows, railW, topH, paletteW, H - topH);
+            return;
+        }
+        toolbarH = ui.dp(60);
         float y = H - toolbarH;
-        g.color(0xE0101318);
+        g.color(Ui.BAR);
         g.fillRect(0, y, W, toolbarH);
+        g.color(0x20FFFFFF);
+        g.fillRect(0, y, W, 1);
         ui.block(0, y, W, toolbarH);
         float bw = (W - ui.dp(8)) / ts.length;
-        for (int i = 0; i < ts.length; i++)
-            ui.button("tool:" + ts[i], ui.dp(4) + i * bw + ui.dp(2), y + ui.dp(6), bw - ui.dp(4), toolbarH - ui.dp(12), toolName(ts[i]),
-                    ts[i].equals(tool) || (ts[i].equals("fire") && w.strat.playerFire), 12);
+        for (int i = 0; i < ts.length; i++) toolButton(ts[i], ui.dp(4) + i * bw + ui.dp(1), y + ui.dp(4), bw - ui.dp(2), toolbarH - ui.dp(8));
         if (inspectorOpen()) {
-            inspector(g, y);
+            inspector(g, 0, 0, W, y);
             return;
         }
         String[][] rows = palette();
         if (rows == null) return;
+        float ph = paletteFixedH();
+        float py = y - ph;
+        g.color(0xEC121820);
+        g.fillRect(0, py, W, ph);
+        g.color(0x18FFFFFF);
+        g.fillRect(0, py, W, 1);
+        ui.block(0, py, W, ph);
+        String cap = paletteCaption();
+        if (cap != null) {
+            g.color(Ui.DIM);
+            g.text(Ui.fit(g, cap, W - ui.dp(20), ui.dp(Ui.S + 0.5f), false), ui.dp(10), py + ui.dp(16), ui.dp(Ui.S + 0.5f), Gfx.ALIGN_LEFT, false);
+        }
         float rh = ui.dp(46);
-        float py = y - rh * rows.length - ui.dp(6);
-        g.color(0xD0101318);
-        g.fillRect(0, py, W, rh * rows.length + ui.dp(6));
-        ui.block(0, py, W, rh * rows.length + ui.dp(6));
-        for (int r = 0; r < rows.length; r++) {
-            String[] row = rows[r];
-            int n = row.length / 2;
-            float cw = (W - ui.dp(8)) / n;
-            for (int i = 0; i < n; i++) {
-                String id = row[i * 2], label = row[i * 2 + 1];
-                if (id.endsWith(":hint")) {
-                    g.color(Ui.DIM);
-                    g.text(label, ui.dp(8) + i * cw + cw / 2, py + ui.dp(6) + r * rh + rh / 2 + ui.dp(3), ui.dp(12), Gfx.ALIGN_CENTER, false);
-                    continue;
-                }
-                ui.button(id, ui.dp(4) + i * cw + ui.dp(2), py + ui.dp(6) + r * rh, cw - ui.dp(4), rh - ui.dp(6), label, paletteOn(id), 12);
+        for (int r = 0; r < rows.length; r++) paletteRow(g, rows[r], ui.dp(4), py + ui.dp(22) + r * rh, W - ui.dp(8), rh - ui.dp(6));
+    }
+
+    private void toolButton(String t, float x, float y, float w2, float h) {
+        if (t.equals("fire")) {
+            // not a tool but a switch: firing at will or holding fire
+            boolean on = w.strat.playerFire;
+            g0Fill(x, y, w2, h, on ? 0xFF2E5A34 : 0xFF3A2A2A);
+            ui.iconButton("tool:fire", x, y, w2, h, "fire", on ? "Firing" : "Hold fire", false);
+            return;
+        }
+        ui.iconButton("tool:" + t, x, y, w2, h, t, toolName(t), t.equals(tool));
+    }
+
+    private void g0Fill(float x, float y, float w2, float h, int c) {
+        ui.g.color(c);
+        ui.g.fillRoundRect(x, y, w2, h, ui.dp(10));
+    }
+
+    /** One row of options across a width: each as wide as its label wants, all filling the row. */
+    private void paletteRow(Gfx g, String[] row, float x, float y, float wdt, float h) {
+        int n = row.length / 2;
+        if (n == 0) return;
+        float ts = ui.dp(12.5f), gap = ui.dp(4), min = ui.dp(52);
+        float want = 0;
+        for (int i = 0; i < n; i++) want += Math.max(min, g.textWidth(row[i * 2 + 1], ts, true) + ui.dp(18));
+        float k = (wdt - gap * (n - 1)) / want;
+        float bx = x;
+        for (int i = 0; i < n; i++) {
+            float bw = Math.max(min, g.textWidth(row[i * 2 + 1], ts, true) + ui.dp(18));
+            bw = k < 1 ? (wdt - gap * (n - 1)) / n : bw * k;
+            option(row[i * 2], row[i * 2 + 1], bx, y, bw, h);
+            bx += bw + gap;
+        }
+    }
+
+    private void option(String id, String label, float x, float y, float bw, float h) {
+        if (id.startsWith("x:")) ui.disabled(x, y, bw, h, label, 12.5f);
+        else ui.button(id, x, y, bw, h, label, paletteOn(id), 12.5f);
+    }
+
+    /** The options as a panel beside the rail (landscape): two columns. */
+    private void sidePalette(Gfx g, String[][] rows, float x, float y, float wdt, float h) {
+        g.color(0xEC121820);
+        g.fillRect(x, y, wdt, h);
+        g.color(0x18FFFFFF);
+        g.fillRect(x + wdt - 1, y, 1, h);
+        ui.block(x, y, wdt, h);
+        String cap = paletteCaption();
+        float yy = y + ui.dp(8);
+        // sideways the rail has no room for names: the tool's name heads its options
+        g.color(Ui.TEXT);
+        g.text(toolName(tool), x + ui.dp(10), yy + ui.dp(16), ui.dp(Ui.L), Gfx.ALIGN_LEFT, true);
+        yy += ui.dp(22);
+        if (cap != null) yy += ui.wrap(cap, x + ui.dp(10), yy + ui.dp(10), wdt - ui.dp(20), ui.dp(Ui.S + 0.5f), Ui.DIM, 3) + ui.dp(6);
+        float bw = (wdt - ui.dp(24)) / 2, bh = ui.dp(40);
+        int k = 0;
+        for (String[] row : rows) {
+            for (int i = 0; i < row.length / 2; i++) {
+                option(row[i * 2], row[i * 2 + 1], x + ui.dp(8) + (k % 2) * (bw + ui.dp(8)), yy + (k / 2) * (bh + ui.dp(6)), bw, bh);
+                k++;
             }
+            if (k % 2 == 1) k++;
         }
     }
 
@@ -1029,12 +1512,37 @@ public final class Game {
         }
     }
 
-    private void inspector(Gfx g, float bottom) {
+    // the inspector's bars: label, fraction, colour, value text
+    private final String[] barLabel = new String[4], barText = new String[4];
+    private final float[] barFrac = new float[4];
+    private final int[] barCol = new int[4];
+    private int bars;
+    private String inspIcon = "look";
+    private int inspIconCol = Ui.TEXT;
+
+    private void bar(String label, float frac, int col, String text) {
+        if (bars >= 4) return;
+        barLabel[bars] = label;
+        barFrac[bars] = Math.max(0, Math.min(1, frac));
+        barCol[bars] = col;
+        barText[bars] = text;
+        bars++;
+    }
+
+    private static int healthCol(float f) {
+        return f > 0.6f ? 0xFF5CC86A : f > 0.3f ? 0xFFE0C040 : 0xFFE04848;
+    }
+
+    /** Who or what was tapped, as a sheet: a bottom sheet in portrait (above the tools), a side sheet in landscape. */
+    private void inspector(Gfx g, float sx, float top, float sw, float bottom) {
         int W = g.width();
         float m = ui.dp(10);
         String title = "", sub = "";
         StringBuilder body = new StringBuilder();
         String[] actions;
+        bars = 0;
+        inspIcon = "look";
+        inspIconCol = Ui.TEXT;
         Ents e = w.e;
         if (inspEnt >= 0) {
             int i = inspEnt;
@@ -1043,27 +1551,32 @@ public final class Game {
                 return;
             }
             title = w.nameOf(i);
+            float hp = Math.max(0, e.hp[i]) / Math.max(1, e.maxHp[i]);
             if (e.kind[i] == Ents.ZOMBIE) {
                 Content.ZType t = w.ztypeOf(i);
-                sub = e.loc[i] == Ents.BODY ? "Destroyed" : "One of the dead";
-                body.append("Health ").append((int) Math.max(0, e.hp[i])).append(" of ").append((int) e.maxHp[i]);
-                if ((e.flags[i] & Ents.F_HELMET) != 0) body.append(". Wearing a helmet");
-                if (t.smash) body.append(". Smashes through things");
+                inspIcon = "dead";
+                inspIconCol = 0xFFFF7A6A;
+                sub = e.loc[i] == Ents.BODY ? "Destroyed" : title.equals(t.name) ? "One of the dead" : t.name;
+                bar("Health", hp, 0xFFB03030, (int) Math.max(0, e.hp[i]) + " of " + (int) e.maxHp[i]);
+                if ((e.flags[i] & Ents.F_HELMET) != 0) body.append("Wearing a helmet. ");
+                if (t.smash) body.append("Smashes through things. ");
             } else {
                 Content.Unit u = w.unitOf(i);
+                inspIcon = e.kind[i] == Ents.COP ? "police" : e.kind[i] == Ents.SOLDIER ? "army" : "people";
+                inspIconCol = e.kind[i] == Ents.COP ? 0xFF7FA8FF : e.kind[i] == Ents.SOLDIER ? WorldView.C_ARMY : WorldView.C_CIV;
                 sub = u.name + (u.agency.length() > 0 ? ", " + u.agency : "");
                 if (e.loc[i] == Ents.BODY) sub = "Killed. " + sub;
-                body.append("Health ").append((int) Math.max(0, e.hp[i])).append(" of ").append((int) e.maxHp[i]);
-                if (u.weapon != null) body.append(". ").append(u.weapon.name).append(", ").append(e.ammo[i]).append(" rounds");
-                if (e.kills[i] > 0) body.append(". ").append(e.kills[i]).append(" kills");
-                if ((e.flags[i] & Ents.F_INFECTED) != 0) body.append(". Bitten and infected");
+                bar("Health", hp, healthCol(hp), (int) Math.max(0, e.hp[i]) + " of " + (int) e.maxHp[i]);
+                if (u.weapon != null) bar("Ammo", e.ammo[i] / (float) Math.max(1, u.weapon.ammo), 0xFFE0C040, e.ammo[i] + " rounds, " + u.weapon.name);
+                if (e.kills[i] > 0) body.append(e.kills[i]).append(" kills. ");
+                if ((e.flags[i] & Ents.F_INFECTED) != 0) body.append("Bitten and infected. ");
                 if (e.squad[i] >= 0) {
                     Squads.Squad s = w.sq.get(e.squad[i]);
-                    body.append(". ").append(s.name).append(" (").append(s.label).append("): ").append(Squads.ORDER_NAMES[s.order]);
+                    body.append(s.name).append(" (").append(s.label).append("): ").append(Squads.ORDER_NAMES[s.order]).append(". ");
                 }
                 if (e.kind[i] == Ents.CIV && i != w.playerEnt) {
                     String[] st = {"Out and about", "Fleeing", "Heading for shelter", "Evacuating", "Going home", ""};
-                    body.append(". ").append(st[Math.min(5, e.state[i])]);
+                    body.append(st[Math.min(5, e.state[i])]).append(". ");
                 }
             }
             boolean squadable = e.squad[i] >= 0 && w.mode != World.MODE_SURVIVOR;
@@ -1077,44 +1590,51 @@ public final class Game {
                 return;
             }
             Content.VType t = vs.type(v);
+            inspIcon = t.faction.equals("police") ? "police" : t.faction.equals("army") ? "army" : "send";
+            inspIconCol = t.faction.equals("police") ? 0xFF7FA8FF : t.faction.equals("army") ? WorldView.C_ARMY : 0xFFE3B21F;
             title = t.name + " " + Names.callsign(t.faction.equals("police") ? Ents.COP : Ents.SOLDIER, vs.uid[v]);
             sub = Vehicles.STATE_NAMES[vs.state[v]] + (vs.siren[v] ? ", lights and siren" : "");
-            body.append("Condition ").append((int) Math.max(0, vs.hp[v] * 100 / t.hp)).append("%. Fuel ").append((int) (vs.fuel[v] * 100)).append("%");
-            if (t.seats > 0) body.append(". Aboard ").append(vs.crewN[v]).append(" of ").append(t.seats);
-            if (vs.kills[v] > 0) body.append(". ").append(vs.kills[v]).append(" kills");
+            float cond = Math.max(0, vs.hp[v]) / t.hp;
+            bar("Condition", cond, healthCol(cond), (int) (cond * 100) + "%");
+            bar("Fuel", vs.fuel[v], 0xFFC08040, (int) (vs.fuel[v] * 100) + "%");
+            if (t.seats > 0) bar("Aboard", vs.crewN[v] / (float) t.seats, 0xFF7FA8FF, vs.crewN[v] + " of " + t.seats);
+            if (vs.kills[v] > 0) body.append(vs.kills[v]).append(" kills. ");
             if (vs.squad[v] >= 0) {
                 Squads.Squad s = w.sq.get(vs.squad[v]);
-                body.append(". ").append(s.name).append(": ").append(Squads.ORDER_NAMES[s.order]);
+                body.append(s.name).append(": ").append(Squads.ORDER_NAMES[s.order]).append(". ");
             }
             actions = new String[]{"i:followv", cam.followVehicle == v ? "Stop following" : "Follow", "i:close", "Close"};
         } else if (inspFac >= 0) {
             Region.Facility f = w.r.facilities.get(inspFac);
             title = f.name;
             boolean on = w.strat.online[f.id];
+            inspIcon = f.kind == Region.F_POLICE ? "police" : f.kind == Region.F_BASE || f.kind == Region.F_ARMORY ? "army" : "town";
+            inspIconCol = on ? Ui.TEXT : 0xFFFF7A6A;
             sub = on ? "Working" : "Overrun";
-            if (f.kind == Region.F_POWER) body.append(on ? "Powering " : "Was powering ").append(w.strat.gridName(f.grid));
-            if (f.kind == Region.F_POLICE || f.kind == Region.F_BASE || f.kind == Region.F_ARMORY)
-                body.append("Ammunition in store: ").append((int) f.ammo).append(" rounds. Waiting here: ")
-                        .append(w.forces.armedAt(f, Ents.COP) + w.forces.armedAt(f, Ents.SOLDIER));
-            if (f.kind == Region.F_HOSPITAL) body.append(on ? "Taking in the bitten" : "The sick inside have turned");
-            if (f.kind == Region.F_FUEL) body.append(on ? "Refuelling the town's vehicles" : "Vehicles here can't refuel");
-            if (f.food > 0 || f.fuel > 0 || f.med > 0) {
-                body.append(body.length() > 0 ? ". " : "").append("In store:");
-                if (f.food > 0) body.append(" food for ").append(fmt((int) f.food)).append(" person-days");
-                if (f.fuel > 0) body.append(f.food > 0 ? "," : "").append(" ").append((int) f.fuel).append(" t of fuel");
-                if (f.med > 0) body.append(f.food > 0 || f.fuel > 0 ? "," : "").append(" ").append((int) f.med).append(" doses of medicine");
+            if (f.kind == Region.F_POWER) body.append(on ? "Powering " : "Was powering ").append(w.strat.gridName(f.grid)).append(". ");
+            if (f.kind == Region.F_POLICE || f.kind == Region.F_BASE || f.kind == Region.F_ARMORY) {
+                int waiting = w.forces.armedAt(f, Ents.COP) + w.forces.armedAt(f, Ents.SOLDIER);
+                bar("Ammo", (float) Math.log10(1 + f.ammo) / 5, 0xFFE0C040, (int) f.ammo + " rounds");
+                body.append(waiting).append(" waiting here. ");
             }
+            if (f.kind == Region.F_HOSPITAL) body.append(on ? "Taking in the bitten. " : "The sick inside have turned. ");
+            if (f.kind == Region.F_FUEL) body.append(on ? "Refuelling the town's vehicles. " : "Vehicles here can't refuel. ");
+            if (f.food > 0) bar("Food", (float) Math.log10(1 + f.food) / 6, 0xFF60C060, fmt((int) f.food) + " person-days");
+            if (f.fuel > 0) bar("Fuel", (float) Math.log10(1 + f.fuel) / 4, 0xFFC08040, (int) f.fuel + " t");
+            if (f.med > 0) bar("Medicine", (float) Math.log10(1 + f.med) / 4, 0xFFE0E0F0, (int) f.med + " doses");
             actions = new String[]{"i:close", "Close"};
         } else if (inspSettle >= 0) {
             Region.Settlement s = w.r.settlements.get(inspSettle);
-            title = s.name;
+            title = (s.capital ? "★ " : "") + s.name;
+            inspIcon = "town";
             sub = (s.capital ? "Capital" : Region.SNAMES[s.kind]) + (s.state >= 0 && s.state < w.r.states.size() ? ", " + w.r.states.get(s.state).name : "")
                     + (w.gov.evacuating(s.id) ? ", evacuating" : "") + (w.roles.quarantined(s.id) ? ", QUARANTINED" : "")
                     + (w.disp.perimeterMode(s.id) ? ", under a police cordon" : "");
-            body.append("Home to ").append(WorldView.people(s.residents)).append(". Still here: ").append(WorldView.people(w.stats.popBySettlement[s.id]))
-                    .append(". The dead here: ").append(WorldView.people(w.stats.zBySettlement[s.id]));
-            if (s.grid >= 0) body.append(w.strat.gridOn[s.grid] ? ". Power on" : ". No power");
-            body.append(". The people are ").append(w.media.mood(s.id));
+            int still = w.stats.popBySettlement[s.id], dead = w.stats.zBySettlement[s.id];
+            bar("People", still / (float) Math.max(1, s.residents), WorldView.C_CIV, WorldView.people(still) + " of " + WorldView.people(s.residents));
+            bar("The dead", dead <= 0 ? 0 : (float) Math.log10(1 + dead) / 6, 0xFFE04848, WorldView.people(dead));
+            if (s.grid >= 0) body.append(w.strat.gridOn[s.grid] ? "Power on. " : "No power. ");
+            body.append("The people are ").append(w.media.mood(s.id));
             if (w.society.militia[s.id] > 0) body.append(", ").append(w.society.militia[s.id]).append(" in militias");
             body.append(w.command.describe(s.id));
             boolean town = s.kind == Region.S_CITY || s.kind == Region.S_TOWN;
@@ -1144,12 +1664,17 @@ public final class Game {
                 return;
             }
             title = f.name;
+            inspIcon = f.faction == Ents.COP ? "police" : "army";
+            inspIconCol = f.faction == Ents.COP ? 0xFF7FA8FF : WorldView.C_ARMY;
             sub = Forces.STATES[f.state] + (f.player ? ", under your command" : f.task >= 0 ? ", sent to " + w.r.settlements.get(f.task).name : "");
-            body.append(f.strength()).append(f.faction == Ents.COP ? " officers" : " soldiers").append(" (").append(f.deployed).append(" out in squads)");
+            float frac = f.start > 0 ? f.strength() / (float) f.start : 1;
+            bar("Strength", frac, healthCol(frac), f.strength() + (f.faction == Ents.COP ? " officers" : " soldiers"));
+            bar("Ammo", (float) Math.log10(1 + f.hq.ammo) / 5, 0xFFE0C040, (int) f.hq.ammo + " rounds");
+            body.append(f.deployed).append(" out in squads");
             Content.VType tank = w.c.vtype("tank");
             if (tank != null && f.hq.vpool[tank.index] + f.tanksOut > 0) body.append(", ").append(f.hq.vpool[tank.index] + f.tanksOut).append(" tanks");
             if (f.t.guns > 0) body.append(", ").append(f.t.guns).append(" guns");
-            body.append(". ").append(fmt(f.kills)).append(" of the dead destroyed, ").append(f.losses).append(" lost. Ammunition ").append((int) f.hq.ammo);
+            body.append(". ").append(fmt(f.kills)).append(" of the dead destroyed, ").append(f.losses).append(" lost.");
             actions = new String[]{"i:fcommand", "Command it", "i:close", "Close"};
         } else {
             Squads.Squad s = inspSquad;
@@ -1159,24 +1684,72 @@ public final class Game {
                 return;
             }
             title = s.name + " (" + s.label + ")";
+            inspIcon = s.faction == Ents.COP ? "police" : "army";
+            inspIconCol = s.faction == Ents.COP ? 0xFF7FA8FF : WorldView.C_ARMY;
             sub = Squads.ORDER_NAMES[s.order] + ", " + s.n + (s.faction == Ents.COP ? " officers" : " soldiers");
             body.append(s.kills).append(" kills, ").append(s.losses).append(" lost");
             actions = new String[]{"i:squad", "Give orders", "i:close", "Close"};
         }
-        float textW = W - m * 4;
-        int bl = Ui.lines(ui.g, body.toString(), textW, ui.dp(12));
-        inspectorH = ui.dp(64) + bl * ui.dp(15.6f) + ui.dp(48);
-        float y = bottom - inspectorH;
-        ui.panel(m, y, W - m * 2, inspectorH - ui.dp(6));
+        String text = body.toString().trim();
+        float pad = ui.dp(14);
+        float textW = sw - (landscape ? m : m * 2) - pad * 2;
+        int bl = text.length() == 0 ? 0 : Ui.lines(ui.g, text, textW, ui.dp(12.5f));
+        float barH = ui.dp(26);
+        float contentH = ui.dp(58) + bars * barH + (bl > 0 ? bl * ui.dp(16.5f) + ui.dp(6) : 0) + ui.dp(60);
+        float x, y, pw, ph;
+        if (landscape) {
+            x = sx + ui.dp(4);
+            y = top + ui.dp(6);
+            pw = sw - ui.dp(10);
+            ph = Math.min(bottom - ui.dp(12), contentH);
+        } else {
+            inspectorH = Math.min(contentH, g.height() * 0.45f) + ui.dp(4);
+            x = m;
+            y = bottom - inspectorH;
+            pw = W - m * 2;
+            ph = inspectorH - ui.dp(6);
+        }
+        ui.panel(x, y, pw, ph);
+        // the header: an icon, the name, what it is
+        g.color(0xFF232C38);
+        g.fillCircle(x + pad + ui.dp(15), y + ui.dp(28), ui.dp(16));
+        Icons.draw(g, inspIcon, x + pad + ui.dp(15), y + ui.dp(28), ui.dp(18), inspIconCol);
+        float tx = x + pad + ui.dp(40);
         g.color(Ui.TEXT);
-        g.text(title, m * 2, y + ui.dp(24), ui.dp(16), Gfx.ALIGN_LEFT, true);
+        g.text(Ui.fit(g, title, pw - (tx - x) - pad - ui.dp(36), ui.dp(Ui.L + 1), true), tx, y + ui.dp(25), ui.dp(Ui.L + 1), Gfx.ALIGN_LEFT, true);
         g.color(Ui.DIM);
-        g.text(sub, m * 2, y + ui.dp(42), ui.dp(12), Gfx.ALIGN_LEFT, false);
-        ui.wrap(body.toString(), m * 2, y + ui.dp(62), textW, ui.dp(12), Ui.TEXT, 10);
-        int n = actions.length / 2;
-        float aw = (W - m * 4 - ui.dp(8) * (n - 1)) / n;
-        for (int k = 0; k < n; k++)
-            ui.button(actions[k * 2], m * 2 + k * (aw + ui.dp(8)), y + inspectorH - ui.dp(50), aw, ui.dp(38), actions[k * 2 + 1], false, 13);
+        g.text(Ui.fit(g, sub, pw - (tx - x) - pad, ui.dp(12), false), tx, y + ui.dp(43), ui.dp(12), Gfx.ALIGN_LEFT, false);
+        ui.button("i:close", x + pw - ui.dp(40), y + ui.dp(8), ui.dp(32), ui.dp(32), "✕", false, 13);
+        float yy = y + ui.dp(60);
+        // the bars
+        for (int k = 0; k < bars; k++) {
+            float lw = ui.dp(72);
+            g.color(Ui.DIM);
+            g.text(barLabel[k], x + pad, yy + ui.dp(12), ui.dp(12), Gfx.ALIGN_LEFT, false);
+            float bx = x + pad + lw, bw = pw - pad * 2 - lw;
+            g.color(0xFF2A333F);
+            g.fillRoundRect(bx, yy + ui.dp(3), bw, ui.dp(11), ui.dp(5));
+            g.color(barCol[k]);
+            if (barFrac[k] > 0) g.fillRoundRect(bx, yy + ui.dp(3), Math.max(ui.dp(10), bw * barFrac[k]), ui.dp(11), ui.dp(5));
+            g.color(0xFFFFFFFF);
+            g.textHalo(Ui.fit(g, barText[k], bw - ui.dp(10), ui.dp(Ui.S), true), bx + ui.dp(6), yy + ui.dp(12), ui.dp(Ui.S), Gfx.ALIGN_LEFT, true, 0xA0000000, ui.dp(1));
+            yy += barH;
+        }
+        if (bl > 0) {
+            int maxLines = Math.max(1, (int) ((y + ph - ui.dp(60) - yy) / ui.dp(16.5f)));
+            yy += ui.wrap(text, x + pad, yy + ui.dp(13), textW, ui.dp(12.5f), Ui.TEXT, maxLines) + ui.dp(6);
+        }
+        // the actions (Close is the button in the corner)
+        int n = 0;
+        for (int k = 0; k < actions.length / 2; k++) if (!actions[k * 2].equals("i:close")) n++;
+        if (n == 0) return;
+        float aw = (pw - pad * 2 - ui.dp(8) * (n - 1)) / n;
+        int q = 0;
+        for (int k = 0; k < actions.length / 2; k++) {
+            if (actions[k * 2].equals("i:close")) continue;
+            ui.button(actions[k * 2], x + pad + q * (aw + ui.dp(8)), y + ph - ui.dp(52), aw, ui.dp(40), actions[k * 2 + 1], q == 0, 13);
+            q++;
+        }
     }
 
     // ------------------------------------------------------------------ the end
@@ -1199,7 +1772,7 @@ public final class Game {
 
     private void joystick(Gfx g) {
         float r = ui.dp(54);
-        float cx = ui.dp(24) + r, cy = g.height() - toolbarH - ui.dp(24) - r;
+        float cx = freeL + ui.dp(24) + r, cy = freeB - ui.dp(24) - r;
         joyCX = cx;
         joyCY = cy;
         g.color(0x50000000);
@@ -1216,63 +1789,106 @@ public final class Game {
 
     private void pause(Gfx g) {
         int W = g.width(), H = g.height();
-        g.color(0xB0000000);
+        g.color(0xC0000000);
         g.fillRect(0, 0, W, H);
-        float pw = Math.min(W - ui.dp(40), ui.dp(380));
-        float x = (W - pw) / 2, bh = ui.dp(44), gap = ui.dp(8);
-        String[][] items = {{"resume", "Resume"}, {"report", "Report"}, {"save", "Save"}, {"loadp", "Load"}, {"radio", "Radio log"},
+        ui.block(0, 0, W, H);
+        boolean land = W > H * 1.15f;
+        float pw = Math.min(W - ui.dp(32), ui.dp(land ? 560 : 380));
+        float bh = ui.dp(44), gap = ui.dp(8);
+        String[][] items = {{"report", "Report"}, {"radio", "Radio log"}, {"save", "Save"}, {"loadp", "Load"},
                 {"timelapse", "Timelapse"}, {"savereplay", "Save replay"}, {"sharecode", "Challenge code"}, {"players", "Players"},
                 {"settings", "Settings"}, {"shot", "Screenshot"}, {"hideui", "Hide buttons"}, {"tomenu", "Quit to the menu"}};
-        int rows = (items.length + 1) / 2;
-        float ph = rows * (bh + gap) + ui.dp(76);
-        float y = (H - ph) / 2;
-        ui.panel(x - ui.dp(12), y, pw + ui.dp(24), ph);
+        int cols = land ? 3 : 2;
+        int rows = (items.length + cols - 1) / cols;
+        float ph = ui.dp(66) + ui.dp(56) + gap + rows * (bh + gap) + ui.dp(8);
+        ph = Math.min(ph, H - ui.dp(16));
+        float x = (W - pw) / 2, y = (H - ph) / 2;
+        ui.panel(x, y, pw, ph);
         g.color(Ui.TEXT);
-        g.text("Paused", W / 2f, y + ui.dp(30), ui.dp(20), Gfx.ALIGN_CENTER, true);
+        g.text("Paused", x + pw / 2, y + ui.dp(30), ui.dp(Ui.XL), Gfx.ALIGN_CENTER, true);
         g.color(Ui.DIM);
-        String line = w.r.name + (w.scenario != null ? ", " + w.scenario.name : "") + ". " + w.roles.label();
-        float ts = ui.dp(11);
-        while (g.textWidth(line, ts, false) > pw && ts > ui.dp(7)) ts *= 0.92f;
-        g.text(line, W / 2f, y + ui.dp(52), ts, Gfx.ALIGN_CENTER, false);
-        y += ui.dp(66);
-        float half = (pw - gap) / 2;
+        String line = w.r.name + (w.scenario != null ? ", " + w.scenario.name : "") + ". " + w.roles.label() + ". " + w.clock();
+        g.text(Ui.fit(g, line, pw - ui.dp(24), ui.dp(Ui.S + 0.5f), false), x + pw / 2, y + ui.dp(52), ui.dp(Ui.S + 0.5f), Gfx.ALIGN_CENTER, false);
+        float yy = y + ui.dp(66), ix = x + ui.dp(14), iw = pw - ui.dp(28);
+        // the main thing: carry on
+        ui.bigButton("resume", ix, yy, iw, ui.dp(52), "Resume", Ui.ON);
+        yy += ui.dp(52) + gap + ui.dp(4);
+        float cw = (iw - gap * (cols - 1)) / cols;
         for (int k = 0; k < items.length; k++) {
-            ui.button(items[k][0], x + (k % 2) * (half + gap), y + (k / 2) * (bh + gap), half, bh, items[k][1], false, 13);
+            boolean quit = items[k][0].equals("tomenu");
+            ui.button(items[k][0], ix + (k % cols) * (cw + gap), yy + (k / cols) * (bh + gap), cw, bh, items[k][1], false, 13);
+            if (quit) {
+                g.color(0x60E0453A);
+                g.fillRect(ix + (k % cols) * (cw + gap) + ui.dp(6), yy + (k / cols) * (bh + gap) + bh - ui.dp(2), cw - ui.dp(12), ui.dp(2));
+            }
         }
     }
 
     private void settingsScreen(Gfx g) {
         int W = g.width(), H = g.height();
-        g.color(0xFF0E1116);
+        g.color(Ui.SCREEN);
         g.fillRect(0, 0, W, H);
-        float m = ui.dp(14);
-        ui.button("back", m, ui.dp(10), ui.dp(70), ui.dp(34), "Back", false, 13);
-        ui.title("Settings", m + ui.dp(84), ui.dp(34));
+        float m = ui.dp(16);
         Settings s = settings;
+        // sections of rows: switches for on/off, a value button for the rest
         String[][] rows = {
-                {"set:sound", "Sound", s.sound + "%"},
+                {"#", "Sound"},
+                {"set:sound", "Sound effects", s.sound + "%"},
                 {"set:music", "Music", s.music + "%"},
-                {"set:lean3d", "Buildings", s.lean3d ? "3D" : "Flat"},
-                {"set:realistic", "Ground", s.realistic ? "Textured" : "Plain"},
-                {"set:blood", "Blood", s.blood ? "On" : "Off"},
-                {"set:health", "Health bars", s.healthBars ? "On" : "Off"},
-                {"set:names", "Place names", s.names ? "On" : "Off"},
-                {"set:radio", "Radio messages", s.radio ? "On" : "Off"},
-                {"set:minimap", "Minimap", s.minimap ? "On" : "Off"},
-                {"set:max", "People simulated in detail", WorldView.fmt(s.maxIndividuals)},
-                {"set:threads", "Simulation threads", s.threads == 0 ? "Auto (" + s.simThreads() + ")" : "" + s.threads},
+                {"set:vibrate", "Vibration", "?" + s.vibrate},
+                {"#", "The map"},
+                {"set:lean3d", "Buildings stand up (3D)", "?" + s.lean3d},
+                {"set:realistic", "Textured ground", "?" + s.realistic},
+                {"set:blood", "Blood", "?" + s.blood},
+                {"set:health", "Health bars", "?" + s.healthBars},
+                {"set:names", "Place names", "?" + s.names},
+                {"#", "On the screen"},
+                {"set:radio", "Radio messages", "?" + s.radio},
+                {"set:minimap", "Minimap", "?" + s.minimap},
                 {"set:ui", "Button size", new String[]{"Small", "Normal", "Large"}[s.uiSize]},
-                {"set:vibrate", "Vibration", s.vibrate ? "On" : "Off"},
-                {"set:gpu", "Renderer (next start)", s.gpu ? "GPU (experimental)" : "Canvas"}};
-        float y = ui.dp(60), rh = ui.dp(48);
-        for (String[] r : rows) {
+                {"set:debug", "Frame rate (for testing)", "?" + s.debug},
+                {"#", "The simulation"},
+                {"set:max", "People in detail", WorldView.fmt(s.maxIndividuals)},
+                {"set:threads", "Threads", s.threads == 0 ? "Auto (" + s.simThreads() + ")" : "" + s.threads},
+                {"set:gpu", "Renderer (next start)", s.gpu ? "GPU (test)" : "Canvas"}};
+        boolean land = W > H * 1.15f;
+        float colW = land ? (W - m * 3) / 2 : W - m * 2;
+        float top = ui.dp(60), rh = ui.dp(46), sh = ui.dp(34);
+        g.save();
+        g.clip(0, ui.dp(54), W, H - ui.dp(54));
+        float y = top - scroll, x = m;
+        int col = 0;
+        float colTop = y;
+        for (int k = 0; k < rows.length; k++) {
+            String[] r = rows[k];
+            if (land && col == 0 && r[0].equals("#") && k > rows.length / 2 && rows[k][1].equals("On the screen")) {
+                col = 1;
+                x = m * 2 + colW;
+                y = colTop;
+            }
+            if (r[0].equals("#")) {
+                y += ui.dp(8);
+                g.color(Ui.ACCENT);
+                g.text(r[1].toUpperCase(), x, y + sh - ui.dp(10), ui.dp(Ui.S + 0.5f), Gfx.ALIGN_LEFT, true);
+                y += sh;
+                continue;
+            }
+            g.color(0xFF18202A);
+            g.fillRoundRect(x, y, colW, rh - ui.dp(4), ui.dp(8));
             g.color(Ui.TEXT);
-            g.text(r[1], m, y + rh / 2 + ui.dp(5), ui.dp(14), Gfx.ALIGN_LEFT, false);
-            ui.button(r[0], W - m - ui.dp(130), y + ui.dp(5), ui.dp(130), rh - ui.dp(10), r[2], false, 13);
+            g.text(Ui.fit(g, r[1], colW - ui.dp(150), ui.dp(Ui.L - 1), false), x + ui.dp(12), y + (rh - ui.dp(4)) / 2 + ui.dp(5), ui.dp(Ui.L - 1), Gfx.ALIGN_LEFT, false);
+            if (r[2].startsWith("?")) ui.toggle(r[0], x, y, colW - ui.dp(10), rh - ui.dp(4), r[2].equals("?true"));
+            else ui.button(r[0], x + colW - ui.dp(128), y + ui.dp(5), ui.dp(120), rh - ui.dp(14), r[2], false, 13);
             y += rh;
         }
-        g.color(Ui.DIM);
-        ui.wrap("More people in detail look better and cost more on a slow phone. The rest are still simulated, as counts.", m, y + ui.dp(20), W - m * 2, ui.dp(12), Ui.DIM, 3);
+        y += ui.dp(6);
+        float ny = ui.wrap("More people in detail look better and cost more on a slow phone. The rest are still simulated, as counts.", m, y + ui.dp(16), W - m * 2, ui.dp(12), Ui.DIM, 3);
+        g.restore();
+        maxScroll = Math.max(0, y + ny + ui.dp(30) + scroll - H);
+        g.color(Ui.SCREEN);
+        g.fillRect(0, 0, W, ui.dp(54));
+        ui.button("back", m, ui.dp(10), ui.dp(70), ui.dp(36), "Back", false, 13);
+        ui.title("Settings", m + ui.dp(84), ui.dp(35));
     }
 
     // ------------------------------------------------------------------ pass-and-play
@@ -1283,7 +1899,7 @@ public final class Game {
     /** Who plays what: the players sharing this game, and adding one. */
     private void players(Gfx g) {
         int W = g.width(), H = g.height();
-        g.color(0xD0000000);
+        g.color(Ui.SCREEN);
         g.fillRect(0, 0, W, H);
         float m = ui.dp(16), y = ui.dp(70), bw = W - m * 2;
         ui.block(0, 0, W, H);
@@ -1292,7 +1908,7 @@ public final class Game {
         Roles ro = w.roles;
         for (int k = 0; k < ro.players; k++) {
             boolean now = k == ro.current;
-            ui.card("pl:" + k, m, y, bw, ui.dp(58), "Player " + (k + 1) + (now ? " (playing now)" : ""), ro.labelOf(k), now);
+            ui.card("pl:" + k, m, y, bw, ui.dp(60), "Player " + (k + 1) + (now ? " (playing now)" : ""), ro.labelOf(k), now);
             y += ui.dp(64);
         }
         y += ui.dp(8);
@@ -1351,43 +1967,40 @@ public final class Game {
 
     private void radio(Gfx g) {
         int W = g.width(), H = g.height();
-        g.color(0xFF0E1116);
+        g.color(Ui.SCREEN);
         g.fillRect(0, 0, W, H);
         float m = ui.dp(12);
         g.save();
         g.clip(0, ui.dp(54), W, H - ui.dp(54));
-        float y = ui.dp(60) - scroll, rh = ui.dp(36);
+        float y = ui.dp(60) - scroll, rh = ui.dp(44);
         List<News.Item> log = w.news.log;
         for (int i = log.size() - 1; i >= 0; i--) {
             News.Item it = log.get(i);
             if (y > -rh && y < H) {
-                int col = it.kind == News.HEADLINE ? 0xFFFFD0A0 : it.kind == News.LOSS ? 0xFFFF9A8A : it.kind == News.COMMAND ? 0xFFFFE08A : it.kind == News.CALL ? 0xFFB0D0FF : Ui.TEXT;
-                int mins = (int) (it.time / 60);
-                String when = "Day " + (1 + (int) ((World.START_HOUR + mins / 60.0) / 24)) + " " + String.format("%02d:%02d", (int) ((World.START_HOUR + it.time / 60.0) % 24), (int) (it.time % 60));
-                g.color(Ui.DIM);
-                g.text(when, m, y + ui.dp(13), ui.dp(10), Gfx.ALIGN_LEFT, false);
-                g.color(col);
-                String t = it.text;
-                float ts = ui.dp(12.5f);
-                while (g.textWidth(t, ts, false) > W - m * 2 && t.length() > 10) t = t.substring(0, t.length() - 4) + "...";
-                g.text(t, m, y + ui.dp(29), ts, Gfx.ALIGN_LEFT, it.kind == News.HEADLINE);
-                if (it.x >= 0) ui.button("goto:" + i, 0, y, W, rh, "", false);
-                if (it.x >= 0) {
-                    // the button paints a background: put the text back on top
-                    g.color(Ui.DIM);
-                    g.text(when + "   (tap to go there)", m, y + ui.dp(13), ui.dp(10), Gfx.ALIGN_LEFT, false);
-                    g.color(col);
-                    g.text(t, m, y + ui.dp(29), ts, Gfx.ALIGN_LEFT, it.kind == News.HEADLINE);
+                int col = it.kind == News.HEADLINE ? 0xFFFFC890 : it.kind == News.LOSS ? 0xFFFF8A7A : it.kind == News.COMMAND ? 0xFFFFD87A : it.kind == News.CALL ? 0xFF9EC4FF : Ui.TEXT;
+                boolean go = it.x >= 0;
+                if (go) ui.button("goto:" + i, m - ui.dp(4), y, W - m * 2 + ui.dp(8), rh - ui.dp(4), "", false);
+                else {
+                    g.color(0xFF141A22);
+                    g.fillRoundRect(m - ui.dp(4), y, W - m * 2 + ui.dp(8), rh - ui.dp(4), ui.dp(8));
                 }
+                g.color(col);
+                g.fillRoundRect(m - ui.dp(4), y + ui.dp(6), ui.dp(3), rh - ui.dp(16), ui.dp(1.5f));
+                String kind = it.kind == News.HEADLINE ? "News" : it.kind == News.LOSS ? "Loss" : it.kind == News.COMMAND ? "Command" : it.kind == News.CALL ? "911" : "Units";
+                g.color(Ui.DIM);
+                g.text(clockAt(it.time) + "  ·  " + kind + (go ? "  ·  tap to go there" : ""), m + ui.dp(6), y + ui.dp(15), ui.dp(Ui.S), Gfx.ALIGN_LEFT, false);
+                g.color(col);
+                float ts = ui.dp(Ui.M);
+                g.text(Ui.fit(g, it.text, W - m * 2 - ui.dp(12), ts, it.kind == News.HEADLINE), m + ui.dp(6), y + ui.dp(32), ts, Gfx.ALIGN_LEFT, it.kind == News.HEADLINE);
             }
-            y += rh + ui.dp(2);
+            y += rh;
         }
         g.restore();
         maxScroll = Math.max(0, y + scroll - H + ui.dp(20));
-        g.color(0xFF0E1116);
+        g.color(Ui.SCREEN);
         g.fillRect(0, 0, W, ui.dp(54));
-        ui.button("back", m, ui.dp(10), ui.dp(70), ui.dp(34), "Back", false, 13);
-        ui.title("Radio log", m + ui.dp(84), ui.dp(34));
+        ui.button("back", m, ui.dp(10), ui.dp(70), ui.dp(36), "Back", false, 13);
+        ui.title("Radio log", m + ui.dp(84), ui.dp(35));
     }
 
     private void slots(Gfx g) {
@@ -1464,45 +2077,87 @@ public final class Game {
             g.text("Contained after " + duration(w.roles.containedAt), m, y + ui.dp(14), ui.dp(11.5f), Gfx.ALIGN_LEFT, false);
             y += ui.dp(16);
         }
-        // the timeline
-        float gh = ui.dp(150), gw = W - m * 2;
-        y += ui.dp(10);
-        g.color(0xFF161C24);
-        g.fillRect(m, y, gw, gh);
+        // the timeline: each line against its own peak (named in the key), days along the bottom
+        float gx = m + ui.dp(30), gw = W - m - gx, gh = ui.dp(160);
+        y += ui.dp(14);
+        g.color(0xFF141A22);
+        g.fillRoundRect(m, y - ui.dp(8), W - m * 2, gh + ui.dp(34), ui.dp(8));
         int n = s.tN;
+        int maxZ = 1, maxA = 1, maxP = 1, maxR = 1;
+        for (int i = 0; i < n; i++) {
+            maxZ = Math.max(maxZ, s.tZombies[i]);
+            maxA = Math.max(maxA, s.tAlive[i]);
+            maxP = Math.max(maxP, s.tPolice[i]);
+            maxR = Math.max(maxR, s.tArmy[i]);
+        }
+        float gy = y + ui.dp(4), gh2 = gh - ui.dp(8);
+        // axes and gridlines: 0, half, peak
+        for (int k = 0; k <= 2; k++) {
+            float ly = gy + gh2 - gh2 * k / 2f;
+            g.color(k == 0 ? 0x60FFFFFF : 0x22FFFFFF);
+            g.fillRect(gx, ly, gw, 1);
+            g.color(0xFF7A8490);
+            g.text(k == 0 ? "0" : k == 1 ? "½" : "peak", gx - ui.dp(4), ly + ui.dp(4), ui.dp(Ui.S - 1), Gfx.ALIGN_RIGHT, false);
+        }
+        g.color(0x60FFFFFF);
+        g.fillRect(gx, gy, 1, gh2);
         if (n >= 2) {
-            int maxZ = 1, maxA = 1, maxU = 1;
-            for (int i = 0; i < n; i++) {
-                maxZ = Math.max(maxZ, s.tZombies[i]);
-                maxA = Math.max(maxA, s.tAlive[i]);
-                maxU = Math.max(maxU, Math.max(s.tPolice[i], s.tArmy[i]));
+            float t0 = s.tTime[0], t1 = Math.max(t0 + 1, s.tTime[n - 1]);
+            // day ticks (or hours, for a short game)
+            float span = t1 - t0;
+            float stepMin = span > 60 * 24 * 3 ? 60 * 24 : span > 60 * 24 ? 60 * 6 : span > 60 * 6 ? 60 : 30;
+            float first = (float) Math.ceil((World.START_HOUR * 60 + t0) / stepMin) * stepMin - World.START_HOUR * 60;
+            int ticks = 0;
+            for (float t = first; t <= t1 && ticks < 40; t += stepMin, ticks++) {
+                float tx = gx + gw * (t - t0) / span;
+                g.color(0x30FFFFFF);
+                g.fillRect(tx, gy, 1, gh2);
+                if (ticks % Math.max(1, (int) (span / stepMin / 6)) == 0) {
+                    g.color(0xFF7A8490);
+                    int hr = (int) ((World.START_HOUR + t / 60) % 24 + 0.01f);
+                    String lab = stepMin >= 60 * 24 || hr == 0 ? "Day " + (1 + (int) ((World.START_HOUR + t / 60 + 0.01f) / 24)) : (hr < 10 ? "0" : "") + hr + ":00";
+                    g.text(lab, tx, gy + gh2 + ui.dp(14), ui.dp(Ui.S - 1), Gfx.ALIGN_CENTER, false);
+                }
             }
-            series(g, s.tAlive, n, maxA, m, y, gw, gh, 0xFFE8E0C8);
-            series(g, s.tPolice, n, maxU, m, y, gw, gh, 0xFF4F8CFF);
-            series(g, s.tArmy, n, maxU, m, y, gw, gh, 0xFF9CC060);
-            series(g, s.tZombies, n, maxZ, m, y, gw, gh, 0xFFE04040);
+            series(g, s.tAlive, s.tTime, n, maxA, gx, gy, gw, gh2, 0xFFE8E0C8, t0, span);
+            series(g, s.tPolice, s.tTime, n, maxP, gx, gy, gw, gh2, 0xFF5A96FF, t0, span);
+            series(g, s.tArmy, s.tTime, n, maxR, gx, gy, gw, gh2, WorldView.C_ARMY, t0, span);
+            series(g, s.tZombies, s.tTime, n, maxZ, gx, gy, gw, gh2, 0xFFE84848, t0, span);
             int tp = s.turningPoint();
             if (tp >= 0) {
-                float tx = m + gw * tp / (n - 1f);
-                g.color(0xA0FFFFFF);
-                g.line(tx, y, tx, y + gh, 1);
+                float tx = gx + gw * (s.tTime[tp] - t0) / span;
+                g.color(0xC0FFFFFF);
+                WorldView.dashedLine(g, tx, gy, tx, gy + gh2, ui.dp(1.2f), ui.dp(4));
+                String lab = "turning point";
+                float lw = g.textWidth(lab, ui.dp(Ui.S), true);
+                float lx = Math.max(gx + ui.dp(2), Math.min(gx + gw - lw - ui.dp(2), tx - lw / 2));
+                g.color(0xFFFFFFFF);
+                g.textHalo(lab, lx, gy + ui.dp(12), ui.dp(Ui.S), Gfx.ALIGN_LEFT, true, 0xE0141A22, ui.dp(2));
             }
         } else {
             g.color(Ui.DIM);
-            g.text("The timeline fills in as the game goes on", m + gw / 2, y + gh / 2, ui.dp(12), Gfx.ALIGN_CENTER, false);
+            g.text("The timeline fills in as the game goes on", gx + gw / 2, gy + gh2 / 2, ui.dp(12), Gfx.ALIGN_CENTER, false);
         }
-        y += gh + ui.dp(16);
-        g.color(0xFFE8E0C8); g.text("people", m, y, ui.dp(11), Gfx.ALIGN_LEFT, true);
-        g.color(0xFFE04040); g.text("the dead", m + ui.dp(60), y, ui.dp(11), Gfx.ALIGN_LEFT, true);
-        g.color(0xFF4F8CFF); g.text("police", m + ui.dp(130), y, ui.dp(11), Gfx.ALIGN_LEFT, true);
-        g.color(0xFF9CC060); g.text("army", m + ui.dp(185), y, ui.dp(11), Gfx.ALIGN_LEFT, true);
+        y += gh + ui.dp(30);
+        // the key, with each line's peak
+        String[] keys = {"people " + WorldView.people(maxA), "the dead " + WorldView.people(maxZ), "police " + fmt(maxP), "army " + fmt(maxR)};
+        int[] kc = {0xFFE8E0C8, 0xFFE84848, 0xFF5A96FF, WorldView.C_ARMY};
+        float kx = m;
+        for (int k = 0; k < 4; k++) {
+            float kw = g.textWidth(keys[k], ui.dp(Ui.S + 0.5f), true) + ui.dp(26);
+            if (kx + kw > W - m) {
+                kx = m;
+                y += ui.dp(18);
+            }
+            g.color(kc[k]);
+            g.fillRoundRect(kx, y - ui.dp(8), ui.dp(14), ui.dp(4), ui.dp(2));
+            g.text(keys[k], kx + ui.dp(18), y, ui.dp(Ui.S + 0.5f), Gfx.ALIGN_LEFT, true);
+            kx += kw;
+        }
         y += ui.dp(18);
         int tp = s.turningPoint();
         if (tp >= 0) {
-            float t = s.tTime[tp];
-            int hh = (int) ((World.START_HOUR + t / 60) % 24), mm = (int) (t % 60);
-            y += ui.wrap("The turning point came on day " + (1 + (int) ((World.START_HOUR + t / 60) / 24)) + " at " + String.format("%02d:%02d", hh, mm)
-                    + ", when the dead grew fastest.", m, y + ui.dp(10), W - m * 2, ui.dp(12.5f), Ui.TEXT, 3) + ui.dp(8);
+            y += ui.wrap("The turning point came on " + clockAt(s.tTime[tp]).replace("  ", " at ") + ", when the dead grew fastest.", m, y + ui.dp(10), W - m * 2, ui.dp(12.5f), Ui.TEXT, 3) + ui.dp(8);
         }
         String[][] nums = {
                 {"People killed", fmt(s.civDeaths)}, {"Infected", fmt(s.infectedTotal)}, {"Most of the dead at once", fmt(s.peakZombies)},
@@ -1542,13 +2197,25 @@ public final class Game {
         g.color(Ui.ACCENT);
         g.text("WHAT HAPPENED", m, y + ui.dp(12), ui.dp(13), Gfx.ALIGN_LEFT, true);
         y += ui.dp(18);
+        String lastEv = null;
+        int repeats = 0;
         for (Stats.Event ev : s.events) {
+            // the same thing twice running is told once
+            if (ev.text.equals(lastEv)) {
+                repeats++;
+                continue;
+            }
+            lastEv = ev.text;
             int mins = (int) (ev.time / 60);
-            String when = "Day " + (1 + (int) ((World.START_HOUR + ev.time / 60) / 24)) + " " + String.format("%02d:%02d", (int) ((World.START_HOUR + ev.time / 60) % 24), (int) (ev.time % 60));
             g.color(Ui.DIM);
-            g.text(when, m, y + ui.dp(12), ui.dp(10.5f), Gfx.ALIGN_LEFT, false);
-            y += ui.wrap(ev.text, m + ui.dp(78), y + ui.dp(12), W - m * 2 - ui.dp(78), ui.dp(11.5f), Ui.TEXT, 3) + ui.dp(4);
+            g.text(clockAt(ev.time), m, y + ui.dp(12), ui.dp(Ui.S), Gfx.ALIGN_LEFT, false);
+            y += ui.wrap(ev.text, m + ui.dp(84), y + ui.dp(12), W - m * 2 - ui.dp(84), ui.dp(12), Ui.TEXT, 3) + ui.dp(5);
             if (mins < 0) break;
+        }
+        if (repeats > 0) {
+            g.color(Ui.DIM);
+            g.text("(" + repeats + " repeated " + (repeats == 1 ? "entry" : "entries") + " left out)", m, y + ui.dp(12), ui.dp(Ui.S), Gfx.ALIGN_LEFT, false);
+            y += ui.dp(18);
         }
         y += ui.dp(12);
         g.color(Ui.ACCENT);
@@ -1684,12 +2351,12 @@ public final class Game {
         }
     }
 
-    private void series(Gfx g, int[] v, int n, int max, float x, float y, float w2, float h, int color) {
+    private void series(Gfx g, int[] v, float[] t, int n, int max, float x, float y, float w2, float h, int color, float t0, float span) {
         g.color(color);
-        float px0 = x, py0 = y + h - (float) Math.sqrt(v[0] / (float) max) * h;
+        float px0 = x, py0 = y + h - v[0] / (float) max * h;
         for (int i = 1; i < n; i++) {
-            float px1 = x + w2 * i / (n - 1f), py1 = y + h - (float) Math.sqrt(v[i] / (float) max) * h;
-            g.line(px0, py0, px1, py1, ui.dp(1.6f));
+            float px1 = x + w2 * (t[i] - t0) / span, py1 = y + h - v[i] / (float) max * h;
+            g.line(px0, py0, px1, py1, ui.dp(1.8f));
             px0 = px1;
             py0 = py1;
         }
@@ -1766,6 +2433,12 @@ public final class Game {
             case "savereplay": dir.saveReplay(); return;
             case "timelapse": back = screen; screen = S_TIMELAPSE; dir.openTimelapse(); return;
             case "resume":
+                if (menuCam && screen == S_MENU) {
+                    cam.cx = keptX;
+                    cam.cy = keptY;
+                    cam.zoom = keptZ;
+                }
+                menuCam = false;
                 if (w != null) screen = S_PLAY;
                 paused = w != null && w.ended;
                 return;
@@ -1813,6 +2486,12 @@ public final class Game {
             case "n:martial": if (w.gov.level < 3) Actions.level(w, 3); else toast("Martial law is already in force"); return;
             case "n:mobilise": if (w.gov.level < 4) Actions.level(w, 4); else toast("The nation is already mobilised"); return;
             case "m:jump": mapToggle(); return;
+            case "aim:go": fireAimed(); return;
+            case "aim:no": view.aimX = -1; return;
+            case "legend": legendOpen = !legendOpen; return;
+            case "rolesheet": roleSheet = true; return;
+            case "rolesheet:close": roleSheet = false; return;
+            case "golive": cam.follow = -1; cam.flyTo(startX, startY, Math.max(cam.zoom, 0.6f)); return;
             case "o:release": Actions.release(w, inspSquad); inspSquad = null; return;
             case "o:frelease": Actions.releaseFormation(w, inspFormation); inspFormation = null; return;
             case "o:fdone": inspFormation = null; return;
@@ -1864,6 +2543,7 @@ public final class Game {
                 return;
             }
             tool = t;
+            view.aimX = -1;
             closeInspector();
             if (!t.equals("orders")) inspSquad = null;
             if (t.equals("police") && (placeUnit == null || w.c.unit(placeUnit) == null || w.c.unit(placeUnit).kind != Content.COP)) { placeUnit = "patrol"; placeVehicle = null; }
@@ -1879,6 +2559,17 @@ public final class Game {
         } else if (id.startsWith("v:")) placeVehicle = id.substring(2);
         else if (id.startsWith("s:")) strikeMode = id.substring(2);
         else if (id.startsWith("set:")) setting(id.substring(4));
+        else if (id.startsWith("rolepick:")) {
+            ngRole = Integer.parseInt(id.substring(9));
+            roleSheet = false;
+        } else if (id.startsWith("alert:")) {
+            int k = Integer.parseInt(id.substring(6));
+            for (Dispatch.Incident in : w.disp.incidents)
+                if (in.id == k) {
+                    cam.follow = -1;
+                    cam.flyTo(in.x, in.y, Math.max(cam.zoom, 0.5f));
+                }
+        }
         else if (id.startsWith("addpl:")) {
             int r = Integer.parseInt(id.substring(6));
             if (Actions.addPlayer(w, r, cam.cx, cam.cy)) toast("Player " + w.roles.players + ": " + Roles.NAMES[r]);
@@ -1921,6 +2612,7 @@ public final class Game {
             case "radio": s.radio = !s.radio; break;
             case "minimap": s.minimap = !s.minimap; break;
             case "vibrate": s.vibrate = !s.vibrate; break;
+            case "debug": s.debug = !s.debug; break;
             case "gpu":
                 s.gpu = !s.gpu;
                 if (s.gpu) pf.setPref("gpuFailed", "false"); // let it try again
@@ -1941,12 +2633,12 @@ public final class Game {
     }
 
     private void mapToggle() {
-        if (cam.zoom > cam.minZoom * 1.5f) {
+        if (cam.zoom > cam.fitZoom() * 1.5f) {
             prevX = cam.cx;
             prevY = cam.cy;
             prevZoom = cam.zoom;
             cam.follow = -1;
-            cam.flyTo(w.r.px() / 2f, w.r.px() / 2f, cam.minZoom);
+            cam.showAll();
         } else cam.flyTo(prevX, prevY, Math.max(prevZoom, 0.3f));
     }
 
@@ -1966,7 +2658,7 @@ public final class Game {
             in.close();
             o2.close();
             pf.delete(name + ".tmp");
-            pf.setPref("info." + name, w.r.name + ", " + w.clock() + (w.scenario != null ? ", " + w.scenario.name : "") + ". " + WorldView.fmt(w.totalZombies()) + " of the dead");
+            pf.setPref("info." + name, w.r.name + ", " + w.clock() + (w.scenario != null ? ", " + w.scenario.name : "") + ". " + (w.totalZombies() == 0 ? "No dead walking" : WorldView.people(w.totalZombies()) + " dead walking") + ", " + WorldView.people(w.livingCivilians()) + " alive");
             if (!name.equals("autosave")) toast("Saved");
         } catch (Exception e) {
             toast("Couldn't save: " + e.getMessage());
@@ -2091,7 +2783,7 @@ public final class Game {
     }
 
     private boolean isScrollScreen() {
-        return screen == S_REPORT || screen == S_RADIO || screen == S_HELP || screen == S_NOTES || screen == S_NEW || screen == S_REPLAYS;
+        return screen == S_REPORT || screen == S_RADIO || screen == S_HELP || screen == S_NOTES || screen == S_NEW || screen == S_REPLAYS || screen == S_SETTINGS;
     }
 
     private void joy(float x, float y) {
@@ -2177,7 +2869,12 @@ public final class Game {
     private void paint(float sx, float sy) {
         float x = cam.toWorldX(sx), y = cam.toWorldY(sy);
         if (x < 0 || y < 0 || x > w.r.px() || y > w.r.px()) return;
+        view.brushX = x;
+        view.brushY = y;
+        view.brushR = brushRadius();
+        view.brushT = view.time;
         if (tool.equals("erase")) {
+            view.brushColor = 0xC0E8E8E8;
             Actions.erase(w, x, y, brushRadius());
             return;
         }
@@ -2193,15 +2890,15 @@ public final class Game {
         }
         int made = Actions.paint(w, x, y, brush, brushRadius(), zType);
         if (made == 0 && brush > 1) toast("Nowhere to stand there");
-        view.brushX = x;
-        view.brushY = y;
-        view.brushR = brushRadius();
-        view.brushColor = 0x90E04040;
+        view.brushColor = 0xC0E04040;
     }
 
     /** A tap on the map: the current tool acts there, or it shows what's there. */
     private void tap(float sx, float sy) {
         float x = cam.toWorldX(sx), y = cam.toWorldY(sy);
+        rippleX = sx;
+        rippleY = sy;
+        rippleT = 0;
         if (brushTool()) return; // painted on the way down
         switch (tool) {
             case "police":
@@ -2218,13 +2915,14 @@ public final class Game {
                 return;
             }
             case "strike": {
-                if (strikeMode.equals("bridge")) {
-                    int e = Tools.bridgeAt(w, x, y);
-                    if (e < 0) toast("Tap a bridge on a road");
-                    else Actions.bridge(w, e);
-                } else if (strikeMode.equals("art")) {
-                    if (!Actions.artillery(w, x, y)) toast("No guns in range (they need a battery holding within reach)");
-                } else if (!Actions.strike(w, x, y)) toast("No air strikes left");
+                // aim first: a reticle shows where it lands, and the player confirms
+                if (strikeMode.equals("bridge") && Tools.bridgeAt(w, x, y) < 0) {
+                    toast("Tap a bridge on a road");
+                    return;
+                }
+                view.aimX = x;
+                view.aimY = y;
+                view.aimR = strikeMode.equals("bridge") ? 60 : strikeMode.equals("art") ? 110 : 160;
                 return;
             }
             case "send": {
@@ -2236,6 +2934,7 @@ public final class Game {
                 Squads.Squad s = Actions.deploy(w, w.roles.target, sendTemplate, x, y);
                 if (s == null) toast("Nobody left at the station for that");
                 else {
+                    ping(x, y);
                     inspSquad = s;
                     toast(s.label + " on the way");
                 }
@@ -2250,7 +2949,10 @@ public final class Game {
                         return;
                     }
                     if (inspFormation != null && inspFormation.alive) {
-                        if (Actions.formation(w, inspFormation, x, y)) toast(inspFormation.name + " moving");
+                        if (Actions.formation(w, inspFormation, x, y)) {
+                            toast(inspFormation.name + " moving");
+                            ping(x, y);
+                        }
                         else toast("No road there");
                         return;
                     }
@@ -2277,6 +2979,7 @@ public final class Game {
                         return;
                     }
                     Actions.order(w, inspSquad, x, y);
+                    ping(x, y);
                     return;
                 }
                 toast(w.roles.commandsFormations() ? "Tap a formation or a squad first" : "Tap one of your squads first");
@@ -2306,6 +3009,26 @@ public final class Game {
             default:
                 inspect(sx, sy, x, y);
         }
+    }
+
+    /** A flag where an order sends someone, for a moment. */
+    private void ping(float x, float y) {
+        pingX = x;
+        pingY = y;
+        pingT = 0;
+    }
+
+    /** Carries out the aimed strike. */
+    private void fireAimed() {
+        float x = view.aimX, y = view.aimY;
+        view.aimX = -1;
+        if (strikeMode.equals("bridge")) {
+            int e = Tools.bridgeAt(w, x, y);
+            if (e < 0) toast("Tap a bridge on a road");
+            else Actions.bridge(w, e);
+        } else if (strikeMode.equals("art")) {
+            if (!Actions.artillery(w, x, y)) toast("No guns in range (they need a battery holding within reach)");
+        } else if (!Actions.strike(w, x, y)) toast("No air strikes left");
     }
 
     private void inspect(float sx, float sy, float x, float y) {

@@ -138,6 +138,15 @@ final class GLGfx implements Gfx {
         return id;
     }
 
+    /** Re-sends one rectangle of a bitmap into its texture. */
+    static void uploadPart(Bitmap b, int id, int x, int y, int w, int h) {
+        if (w <= 0 || h <= 0) return;
+        Bitmap part = Bitmap.createBitmap(b, x, y, w, h);
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, id);
+        GLUtils.texSubImage2D(GLES20.GL_TEXTURE_2D, 0, x, y, part);
+        part.recycle();
+    }
+
     // ------------------------------------------------------------------ frames
 
     /** Starts a frame of the given size. */
@@ -421,6 +430,30 @@ final class GLGfx implements Gfx {
     }
 
     public void image(GImage img, float dx, float dy, float dw, float dh) {
+        image(img, dx, dy, dw, dh, 1);
+    }
+
+    public void textHalo(String s, float x, float y, float size, int align, boolean bold, int halo, float hw) {
+        float r = cr, gg = cg, b = cb, a = ca;
+        color(halo);
+        float d = hw * 0.7071f;
+        text(s, x - hw, y, size, align, bold);
+        text(s, x + hw, y, size, align, bold);
+        text(s, x, y - hw, size, align, bold);
+        text(s, x, y + hw, size, align, bold);
+        text(s, x - d, y - d, size, align, bold);
+        text(s, x + d, y - d, size, align, bold);
+        text(s, x - d, y + d, size, align, bold);
+        text(s, x + d, y + d, size, align, bold);
+        cr = r;
+        cg = gg;
+        cb = b;
+        ca = a;
+        text(s, x, y, size, align, bold);
+    }
+
+    public void image(GImage img, float dx, float dy, float dw, float dh, float alpha) {
+        if (alpha <= 0) return;
         AndroidImage ai = (AndroidImage) img;
         if (ai.needsUpload()) {
             // uploading binds the texture: draw what's batched with the current one first
@@ -431,7 +464,7 @@ final class GLGfx implements Gfx {
         if (id == 0) return;
         tex(id);
         room(6);
-        float a = 1; // images draw as themselves (not tinted)
+        float a = Math.min(1, alpha); // images draw as themselves (not tinted), faded by alpha (premultiplied)
         vert(dx, dy, 0, 0, a, a, a, a);
         vert(dx + dw, dy, 1, 0, a, a, a, a);
         vert(dx + dw, dy + dh, 1, 1, a, a, a, a);
