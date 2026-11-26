@@ -1226,6 +1226,16 @@ public final class Tests {
                 check(game.addResult(code), "a good code was refused");
                 check(!game.addResult(code.replace("1200", "12")), "a doctored code was taken");
                 check(game.board("1024-0-33-sandbox-god").size() == 1, "the friend isn't on the board");
+                // a code from 1.2: its time was in hours, checked the old way; it's read as minutes now
+                String body = "1024-0-33-sandbox-god~Alex~900~7~1";
+                long h = 1469598103934665603L;
+                for (int i = 0; i < body.length(); i++) h = (h ^ body.charAt(i)) * 1099511628211L;
+                String old = "ZC2R~" + body + "~" + Long.toString(Math.abs(h % 1679616L), 36);
+                check(game.addResult(old), "a 1.2 code was refused");
+                boolean found = false;
+                for (String[] e : game.board("1024-0-33-sandbox-god")) if (e[0].equals("Alex")) found = e[2].equals("420");
+                check(found, "a 1.2 code's 7 hours didn't become 420 minutes");
+                check(!game.addResult(old.replace("~900~", "~9~")), "a doctored 1.2 code was taken");
                 w.shutdown();
                 l.shutdown();
                 r.w.shutdown();
@@ -1378,6 +1388,144 @@ public final class Tests {
                 for (int k = 0; k < cars; k++) if (w.veh.state[v[k]] != Vehicles.V_DRIVE) there++;
                 check(circling == 0, circling + " car-seconds spent going round in circles");
                 check(there >= cars * 9 / 10, "only " + there + " of " + cars + " cars got there in 150 s");
+                w.shutdown();
+            }
+        });
+        test("street: vehicles keep apart at junctions and on scene, each in a place of its own", new T() {
+            public void run() {
+                // a dozen police cars sent from one junction to the same place: they queue, and park side by side
+                World w = game(31, 1024, "sandbox", 1);
+                RoadGraph g = w.r.roads;
+                Region.Settlement c = w.r.city();
+                int a = -1, b = -1;
+                for (int n = 0; n < g.nodeCount && b < 0; n++)
+                    if (g.nset[n] == c.id && g.nodeLive(n)) {
+                        if (a < 0) a = n;
+                        else if (Math.hypot(g.nx[n] - g.nx[a], g.ny[n] - g.ny[a]) > 600) b = n;
+                    }
+                check(a >= 0 && b >= 0, "no junctions to drive between");
+                int cars = 12;
+                int[] v = new int[cars];
+                for (int k = 0; k < cars; k++) {
+                    v[k] = w.veh.add(w.c.vtype("patrol_car"), g.nx[a], g.ny[a], 0, -1);
+                    check(w.veh.driveTo(v[k], g.nx[b], g.ny[b], 0), "can't route");
+                }
+                check(w.veh.overlapPairs() == 0, "cars put down on top of each other");
+                long pairSteps = 0;
+                for (int k = 0; k < 120 * 20; k++) {
+                    w.step();
+                    pairSteps += w.veh.overlapPairs();
+                }
+                int there = 0;
+                for (int k = 0; k < cars; k++) {
+                    check(w.veh.state[v[k]] != Vehicles.V_PULLIN, "still pulling in after two minutes");
+                    if (w.veh.state[v[k]] == Vehicles.V_ARRIVED && Math.hypot(w.veh.x[v[k]] - g.nx[b], w.veh.y[v[k]] - g.ny[b]) < 400) there++;
+                }
+                check(there >= cars - 1, "only " + there + " of " + cars + " cars parked at the scene");
+                check(pairSteps < 20, "cars overlapped for " + pairSteps / 20f + " pair-seconds");
+                w.shutdown();
+                // a whole response to 500 of the dead (police, soldiers, convoys), and the lab leak's
+                String[] scen = {"sandbox", "lab_leak"};
+                for (String sc : scen) {
+                    w = game(31, 1024, sc, 2);
+                    if (sc.equals("sandbox")) Tools.paintZombies(w, Setup.originX, Setup.originY, 500, 600, -1);
+                    camOver(w, Setup.originX, Setup.originY);
+                    pairSteps = 0;
+                    int steps = 240 * 20, most = 0;
+                    for (int k = 0; k < steps; k++) {
+                        w.step();
+                        pairSteps += w.veh.overlapPairs();
+                        most = Math.max(most, w.veh.top);
+                    }
+                    float perSec = pairSteps / (float) steps;
+                    check(most > 20, sc + ": hardly any vehicles came out (" + most + ")");
+                    check(perSec < 0.02f, sc + ": " + perSec + " overlapping vehicle pairs per second");
+                    w.shutdown();
+                }
+            }
+        });
+        test("save: a 1.2 save (version 3) still loads and plays on", new T() {
+            public void run() throws Exception {
+                FileInputStream in = new FileInputStream("desktop/testdata/save-v3-1.2.zcs");
+                World w = SaveIO.load(content, in, 1);
+                in.close();
+                check(w.tick == 2400, "loaded at the wrong time: " + w.tick);
+                check(w.totalZombies() > 0 && w.sq.list.size() > 0, "the outbreak or the response didn't come back");
+                int typed = 0;
+                for (Squads.Squad s : w.sq.list) if (s.template >= 0) typed++;
+                check(typed > 0, "no squad got its kind back");
+                check(Audit.check(w).isEmpty(), "audit: " + Audit.check(w));
+                check(Audit.ledger(w) == 0, "the ledger is off by " + Audit.ledger(w));
+                play(w, 60, true);
+                check(Audit.ledger(w) == 0, "the ledger is off by " + Audit.ledger(w) + " after a minute");
+                // and saves again in today's format, carrying on exactly
+                ByteArrayOutputStream bo = new ByteArrayOutputStream();
+                SaveIO.save(w, bo);
+                World l = SaveIO.load(content, new ByteArrayInputStream(bo.toByteArray()), 1);
+                play(w, 10, false);
+                play(l, 10, false);
+                check(Audit.hash(w) == Audit.hash(l), "a re-saved 1.2 game doesn't carry on the same");
+                w.shutdown();
+                l.shutdown();
+                // a save older than that is offered for deleting, not called damaged
+                java.io.File dir = new java.io.File("build/test-work-old");
+                dir.mkdirs();
+                for (java.io.File f : dir.listFiles()) f.delete();
+                DesktopPlatform pf = new DesktopPlatform(dir);
+                java.io.DataOutputStream o = new java.io.DataOutputStream(new java.util.zip.DeflaterOutputStream(pf.openWrite("autosave.sav")));
+                o.writeInt(0x5A435332);
+                o.writeInt(2);
+                o.close();
+                Game g = new Game(pf);
+                frames(g, 1);
+                check(tapId(g, "continue"), "no Continue button");
+                for (int k = 0; k < 200 && g.error == null; k++) {
+                    frames(g, 1);
+                    Thread.sleep(20);
+                }
+                check(g.error != null && g.error.contains("older version"), "no older-version message: " + g.error);
+                check(pf.exists("autosave.sav"), "an old save was put aside without asking");
+                frames(g, 1);
+                check(tapId(g, "olddelete"), "no way to delete the old save");
+                frames(g, 1);
+                check(!pf.exists("autosave.sav") && g.error == null, "the old save wasn't deleted");
+            }
+        });
+        test("save: the autosave stops the game only for a snapshot, and writes the same file", new T() {
+            public void run() throws Exception {
+                java.io.File dir = new java.io.File("build/test-work-autosave");
+                dir.mkdirs();
+                for (java.io.File f : dir.listFiles()) f.delete();
+                DesktopPlatform pf = new DesktopPlatform(dir);
+                Game g = new Game(pf);
+                World w = game(5, 1536, "lab_leak", 1);
+                play(w, 20, false);
+                g.w = w;
+                g.view = new WorldView(w, pf);
+                g.screen = Game.S_PLAY;
+                g.autosave();
+                ByteArrayOutputStream bo = new ByteArrayOutputStream();
+                SaveIO.save(w, bo); // the world hasn't moved: the same save made all at once
+                g.waitForSave();
+                java.io.InputStream in = pf.openRead("autosave.sav");
+                ByteArrayOutputStream file = new ByteArrayOutputStream();
+                byte[] buf = new byte[1 << 16];
+                int n;
+                while ((n = in.read(buf)) > 0) file.write(buf, 0, n);
+                in.close();
+                check(java.util.Arrays.equals(file.toByteArray(), bo.toByteArray()), "the autosave differs from a save made at once");
+                check(!pf.exists("autosave.tmp"), "the temporary file was left behind");
+                frames(g, 1);
+                check(pf.pref("info.autosave", "").length() > 0, "the autosave isn't described in the list");
+                // the game's thread does only the snapshot: well under the whole save's time
+                long t0 = System.nanoTime();
+                SaveIO.save(w, new ByteArrayOutputStream());
+                float whole = (System.nanoTime() - t0) / 1e6f;
+                for (int k = 0; k < 3; k++) {
+                    g.autosave();
+                    g.waitForSave();
+                }
+                check(g.lastAutosaveMs < whole, "the snapshot took " + g.lastAutosaveMs + " ms, the whole save " + whole);
                 w.shutdown();
             }
         });

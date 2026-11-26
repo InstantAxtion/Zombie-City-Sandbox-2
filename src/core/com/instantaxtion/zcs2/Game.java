@@ -206,12 +206,21 @@ public final class Game {
         crashedWorld = true;
     }
 
+    /** The save the error screen is about when it's from an older version (offered for deleting), else null. */
+    private String tooOld;
+
+    private static String saveTitle(String file) {
+        String base = file == null ? "" : file.endsWith(".sav") ? file.substring(0, file.length() - 4) : file;
+        return base.equals("autosave") ? "\"Autosave\"" : base.startsWith("slot") ? "in slot " + base.substring(4) : "\"" + base + "\"";
+    }
+
     /** The error screen came from a crash in a running game (the world may not be trustworthy). */
     private boolean crashedWorld;
 
     /** Leaves the error screen for the menu. */
     private void clearError() {
         error = null;
+        tooOld = null;
         loadError = null;
         loaded = null;
         if (crashedWorld) closeWorld();
@@ -226,10 +235,14 @@ public final class Game {
         g.fillRect(0, 0, W, H);
         float m = ui.dp(16);
         g.color(Ui.ACCENT);
-        g.text(content == null ? "The game can't start" : "Something went wrong", m, ui.dp(48), ui.dp(18), Gfx.ALIGN_LEFT, true);
+        g.text(content == null ? "The game can't start" : tooOld != null ? "An older save" : "Something went wrong", m, ui.dp(48), ui.dp(18), Gfx.ALIGN_LEFT, true);
         ui.wrap(error, m, ui.dp(80), W - m * 2, ui.dp(14), Ui.TEXT, 20);
         float bw = Math.min(W - m * 2, ui.dp(320)), bh = ui.dp(50);
         if (content == null) ui.bigButton("quit", (W - bw) / 2, H - bh - ui.dp(40), bw, bh, "Quit", Ui.ACCENT);
+        else if (tooOld != null) {
+            ui.bigButton("olddelete", (W - bw) / 2, H - bh * 2 - ui.dp(52), bw, bh, "Delete it", Ui.ACCENT);
+            ui.bigButton("errmenu", (W - bw) / 2, H - bh - ui.dp(40), bw, bh, "Keep it", Ui.LINE);
+        }
         else ui.bigButton("errmenu", (W - bw) / 2, H - bh - ui.dp(40), bw, bh, "Back to the menu", Ui.ACCENT);
     }
 
@@ -276,8 +289,10 @@ public final class Game {
 
     private final java.util.List<String> toastLines = new java.util.ArrayList<String>();
 
-    /** The toast: wrapped to at most three lines, centred inside the part of the screen the bars leave free. */
-    private void toastBox(Gfx g) {
+    private float toastX, toastY, toastW, toastH, toastL, toastR;
+
+    /** Lays the toast out: wrapped to at most three lines, centred inside the part of the screen the bars leave free. */
+    private void toastLayout(Gfx g) {
         boolean onMap = screen == S_PLAY && w != null && !hideUi;
         float l = onMap ? freeL : 0, r = onMap ? freeR : g.width(), t = onMap ? freeT : 0, b = onMap ? freeB : g.height();
         float ts = ui.dp(13.5f), maxW = Math.min(r - l - ui.dp(32), ui.dp(420));
@@ -303,12 +318,22 @@ public final class Game {
         }
         float lh = ts * 1.35f, th = toastLines.size() * lh + ui.dp(16);
         tw += ui.dp(28);
-        float x = (l + r - tw) / 2, y = Math.max(t + ui.dp(8), Math.min(b - th - ui.dp(8), t + (b - t) * 0.38f));
+        toastL = l;
+        toastR = r;
+        toastW = tw;
+        toastH = th;
+        toastX = (l + r - tw) / 2;
+        toastY = Math.max(t + ui.dp(8), Math.min(b - th - ui.dp(8), t + (b - t) * 0.38f));
+    }
+
+    private void toastBox(Gfx g) {
+        toastLayout(g);
+        float ts = ui.dp(13.5f), lh = ts * 1.35f;
         g.color(0xE6000000);
-        g.fillRoundRect(x, y, tw, th, ui.dp(10));
+        g.fillRoundRect(toastX, toastY, toastW, toastH, ui.dp(10));
         g.color(0xFFFFFFFF);
         for (int k = 0; k < toastLines.size(); k++)
-            g.text(toastLines.get(k), (l + r) / 2, y + ui.dp(8) + lh * k + ts * 1.0f, ts, Gfx.ALIGN_CENTER, true);
+            g.text(toastLines.get(k), (toastL + toastR) / 2, toastY + ui.dp(8) + lh * k + ts * 1.0f, ts, Gfx.ALIGN_CENTER, true);
     }
 
     void toast(String s) {
@@ -352,7 +377,9 @@ public final class Game {
             cam.cy = w.r.city().cy * 16f + (float) Math.sin(menuT * 0.04f) * rad;
             boolean nm = view.names;
             view.names = false;
+            view.noLabels = true;
             view.draw(g, cam, 0.016f);
+            view.noLabels = false;
             view.names = nm;
         } else {
             requestPreview();
@@ -676,6 +703,15 @@ public final class Game {
         g.image(previewImg, pxx, y, ps, ps);
         if (!captions) return true;
         float k = ps / pr.W;
+        // the caption first: the names keep above it
+        long people = 0;
+        for (Region.Settlement s : pr.settlements) people += s.residents;
+        // the country's name, and its people and states: on one line if it fits, else on two
+        String cap = pr.name + ": " + WorldView.people(people) + " people, " + pr.states.size() + " states";
+        String sub = WorldView.people(people) + " people, " + pr.states.size() + " states";
+        boolean two = g.textWidth(cap, ui.dp(12), false) > ps - ui.dp(12);
+        float bh = ui.dp(two ? 40 : 24);
+
         int placed = 0;
         for (int pass = 0; pass < 3; pass++)
             for (Region.Settlement s : pr.settlements) {
@@ -684,7 +720,7 @@ public final class Game {
                 float size = ui.dp(s.capital ? 13 : s.kind == Region.S_CITY ? 11.5f : 10);
                 String name = (s.capital ? "★ " : "") + s.name;
                 float tw = g.textWidth(name, size, true), lx = Math.max(pxx + tw / 2 + ui.dp(2), Math.min(pxx + ps - tw / 2 - ui.dp(2), pxx + s.cx * k));
-                float ly = Math.max(y + size + ui.dp(2), y + s.cy * k);
+                float ly = Math.min(y + ps - bh - ui.dp(3), Math.max(y + size + ui.dp(2), y + s.cy * k));
                 boolean free = true;
                 for (int q = 0; q < placed && free; q++)
                     free = lx + tw / 2 < prevBox[q * 4] || lx - tw / 2 > prevBox[q * 4 + 2] || ly < prevBox[q * 4 + 1] || ly - size > prevBox[q * 4 + 3];
@@ -697,13 +733,6 @@ public final class Game {
                 g.color(0xFFFFFFFF);
                 g.textHalo(name, lx, ly, size, Gfx.ALIGN_CENTER, true, 0xD0000000, ui.dp(1.3f));
             }
-        long people = 0;
-        for (Region.Settlement s : pr.settlements) people += s.residents;
-        // the country's name, and its people and states: on one line if it fits, else on two
-        String cap = pr.name + ": " + WorldView.people(people) + " people, " + pr.states.size() + " states";
-        String sub = WorldView.people(people) + " people, " + pr.states.size() + " states";
-        boolean two = g.textWidth(cap, ui.dp(12), false) > ps - ui.dp(12);
-        float bh = ui.dp(two ? 40 : 24);
         g.color(0xD0000000);
         g.fillRect(pxx, y + ps - bh, ps, bh);
         g.color(0xFFFFFFFF);
@@ -859,6 +888,7 @@ public final class Game {
     }
 
     private void loadFrom(final String name) {
+        waitForSave();
         closeWorld();
         loadingFrom = screen == S_LOADING ? S_MENU : screen;
         screen = S_LOADING;
@@ -875,7 +905,13 @@ public final class Game {
                         nw = SaveIO.load(content, in, settings.simThreads());
                     } catch (Throwable t) {
                         in.close();
-                        if (gen == loadGen) quarantine(name, t);
+                        if (gen == loadGen) {
+                            if (t instanceof SaveIO.TooOld) {
+                                // not damaged, just too old: the player decides whether to keep it
+                                tooOld = name;
+                                loadError = t;
+                            } else quarantine(name, t);
+                        }
                         return;
                     }
                     in.close();
@@ -923,7 +959,9 @@ public final class Game {
         g.text(loadingText, W / 2f, H / 2f + ui.dp(60), ui.dp(15), Gfx.ALIGN_CENTER, false);
         if (loadError != null) {
             Throwable le = loadError;
-            error = le instanceof java.io.IOException && le.getMessage() != null && le.getMessage().startsWith("Couldn't read the save")
+            if (le instanceof SaveIO.TooOld) error = "The save " + saveTitle(tooOld) + " was made with an older version of the game, which this one can't read. "
+                    + "Delete it to start afresh, or keep it (an older version of the game can still play it).";
+            else error = le instanceof java.io.IOException && le.getMessage() != null && le.getMessage().startsWith("Couldn't read the save")
                     ? le.getMessage() : "Something went wrong: " + le;
             loadError = null;
             crashedWorld = false;
@@ -1129,6 +1167,11 @@ public final class Game {
         if (!hideUi) {
             view.labelArea(freeL, freeT, freeR, freeB);
             for (int k = 0; k < hudKeepN; k++) view.keepOut(hudKeep[k * 4], hudKeep[k * 4 + 1], hudKeep[k * 4 + 2], hudKeep[k * 4 + 3]);
+            // the notice in the middle of the map: no label under it
+            if (msg != null && msgT > 0) {
+                toastLayout(g);
+                view.keepOut(toastX - ui.dp(4), toastY - ui.dp(4), toastX + toastW + ui.dp(4), toastY + toastH + ui.dp(4));
+            }
         }
         hudKeepN = 0;
         // screen shake: only the picture moves (the camera the simulation sees is set above)
@@ -2045,7 +2088,7 @@ public final class Game {
             if (f.kind == Region.F_POWER) body.append(on ? "Powering " : "Was powering ").append(w.strat.gridName(f.grid)).append(". ");
             if (f.kind == Region.F_POLICE || f.kind == Region.F_BASE || f.kind == Region.F_ARMORY) {
                 int waiting = w.forces.armedAt(f, Ents.COP) + w.forces.armedAt(f, Ents.SOLDIER);
-                bar("Ammo", (float) Math.log10(1 + f.ammo) / 5, 0xFFE0C040, (int) f.ammo + " rounds");
+                bar("Ammo", (float) Math.log10(1 + f.ammo) / 5, 0xFFE0C040, News.num((int) f.ammo) + " rounds");
                 body.append(waiting).append(" waiting here. ");
             }
             if (f.kind == Region.F_HOSPITAL) body.append(on ? "Taking in the bitten. " : "The sick inside have turned. ");
@@ -2102,7 +2145,7 @@ public final class Game {
                     + (w.roles.commandsFormations() && !f.player ? (gen ? ", under the general" : ", awaiting your orders") : "");
             float frac = f.start > 0 ? f.strength() / (float) f.start : 1;
             bar("Strength", frac, healthCol(frac), f.strength() + (f.faction == Ents.COP ? " officers" : " soldiers"));
-            bar("Ammo", (float) Math.log10(1 + f.hq.ammo) / 5, 0xFFE0C040, (int) f.hq.ammo + " rounds");
+            bar("Ammo", (float) Math.log10(1 + f.hq.ammo) / 5, 0xFFE0C040, News.num((int) f.hq.ammo) + " rounds");
             body.append(f.deployed).append(" out in squads");
             Content.VType tank = w.c.vtype("tank");
             if (tank != null && f.hq.vpool[tank.index] + f.tanksOut > 0) body.append(", ").append(f.hq.vpool[tank.index] + f.tanksOut).append(" tanks");
@@ -2622,7 +2665,7 @@ public final class Game {
         }
         y += gh + ui.dp(30);
         // the key, with each line's peak
-        String[] keys = {"people (peak " + WorldView.people(maxA) + ")", "the dead (peak " + WorldView.people(maxZ) + ")",
+        String[] keys = {"people (peak " + WorldView.people(maxA) + ")", "the dead (peak " + WorldView.people(Math.max(maxZ, s.peakZombies)) + ")",
                 "police out (peak " + fmt(maxP) + ")", "soldiers out (peak " + fmt(maxR) + ")"};
         int[] kc = {0xFFE8E0C8, 0xFFE84848, 0xFF5A96FF, WorldView.C_ARMY};
         float kx = m;
@@ -2778,7 +2821,26 @@ public final class Game {
 
     static String resultCodeFor(String challenge, String name, int losses, int minutes, boolean done) {
         String body = challenge + "~" + name + "~" + losses + "~" + minutes + "~" + (done ? 1 : 0);
-        return "ZC2R~" + body + "~" + check(body);
+        return "ZC2R~" + body + "~" + check(MINUTES + body);
+    }
+
+    /**
+     * Codes made since 1.3 count minutes and say so in their check (it's worked out over this and the body); 1.2's
+     * counted hours and its check is over the body alone.
+     */
+    private static final String MINUTES = "m~";
+
+    /** A 1.2 result code (its time in hours, checked the old way) in today's form; null if it isn't one. */
+    static String upgradeResultCode(String code) {
+        String[] p = code.trim().split("~");
+        if (p.length != 7 || !p[0].equals("ZC2R")) return null;
+        String body = p[1] + "~" + p[2] + "~" + p[3] + "~" + p[4] + "~" + p[5];
+        if (check(MINUTES + body).equals(p[6]) || !check(body).equals(p[6])) return null;
+        try {
+            return resultCodeFor(p[1], p[2], Integer.parseInt(p[3]), Integer.parseInt(p[4]) * 60, p[5].equals("1"));
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     private static String check(String body) {
@@ -2789,10 +2851,12 @@ public final class Game {
 
     /** Adds a friend's result code; false if it's mistyped or for another challenge. */
     boolean addResult(String code) {
+        String old = upgradeResultCode(code);
+        if (old != null) code = old;
         String[] p = code.trim().split("~");
         if (p.length != 7 || !p[0].equals("ZC2R")) return false;
         String body = p[1] + "~" + p[2] + "~" + p[3] + "~" + p[4] + "~" + p[5];
-        if (!check(body).equals(p[6])) return false;
+        if (!check(MINUTES + body).equals(p[6])) return false;
         try {
             Integer.parseInt(p[3]);
             Integer.parseInt(p[4]);
@@ -2924,6 +2988,14 @@ public final class Game {
                 toast("Paused: Player " + (handTo + 1) + " hasn't taken over");
                 return;
             case "errmenu": clearError(); return;
+            case "olddelete": {
+                String base = tooOld.endsWith(".sav") ? tooOld.substring(0, tooOld.length() - 4) : tooOld;
+                pf.delete(tooOld);
+                pf.setPref("info." + base, "");
+                clearError();
+                toast("Deleted");
+                return;
+            }
             case "sharecode":
                 ask("This game's challenge code: share it", challengeCodeOf(w), new Platform.TextAnswer() {
                     public void answer(String text) {
@@ -3183,34 +3255,99 @@ public final class Game {
     // ------------------------------------------------------------------ saving
 
     void saveTo(String name) {
+        waitForSave();
         try {
-            OutputStream out = pf.openWrite(name + ".tmp");
-            try {
-                SaveIO.save(w, out);
-            } finally {
-                out.close();
-            }
-            // replace the old save only once the new one is complete
-            if (!pf.rename(name + ".tmp", name + ".sav")) {
-                InputStream in = pf.openRead(name + ".tmp");
-                OutputStream o2 = pf.openWrite(name + ".sav");
-                byte[] buf = new byte[1 << 16];
-                int n;
-                while ((n = in.read(buf)) > 0) o2.write(buf, 0, n);
-                in.close();
-                o2.close();
-                pf.delete(name + ".tmp");
-            }
-            pf.setPref("info." + name, w.r.name + ", " + w.clock() + (w.scenario != null ? ", " + w.scenario.name : "") + ". " + (w.totalZombies() == 0 ? "No dead walking" : WorldView.people(w.totalZombies()) + " dead walking") + ", " + WorldView.people(w.livingCivilians()) + " alive");
+            SaveIO.Snapshot snap = SaveIO.snapshot(w);
+            writeSave(name, snap);
+            pf.setPref("info." + name, saveInfo());
             if (!name.equals("autosave")) toast("Saved");
         } catch (Exception e) {
             toast("Couldn't save: " + e.getMessage());
         }
     }
 
+    private String saveInfo() {
+        return w.r.name + ", " + w.clock() + (w.scenario != null ? ", " + w.scenario.name : "") + ". " + (w.totalZombies() == 0 ? "No dead walking" : WorldView.people(w.totalZombies()) + " dead walking") + ", " + WorldView.people(w.livingCivilians()) + " alive";
+    }
+
+    /** Compresses a snapshot into name.tmp, then puts it in place of name.sav (the old save goes only once the new one is whole). */
+    private void writeSave(String name, SaveIO.Snapshot snap) throws java.io.IOException {
+        OutputStream out = pf.openWrite(name + ".tmp");
+        try {
+            SaveIO.compress(snap, out);
+        } finally {
+            out.close();
+        }
+        if (!pf.rename(name + ".tmp", name + ".sav")) {
+            InputStream in = pf.openRead(name + ".tmp");
+            OutputStream o2 = pf.openWrite(name + ".sav");
+            byte[] buf = new byte[1 << 16];
+            int n;
+            while ((n = in.read(buf)) > 0) o2.write(buf, 0, n);
+            in.close();
+            o2.close();
+            pf.delete(name + ".tmp");
+        }
+    }
+
+    /** The autosave being compressed and written in the background, if any. */
+    private Thread saver;
+    /** How long the last autosave held up the game's thread (the snapshot), in ms: for the tests. */
+    float lastAutosaveMs;
+
+    /** Waits for an autosave still being written (before another save, or a load, touches the files). */
+    void waitForSave() {
+        Thread t = saver;
+        if (t == null) return;
+        try {
+            t.join();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        saver = null;
+    }
+
+    /**
+     * The autosave: the world is copied on the game's thread (a snapshot, the only part that has to stop the
+     * game), then compressed and written on a background thread, so it doesn't hitch. The file is the same,
+     * byte for byte, as a save made all at once.
+     */
     public void autosave() {
-        if (w != null && screen != S_LOADING && error == null && replay == null) saveTo("autosave");
         sinceAutosave = 0;
+        if (w == null || screen == S_LOADING || error != null || replay != null) return;
+        waitForSave();
+        final SaveIO.Snapshot snap;
+        final String info;
+        long t0 = System.nanoTime();
+        try {
+            snap = SaveIO.snapshot(w);
+            info = saveInfo();
+        } catch (Exception e) {
+            toast("Couldn't save: " + e.getMessage());
+            return;
+        }
+        lastAutosaveMs = (System.nanoTime() - t0) / 1e6f;
+        Thread t = new Thread(new Runnable() {
+            public void run() {
+                try {
+                    writeSave("autosave", snap);
+                    post(new Runnable() {
+                        public void run() {
+                            pf.setPref("info.autosave", info);
+                        }
+                    });
+                } catch (final Exception e) {
+                    post(new Runnable() {
+                        public void run() {
+                            toast("Couldn't save: " + e.getMessage());
+                        }
+                    });
+                }
+            }
+        }, "autosave");
+        t.setPriority(Thread.MIN_PRIORITY);
+        saver = t;
+        t.start();
     }
 
     private void screenshot() {
@@ -3735,8 +3872,9 @@ public final class Game {
         return screen;
     }
 
-    /** Pausing the app (phone call, home button): stop and keep a save. */
+    /** Pausing the app (phone call, home button): stop and keep a save, finished before returning (the app may be stopped next). */
     public void onPause() {
         autosave();
+        waitForSave();
     }
 }

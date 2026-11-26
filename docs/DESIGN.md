@@ -115,7 +115,12 @@ thread; the state is saved with the game.
 
 Roads are a graph built during generation (junctions and the streets, avenues and highways between them, with
 bridge flags). Vehicles route with A* on it (with per-edge penalties) and drive by steering at a point a little
-ahead in their lane, queueing behind whoever is in front. A car stuck for 3.5 seconds squeezes past. They run down
+ahead in their lane, queueing behind whoever is in front. No vehicle moves into another: one that would waits (at a
+corner where two are nose to nose the newer one backs off a little), one stuck for 3.5 seconds swings out towards
+the middle of the road to get past, and after ten seconds with no way through it stops where it is. Arriving, each
+pulls in to a place of its own at the kerb near the end of its route (half on the pavement, facing the way its
+side of the road runs, clear of the junction and of every other vehicle and place being pulled in to); one put down
+where another stands, or going home to a taken spot, gets the nearest free place instead. They run down
 the dead at speed and get mobbed when they stop among them. Blowing a bridge removes its edges: routes go round,
 and the river becomes a line hordes can't cross (sector connectivity is recomputed).
 
@@ -127,7 +132,10 @@ placed most important first, skipping any that would land on another, on a forma
 area the bars leave free, or under the interface's own slots (the radio, the note above it, the minimap, the key).
 Notes and the radio are stacked up from the bottom of the map in separate slots, so they never cover each other.
 The ground is painted into 32-tile chunks at four levels of detail (4, 9, 16 and 28 pixels a tile) within a time
-budget each frame and a memory budget overall.
+budget each frame and a memory budget overall. A chunk is painted as pixels: the ground (the smooth edges worked
+out only for tiles with another kind of ground within four tiles, the spline separated into rows), then the marks
+on it and the trees, anti-aliased by coverage; only the lane markings are drawn on the canvas. A picture the cache
+lets go of is painted over for the next chunk rather than made anew.
 Soft things are small pictures scaled up with smoothing: glow sprites (street lights, fire, sirens, smoke), the
 infection's bleed and the heatmaps (two pixels a sector, blurred), the glow of crowds (the 64 px grid round the
 view). The interface's bars cover the screen's edges, and the camera knows it (`Camera.setInsets`), so "the whole
@@ -140,8 +148,15 @@ top bar.
 
 `SaveIO` writes everything the simulation depends on, including the scent field, noises and the dice, so a
 loaded game continues exactly as the original would have (the test compares state hashes for 40 seconds after
-loading). The region is rebuilt from its seed and the saved tiles (rubble, blown bridges) laid over it. There is
-one save version and no behaviour gating. A save made with different rules (`content.ini` hash) loads with a note.
+loading). The region is rebuilt from its seed and the saved tiles (rubble, blown bridges) laid over it. The format
+has a version and the rules have none. A save from an older version (back to 3, the game's 1.2) loads with the
+fields added since at their defaults: SaveIO rewrites an older module's bytes into today's layout before the module
+reads them, and works out what it can (the population's ledger, who commands the army); one older still is offered
+for deleting. A save made with different rules (`content.ini` hash) loads with a note.
+
+A save is a snapshot (the world written out uncompressed, about 15 ms on the desktop for the largest map) and then
+its compression; the autosave takes the snapshot on the game's thread and compresses and writes it on another, so
+it doesn't hitch, and the file is the same, byte for byte, as a save made at once.
 
 ## Playing at any level
 

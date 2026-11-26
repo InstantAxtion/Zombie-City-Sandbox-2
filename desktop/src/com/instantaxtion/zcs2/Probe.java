@@ -28,6 +28,10 @@ public final class Probe {
         long secNs = 0, plainNs = 0;
         int secN = 0, plainN = 0;
         int steps = secs * 20;
+        // OVERLAP=1: road vehicles whose footprints overlap, as pair-seconds per second (and by state)
+        boolean overlap = System.getenv("OVERLAP") != null;
+        long overlapSteps = 0;
+        int overlapPeak = 0;
         for (int k = 1; k <= steps; k++) {
             boolean secondly = (w.tick + 1) % 20 == 0;
             long s0 = System.nanoTime();
@@ -44,6 +48,11 @@ public final class Probe {
                     plainN++;
                 }
             }
+            if (overlap) {
+                int o = w.veh.overlapPairs();
+                overlapSteps += o;
+                overlapPeak = Math.max(overlapPeak, o);
+            }
             if (k % 600 == 0) {
                 String audit = Audit.check(w);
                 System.out.printf("%s t=%4ds zombies %6d (ind %5d) civ %7d out %4d police %4d army %4d kills P%5d A%5d deaths civ %5d cop %3d sol %3d calls %3d gov %d ent %6d  %.2f ms/step%s%n",
@@ -58,6 +67,8 @@ public final class Probe {
             System.out.printf("once a second: %.2f ms more (steps with the update %.2f ms, without %.2f ms)%n",
                     (secNs / (double) secN - plainNs / (double) plainN) / 1e6, secNs / 1e6 / secN, plainNs / 1e6 / plainN);
         System.out.println(fastForward(w, 72));
+        if (overlap) System.out.printf("overlapping vehicle pairs: %.3f pair-seconds per second (%d pair-steps, peak %d at once, %d vehicles)%n",
+                overlapSteps / (double) steps, overlapSteps, overlapPeak, w.veh.top);
         String strat = System.getenv("STRAT");
         if (strat != null) {
             // strategic fast-forward for that many game days, printing twice a day

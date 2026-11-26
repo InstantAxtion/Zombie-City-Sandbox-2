@@ -173,20 +173,27 @@ public final class MapPainter {
         GImage img = cache.get(k);
         if (img != null || !mayPaint) return img;
         int ppt = PPT[lvl];
-        img = pf.newImage(CHUNK * ppt, CHUNK * ppt);
         int side = CHUNK * ppt;
+        // a picture the cache let go of at this level is painted over rather than a new one made
+        img = spare[lvl];
+        spare[lvl] = null;
+        if (img == null) img = pf.newImage(side, side);
         if (pix == null || pix.length < side * side) pix = new int[side * side];
         paintGround(pix, cx * CHUNK, cy * CHUNK, ppt, lvl);
+        paintDetails(pix, cx * CHUNK, cy * CHUNK, ppt, lvl);
         img.setPixels(pix, side, side);
-        paintChunk(img.gfx(), cx * CHUNK, cy * CHUNK, ppt, lvl);
+        if (hasLanes(cx * CHUNK, cy * CHUNK, lvl)) paintLanes(img.gfx(), cx * CHUNK, cy * CHUNK, ppt, lvl);
         cache.put(k, img);
         cacheBytes += bytes(lvl);
         painted++;
         while (cacheBytes > BUDGET_BYTES && cache.size() > 1) {
             Integer oldest = cache.keySet().iterator().next();
             GImage o = cache.remove(oldest);
-            cacheBytes -= bytes(oldest >>> 28);
-            if (o != null) o.recycle();
+            int ol = oldest >>> 28;
+            cacheBytes -= bytes(ol);
+            if (o == null) continue;
+            if (spare[ol] == null) spare[ol] = o;
+            else o.recycle();
         }
         return img;
     }
@@ -234,6 +241,8 @@ public final class MapPainter {
     /** Which way the noise moves each kind's edges. */
     private static final float[] WANDER = {1, -1, -1, 1, 1, -1};
     private int[] pix;
+    /** One picture per level that the cache let go of, kept to be painted over. */
+    private final GImage[] spare = new GImage[PPT.length];
     // per pixel across a tile: the cubic weights of the four nearest centres (from kb), the bilinear neighbour
     // (-1 or 1) and its weight, and how much of it the furrows cover
     private int tabP = -1;
@@ -296,77 +305,152 @@ public final class MapPainter {
         return (a + (b - a) * fx) * (1 - fy) + (c + (d - c) * fx) * fy;
     }
 
+    /** Smooth value noise's corner values for the window, so each costs one hash (lumpy() hashes four per tile). */
+    private final float[] lumpA = new float[LG * LG], lumpB = new float[LG * LG];
+    private static final int LG = (WIN + 3) / 4 + 2;
+
+    private static void lumpyCorners(float[] out, long seed, int gx0, int gy0) {
+        long s2 = seed ^ 0x5DEECE66DL;
+        for (int j = 0; j < LG; j++)
+            for (int i = 0; i < LG; i++) out[j * LG + i] = Rng.unit(s2, gx0 + i, gy0 + j);
+    }
+
+    /** lumpy(seed, tx, ty), with its corners from lumpyCorners (the same arithmetic, so the same value). */
+    private static float lumpyAt(float[] cor, int gx0, int gy0, int tx, int ty) {
+        int gx = tx >> 2, gy = ty >> 2;
+        float fx = (tx - gx * 4 + 0.5f) / 4f, fy = (ty - gy * 4 + 0.5f) / 4f;
+        fx = fx * fx * (3 - 2 * fx);
+        fy = fy * fy * (3 - 2 * fy);
+        int o = (gy - gy0) * LG + gx - gx0;
+        float a = cor[o], b = cor[o + 1], c = cor[o + LG], d = cor[o + LG + 1];
+        return (a + (b - a) * fx) * (1 - fy) + (c + (d - c) * fx) * fy;
+    }
+
+    /** Per window tile: 1 where another kind of ground is within four tiles (only there can its edge show). */
+    private final byte[] edge = new byte[WIN * WIN];
+    /** For a tile with an edge: each local kind's B-spline along the rows (five rows round the tile) at each pixel column. */
+    private float[] rows;
+
     /** Paints the chunk's ground into out (CHUNK * p pixels square). */
     void paintGround(int[] out, int tx0, int ty0, int p, int lvl) {
         tables(p);
         int side = CHUNK * p;
         long seed = r.seed;
+        if (rows == null || rows.length < NCLS * 5 * p) rows = new float[NCLS * 5 * p];
+        int lgx = (tx0 - M) >> 2, lgy = (ty0 - M) >> 2;
+        lumpyCorners(lumpA, seed + 17, lgx, lgy);
+        int present = 0;
         for (int wy = 0; wy < WIN; wy++)
             for (int wx = 0; wx < WIN; wx++) {
                 int tx = tx0 - M + wx, ty = ty0 - M + wy, i = wy * WIN + wx;
                 int t = r.t(tx, ty);
                 byte c = SOFT[t];
                 wc[i] = c;
+                if (c >= 0) present |= 1 << c;
                 wd[i] = c == C_WATER ? 1e4f : 0;
                 boolean near = wx >= M - 3 && wy >= M - 3 && wx < WIN - M + 3 && wy < WIN - M + 3;
                 if (near) {
                     // a gentle mottling in broad patches, smooth from tile to tile
-                    wm[i] = realistic && (c > C_WATER || natural(t)) ? 1 + (lumpy(seed + 17, tx, ty) - 0.5f) * 0.09f + (Rng.unit(seed, tx, ty) - 0.5f) * 0.025f : 1;
-                    // the edges wander a little, slowly (over a few tiles)
-                    wj[i] = (lumpy(seed, tx, ty) - 0.5f) * 0.5f;
+                    wm[i] = realistic && (c > C_WATER || natural(t)) ? 1 + (lumpyAt(lumpA, lgx, lgy, tx, ty) - 0.5f) * 0.09f + (Rng.unit(seed, tx, ty) - 0.5f) * 0.025f : 1;
                 }
             }
-        // how far each water tile is from land (a two-pass chamfer over the window), deeper out at sea
-        final float D = 1.4142f;
+        // where kinds meet: both tiles of each unlike pair, then spread four tiles (the blur and the look round a tile)
+        java.util.Arrays.fill(edge, (byte) 0);
+        boolean anyEdge = false;
         for (int wy = 0; wy < WIN; wy++)
             for (int wx = 0; wx < WIN; wx++) {
                 int i = wy * WIN + wx;
-                float v = wd[i];
-                if (v == 0) continue;
-                if (wx > 0) v = Math.min(v, wd[i - 1] + 1);
-                if (wy > 0) {
-                    v = Math.min(v, wd[i - WIN] + 1);
-                    if (wx > 0) v = Math.min(v, wd[i - WIN - 1] + D);
-                    if (wx < WIN - 1) v = Math.min(v, wd[i - WIN + 1] + D);
+                if (wx + 1 < WIN && wc[i] != wc[i + 1]) {
+                    edge[i] = edge[i + 1] = 1;
+                    anyEdge = true;
                 }
-                wd[i] = v;
+                if (wy + 1 < WIN && wc[i] != wc[i + WIN]) {
+                    edge[i] = edge[i + WIN] = 1;
+                    anyEdge = true;
+                }
             }
-        for (int wy = WIN - 1; wy >= 0; wy--)
-            for (int wx = WIN - 1; wx >= 0; wx--) {
-                int i = wy * WIN + wx;
-                float v = wd[i];
-                if (v == 0) continue;
-                if (wx < WIN - 1) v = Math.min(v, wd[i + 1] + 1);
-                if (wy < WIN - 1) {
-                    v = Math.min(v, wd[i + WIN] + 1);
-                    if (wx < WIN - 1) v = Math.min(v, wd[i + WIN + 1] + D);
-                    if (wx > 0) v = Math.min(v, wd[i + WIN - 1] + D);
+        if (anyEdge) {
+            // the edges wander a little, slowly (over a few tiles)
+            lumpyCorners(lumpB, seed, lgx, lgy);
+            for (int wy = M - 3; wy < WIN - M + 3; wy++)
+                for (int wx = M - 3; wx < WIN - M + 3; wx++)
+                    wj[wy * WIN + wx] = (lumpyAt(lumpB, lgx, lgy, tx0 - M + wx, ty0 - M + wy) - 0.5f) * 0.5f;
+            // spread by four each way: along the rows, then down the columns, with running counts
+            byte[] e2 = edgeTmp;
+            for (int wy = 0; wy < WIN; wy++) {
+                int row = wy * WIN, n = 0;
+                for (int x = 0; x < 4; x++) n += edge[row + x];
+                for (int wx = 0; wx < WIN; wx++) {
+                    if (wx + 4 < WIN) n += edge[row + wx + 4];
+                    if (wx - 5 >= 0) n -= edge[row + wx - 5];
+                    e2[row + wx] = (byte) (n > 0 ? 1 : 0);
                 }
-                v = Math.min(v, M + 1);
-                if (r.t(tx0 - M + wx, ty0 - M + wy) == Tile.DEEP) v += 2.5f;
-                wd[i] = v;
             }
-        // each kind's share, blurred ([1 4 6 4 1] / 16 each way) and partly kept sharp, wandering with the noise
-        int present = 0;
-        for (int i = 0; i < WIN * WIN; i++) if (wc[i] >= 0) present |= 1 << wc[i];
-        int lo0 = M - 2, hi0 = WIN - M + 2; // the tiles whose share is needed: the chunk and two round it
-        for (int k = 0; k < NCLS; k++) {
-            if ((present & 1 << k) == 0) continue;
-            float[] f = share[k];
-            for (int wy = lo0 - 2; wy < hi0 + 2; wy++)
-                for (int wx = lo0; wx < hi0; wx++) {
-                    int i = wy * WIN + wx;
-                    tmp[i] = ((wc[i - 2] == k ? 1 : 0) + (wc[i + 2] == k ? 1 : 0) + 4 * ((wc[i - 1] == k ? 1 : 0) + (wc[i + 1] == k ? 1 : 0)) + (wc[i] == k ? 6 : 0)) / 16f;
+            for (int wx = 0; wx < WIN; wx++) {
+                int n = 0;
+                for (int y = 0; y < 4; y++) n += e2[y * WIN + wx];
+                for (int wy = 0; wy < WIN; wy++) {
+                    if (wy + 4 < WIN) n += e2[(wy + 4) * WIN + wx];
+                    if (wy - 5 >= 0) n -= e2[(wy - 5) * WIN + wx];
+                    edge[wy * WIN + wx] = (byte) (n > 0 ? 1 : 0);
                 }
-            for (int wy = lo0; wy < hi0; wy++)
-                for (int wx = lo0; wx < hi0; wx++) {
+            }
+        }
+        // how far each water tile is from land (a two-pass chamfer over the window), deeper out at sea; only
+        // needed with water about
+        if ((present & 1 << C_WATER) != 0) {
+            final float D = 1.4142f;
+            for (int wy = 0; wy < WIN; wy++)
+                for (int wx = 0; wx < WIN; wx++) {
                     int i = wy * WIN + wx;
-                    float b = (tmp[i - 2 * WIN] + tmp[i + 2 * WIN] + 4 * (tmp[i - WIN] + tmp[i + WIN]) + 6 * tmp[i]) / 16f;
-                    float v = 0.7f * b + (wc[i] == k ? 0.3f : 0);
-                    f[i] = v * (1 + WANDER[k] * wj[i]) * (k == C_WATER ? 1.1f : 1);
+                    float v = wd[i];
+                    if (v == 0) continue;
+                    if (wx > 0) v = Math.min(v, wd[i - 1] + 1);
+                    if (wy > 0) {
+                        v = Math.min(v, wd[i - WIN] + 1);
+                        if (wx > 0) v = Math.min(v, wd[i - WIN - 1] + D);
+                        if (wx < WIN - 1) v = Math.min(v, wd[i - WIN + 1] + D);
+                    }
+                    wd[i] = v;
+                }
+            for (int wy = WIN - 1; wy >= 0; wy--)
+                for (int wx = WIN - 1; wx >= 0; wx--) {
+                    int i = wy * WIN + wx;
+                    float v = wd[i];
+                    if (v == 0) continue;
+                    if (wx < WIN - 1) v = Math.min(v, wd[i + 1] + 1);
+                    if (wy < WIN - 1) {
+                        v = Math.min(v, wd[i + WIN] + 1);
+                        if (wx < WIN - 1) v = Math.min(v, wd[i + WIN + 1] + D);
+                        if (wx > 0) v = Math.min(v, wd[i + WIN - 1] + D);
+                    }
+                    v = Math.min(v, M + 1);
+                    if (r.t(tx0 - M + wx, ty0 - M + wy) == Tile.DEEP) v += 2.5f;
+                    wd[i] = v;
                 }
         }
-        float[] scr = sc;
+        // each kind's share, blurred ([1 4 6 4 1] / 16 each way) and partly kept sharp, wandering with the noise
+        // (only needed where there's an edge, and only for the kinds there are)
+        int lo0 = M - 2, hi0 = WIN - M + 2; // the tiles whose share is needed: the chunk and two round it
+        if (anyEdge)
+            for (int k = 0; k < NCLS; k++) {
+                if ((present & 1 << k) == 0) continue;
+                float[] f = share[k];
+                for (int wy = lo0 - 2; wy < hi0 + 2; wy++)
+                    for (int wx = lo0; wx < hi0; wx++) {
+                        int i = wy * WIN + wx;
+                        tmp[i] = ((wc[i - 2] == k ? 1 : 0) + (wc[i + 2] == k ? 1 : 0) + 4 * ((wc[i - 1] == k ? 1 : 0) + (wc[i + 1] == k ? 1 : 0)) + (wc[i] == k ? 6 : 0)) / 16f;
+                    }
+                for (int wy = lo0; wy < hi0; wy++)
+                    for (int wx = lo0; wx < hi0; wx++) {
+                        int i = wy * WIN + wx;
+                        float b = (tmp[i - 2 * WIN] + tmp[i + 2 * WIN] + 4 * (tmp[i - WIN] + tmp[i + WIN]) + 6 * tmp[i]) / 16f;
+                        float v = 0.7f * b + (wc[i] == k ? 0.3f : 0);
+                        f[i] = v * (1 + WANDER[k] * wj[i]) * (k == C_WATER ? 1.1f : 1);
+                    }
+            }
+        float[] rw = rows;
+        int[] lk = localKinds;
         for (int y = 0; y < CHUNK; y++)
             for (int x = 0; x < CHUNK; x++) {
                 int wi = (y + M) * WIN + x + M;
@@ -387,36 +471,58 @@ public final class MapPainter {
                     }
                     continue;
                 }
-                // mixed: another kind comes near enough to this tile to matter (else it's all its own colour)
+                boolean furrows = lvl >= 1;
+                // mixed: another kind comes near enough to this tile to matter (else it's all its own colour); with
+                // no other kind within four tiles it can't be
                 boolean mixed = false;
                 int local = 0;
-                float minOwn = 9, maxOther = 0;
-                float[] own = share[c0];
-                for (int dy = -2; dy <= 2; dy++)
-                    for (int dx = -2; dx <= 2; dx++) {
-                        int n = wi + dy * WIN + dx;
-                        minOwn = Math.min(minOwn, own[n]);
-                        for (int k = 0; k < NCLS; k++) {
-                            if (k == c0 || (present & 1 << k) == 0) continue;
-                            float v = share[k][n];
-                            if (v > 0) {
-                                local |= 1 << k;
-                                maxOther = Math.max(maxOther, v);
+                if (edge[wi] != 0) {
+                    float minOwn = 9, maxOther = 0;
+                    float[] own = share[c0];
+                    for (int dy = -2; dy <= 2; dy++)
+                        for (int dx = -2; dx <= 2; dx++) {
+                            int n = wi + dy * WIN + dx;
+                            minOwn = Math.min(minOwn, own[n]);
+                            for (int k = 0; k < NCLS; k++) {
+                                if (k == c0 || (present & 1 << k) == 0) continue;
+                                float v = share[k][n];
+                                if (v > 0) {
+                                    local |= 1 << k;
+                                    maxOther = Math.max(maxOther, v);
+                                }
                             }
                         }
-                    }
-                if (minOwn - maxOther < 0.3f) mixed = true; // else the edge is further than the beach reaches
+                    if (minOwn - maxOther < 0.3f) mixed = true; // else the edge is further than the beach reaches
+                }
                 local |= 1 << c0;
-                boolean across = Rng.unit(seed, tx >> 3, ty >> 3) < 0.5f;
-                boolean furrows = lvl >= 1;
+                // furrows run one way or the other, field by field (only fields need to know)
+                boolean across = furrows && (local & 1 << C_FARM) != 0 && Rng.unit(seed, tx >> 3, ty >> 3) < 0.5f;
                 if (!mixed) {
                     fillPlain(out, base, side, p, wi, c0 == C_WATER ? 0 : CLS_COLOR[c0], c0 == C_FARM && furrows, across);
                     continue;
+                }
+                // the kinds about, in order
+                int nk = 0;
+                for (int k = 0; k < NCLS; k++) if ((local & 1 << k) != 0) lk[nk++] = k;
+                // each local kind's cubic B-spline along the five rows round the tile, at each pixel column (the
+                // same sums the per-pixel spline makes, so the same values)
+                for (int q = 0; q < nk; q++) {
+                    int k = lk[q];
+                    float[] f = share[k];
+                    for (int rr = 0; rr < 5; rr++) {
+                        int rb = wi + (rr - 2) * WIN, ob = (k * 5 + rr) * p;
+                        for (int i = 0; i < p; i++) {
+                            int n = rb + kb[i], ci = i * 4;
+                            rw[ob + i] = f[n] * cw[ci] + f[n + 1] * cw[ci + 1] + f[n + 2] * cw[ci + 2] + f[n + 3] * cw[ci + 3];
+                        }
+                    }
                 }
                 for (int j = 0; j < p; j++) {
                     int o = base + j * side;
                     int ny = lo[j] * WIN;
                     float ay = lt[j];
+                    int cj = j * 4, r0 = kb[j] + 2;
+                    float y0 = cw[cj], y1 = cw[cj + 1], y2 = cw[cj + 2], y3 = cw[cj + 3];
                     for (int i = 0; i < p; i++) {
                         int nx = lo[i];
                         float ax = lt[i];
@@ -425,38 +531,29 @@ public final class MapPainter {
                         float sh = (wm[wi] * (1 - ax) + wm[i10] * ax) * (1 - ay) + (wm[i01] * (1 - ax) + wm[i11] * ax) * ay;
                         int k1 = c0, k2 = -1;
                         float ep = 1e9f;
-                        if (mixed) {
-                            // each kind's share here, a cubic B-spline over the 4x4 tile centres round it
-                            int r0 = wi + kb[j] * WIN + kb[i], cj = j * 4, ci = i * 4;
-                            float x0 = cw[ci], x1 = cw[ci + 1], x2 = cw[ci + 2], x3 = cw[ci + 3];
-                            for (int k = 0; k < NCLS; k++) {
-                                if ((local & 1 << k) == 0) {
-                                    scr[k] = 0;
-                                    continue;
-                                }
-                                float[] f = share[k];
-                                float v = 0;
-                                for (int dy = 0, n = r0; dy < 4; dy++, n += WIN)
-                                    v += cw[cj + dy] * (f[n] * x0 + f[n + 1] * x1 + f[n + 2] * x2 + f[n + 3] * x3);
-                                scr[k] = v;
+                        // each kind's share here, the two that lead
+                        float s1 = -1, s2 = -1;
+                        for (int q = 0; q < nk; q++) {
+                            int k = lk[q];
+                            int ob = (k * 5 + r0) * p + i;
+                            float v = 0;
+                            v += y0 * rw[ob];
+                            v += y1 * rw[ob + p];
+                            v += y2 * rw[ob + 2 * p];
+                            v += y3 * rw[ob + 3 * p];
+                            if (v <= 0) continue;
+                            if (v > s1) {
+                                s2 = s1;
+                                k2 = k1;
+                                s1 = v;
+                                k1 = k;
+                            } else if (v > s2) {
+                                s2 = v;
+                                k2 = k;
                             }
-                            float s1 = -1, s2 = -1;
-                            for (int k = 0; k < NCLS; k++) {
-                                float v = scr[k];
-                                if (v <= 0) continue;
-                                if (v > s1) {
-                                    s2 = s1;
-                                    k2 = k1;
-                                    s1 = v;
-                                    k1 = k;
-                                } else if (v > s2) {
-                                    s2 = v;
-                                    k2 = k;
-                                }
-                            }
-                            if (s2 <= 0) k2 = -1;
-                            else ep = (s1 - s2) * 1.1f * p; // about the distance to the edge, in pixels
                         }
+                        if (s2 <= 0) k2 = -1;
+                        else ep = (s1 - s2) * 1.1f * p; // about the distance to the edge, in pixels
                         int col;
                         if (k1 == C_WATER) {
                             float d = (wd[wi] * (1 - ax) + wd[i10] * ax) * (1 - ay) + (wd[i01] * (1 - ax) + wd[i11] * ax) * ay;
@@ -496,12 +593,15 @@ public final class MapPainter {
             }
     }
 
+    private final byte[] edgeTmp = new byte[WIN * WIN];
+    private final int[] localKinds = new int[NCLS];
+
     /**
      * A tile all of one kind: its colour (water if color is 0) mottled or shaded by depth, both smooth across tiles
      * and slow to change, so worked out once for each small block of pixels; furrows on fields.
      */
     private void fillPlain(int[] out, int base, int side, int p, int wi, int color, boolean furrows, boolean across) {
-        int bl = p >= 24 ? 4 : p >= 14 ? 2 : 1;
+        int bl = p >= 24 ? 4 : 2;
         for (int j0 = 0; j0 < p; j0 += bl) {
             int jc = Math.min(p - 1, j0 + bl / 2), j1 = Math.min(p, j0 + bl);
             int i01 = wi + lo[jc] * WIN;
@@ -537,10 +637,92 @@ public final class MapPainter {
         }
     }
 
-    private void paintChunk(Gfx g, int tx0, int ty0, int p, int lvl) {
+    // ------------------------------------------------------------------ the details, into the same pixels
+
+    /*
+     * The marks on the ground (paving joints, rubble, fences, walls, barricades, rails, bridge edges, kerbs) and the
+     * trees are painted straight into the chunk's pixels after the ground, anti-aliased by how much of each pixel
+     * a shape covers: the same look the canvas gives, without a drawing call per shape. Only the lane markings
+     * (long, often diagonal lines) are drawn on the canvas afterwards.
+     */
+
+    /** Lays colour c (its alpha times cover) over pixel i. */
+    private static void blend(int[] out, int i, int c, float cover) {
+        int a = (int) ((c >>> 24) * cover + 0.5f);
+        if (a <= 0) return;
+        if (a >= 255) {
+            out[i] = c | 0xFF000000;
+            return;
+        }
+        int d = out[i], b = 255 - a;
+        int rr = (((c >> 16) & 255) * a + ((d >> 16) & 255) * b + 127) / 255;
+        int gg = (((c >> 8) & 255) * a + ((d >> 8) & 255) * b + 127) / 255;
+        int bb = ((c & 255) * a + (d & 255) * b + 127) / 255;
+        out[i] = 0xFF000000 | (rr << 16) | (gg << 8) | bb;
+    }
+
+    /** A rectangle in chunk pixels, its edges anti-aliased. */
+    private static void rect(int[] out, int side, float x, float y, float w, float h, int c) {
+        float x1 = Math.min(side, x + w), y1 = Math.min(side, y + h);
+        x = Math.max(0, x);
+        y = Math.max(0, y);
+        if (x1 <= x || y1 <= y) return;
+        int ix0 = (int) x, ix1 = (int) Math.ceil(x1), iy0 = (int) y, iy1 = (int) Math.ceil(y1);
+        for (int iy = iy0; iy < iy1; iy++) {
+            float cy = Math.min(iy + 1, y1) - Math.max(iy, y);
+            int row = iy * side;
+            for (int ix = ix0; ix < ix1; ix++) {
+                float cx = Math.min(ix + 1, x1) - Math.max(ix, x);
+                blend(out, row + ix, c, cx * cy);
+            }
+        }
+    }
+
+    /** A disc in chunk pixels, its edge anti-aliased (each pixel by its centre's distance from the rim). */
+    private static void disc(int[] out, int side, float cx, float cy, float rad, int c) {
+        if (rad <= 0) return;
+        int iy0 = Math.max(0, (int) Math.floor(cy - rad - 0.5f)), iy1 = Math.min(side - 1, (int) Math.ceil(cy + rad + 0.5f));
+        float in = rad - 0.7072f, out2 = (rad + 0.5f) * (rad + 0.5f);
+        float in2 = in > 0 ? in * in : -1;
+        boolean opaque = c >>> 24 == 255;
+        for (int iy = iy0; iy <= iy1; iy++) {
+            float dy = iy + 0.5f - cy, dy2 = dy * dy;
+            if (dy2 >= out2) continue;
+            float span = (float) Math.sqrt(out2 - dy2);
+            int ix0 = Math.max(0, (int) Math.floor(cx - span)), ix1 = Math.min(side - 1, (int) Math.ceil(cx + span));
+            // fully inside between these (no square root per pixel there)
+            float inSpan = in2 > dy2 ? (float) Math.sqrt(in2 - dy2) : -1;
+            int row = iy * side;
+            // the solid run (pixels whose centres are well inside), then the rim pixel by pixel
+            int s0 = ix1 + 1, s1 = ix1;
+            if (inSpan >= 0) {
+                s0 = Math.max(ix0, (int) Math.ceil(cx - 0.5f - inSpan));
+                s1 = Math.min(ix1, (int) Math.floor(cx - 0.5f + inSpan));
+                if (s1 >= s0) {
+                    if (opaque) java.util.Arrays.fill(out, row + s0, row + s1 + 1, c);
+                    else for (int ix = s0; ix <= s1; ix++) blend(out, row + ix, c, 1);
+                } else {
+                    s0 = ix1 + 1;
+                    s1 = ix1;
+                }
+            }
+            for (int ix = ix0; ix <= ix1; ix++) {
+                if (ix == s0) {
+                    ix = s1;
+                    continue;
+                }
+                float dx = ix + 0.5f - cx;
+                float cover = rad + 0.5f - (float) Math.sqrt(dx * dx + dy2);
+                if (cover > 0) blend(out, row + ix, c, Math.min(1, cover));
+            }
+        }
+    }
+
+    /** The marks on the ground and the trees, over the ground in out. */
+    void paintDetails(int[] out, int tx0, int ty0, int p, int lvl) {
         boolean mid = lvl >= 1, high = lvl >= 2;
-        // the ground itself is already there (paintGround): what follows is drawn over it
         if (!mid) return;
+        int side = CHUNK * p;
         float lw = Math.max(1, p / 12f);
         for (int y = 0; y < CHUNK; y++)
             for (int x = 0; x < CHUNK; x++) {
@@ -552,70 +734,53 @@ public final class MapPainter {
                     case Tile.PAVEMENT:
                     case Tile.PLAZA:
                         if (high) {
-                            g.color(shade(c, 0.93f));
-                            g.fillRect(px, py, p, lw * 0.7f);
-                            g.fillRect(px, py, lw * 0.7f, p);
+                            int sc2 = shade(c, 0.93f);
+                            rect(out, side, px, py, p, lw * 0.7f, sc2);
+                            rect(out, side, px, py, lw * 0.7f, p, sc2);
                         }
                         break;
                     case Tile.WATER:
                     case Tile.DEEP: {
                         // a few glints, away from the shore (the shallows are in the ground already)
                         boolean shore = !Tile.water(r.t(tx - 1, ty)) || !Tile.water(r.t(tx + 1, ty)) || !Tile.water(r.t(tx, ty - 1)) || !Tile.water(r.t(tx, ty + 1));
-                        if (!shore && Rng.unit(r.seed, tx, ty * 3) < 0.07f) {
-                            g.color(0x40E8F4FF);
-                            g.fillRect(px + p * 0.15f, py + p / 2f, p * 0.6f, lw);
-                        }
+                        if (!shore && Rng.unit(r.seed, tx, ty * 3) < 0.07f) rect(out, side, px + p * 0.15f, py + p / 2f, p * 0.6f, lw, 0x40E8F4FF);
                         break;
                     }
                     case Tile.LOT:
-                        if (high && (tx & 1) == 0) {
-                            g.color(0x90D8D8D0);
-                            g.fillRect(px, py + p * 0.12f, lw, p * 0.76f);
-                        }
+                        if (high && (tx & 1) == 0) rect(out, side, px, py + p * 0.12f, lw, p * 0.76f, 0x90D8D8D0);
                         break;
                     case Tile.RUBBLE:
-                        g.color(0xFF8A8076);
-                        g.fillRect(px + p * 0.1f, py + p * 0.2f, p / 3f, p / 4f);
-                        g.color(0xFF3E3832);
-                        g.fillRect(px + p / 2f, py + p / 2f, p / 3f, p / 3f);
-                        g.color(0xFF2A2420);
-                        g.fillRect(px + p * 0.3f, py + p * 0.65f, p / 5f, p / 6f);
+                        rect(out, side, px + p * 0.1f, py + p * 0.2f, p / 3f, p / 4f, 0xFF8A8076);
+                        rect(out, side, px + p / 2f, py + p / 2f, p / 3f, p / 3f, 0xFF3E3832);
+                        rect(out, side, px + p * 0.3f, py + p * 0.65f, p / 5f, p / 6f, 0xFF2A2420);
                         break;
                     case Tile.FENCE:
-                        g.color(0xFF3A3A3A);
-                        g.fillRect(px + p * 0.4f, py, p * 0.2f, p);
-                        g.fillRect(px, py + p * 0.4f, p, p * 0.2f);
+                        rect(out, side, px + p * 0.4f, py, p * 0.2f, p, 0xFF3A3A3A);
+                        rect(out, side, px, py + p * 0.4f, p, p * 0.2f, 0xFF3A3A3A);
                         break;
                     case Tile.WALL:
-                        g.color(0xFF7A6E64);
-                        g.fillRect(px, py, p, p);
-                        g.color(0xFF9A8E82);
-                        g.fillRect(px, py, p, lw);
+                        rect(out, side, px, py, p, p, 0xFF7A6E64);
+                        rect(out, side, px, py, p, lw, 0xFF9A8E82);
                         break;
                     case Tile.BARRICADE:
-                        for (int k = 0; k < 4; k++) {
-                            g.color((k & 1) == 0 ? 0xFFE0B030 : 0xFF2A2A2A);
-                            g.fillRect(px + k * p / 4f, py + p * 0.3f, p / 4f, p * 0.4f);
-                        }
+                        for (int k = 0; k < 4; k++) rect(out, side, px + k * p / 4f, py + p * 0.3f, p / 4f, p * 0.4f, (k & 1) == 0 ? 0xFFE0B030 : 0xFF2A2A2A);
                         break;
                     case Tile.RAIL:
-                        g.color(0xFF4A4038);
-                        for (int k = 0; k < 3; k++) g.fillRect(px + k * p / 3f, py + p * 0.1f, lw * 1.2f, p * 0.8f);
-                        g.color(0xFFB0B0B0);
-                        g.fillRect(px, py + p * 0.3f, p, lw);
-                        g.fillRect(px, py + p * 0.66f, p, lw);
+                        for (int k = 0; k < 3; k++) rect(out, side, px + k * p / 3f, py + p * 0.1f, lw * 1.2f, p * 0.8f, 0xFF4A4038);
+                        rect(out, side, px, py + p * 0.3f, p, lw, 0xFFB0B0B0);
+                        rect(out, side, px, py + p * 0.66f, p, lw, 0xFFB0B0B0);
                         break;
                     case Tile.BRIDGE:
-                        g.color(0xFF8A8480);
-                        if (!Tile.roadish(r.t(tx, ty - 1)) && Tile.water(r.t(tx, ty - 1))) g.fillRect(px, py, p, lw * 2);
-                        if (!Tile.roadish(r.t(tx, ty + 1)) && Tile.water(r.t(tx, ty + 1))) g.fillRect(px, py + p - lw * 2, p, lw * 2);
-                        if (!Tile.roadish(r.t(tx - 1, ty)) && Tile.water(r.t(tx - 1, ty))) g.fillRect(px, py, lw * 2, p);
-                        if (!Tile.roadish(r.t(tx + 1, ty)) && Tile.water(r.t(tx + 1, ty))) g.fillRect(px + p - lw * 2, py, lw * 2, p);
+                        if (!Tile.roadish(r.t(tx, ty - 1)) && Tile.water(r.t(tx, ty - 1))) rect(out, side, px, py, p, lw * 2, 0xFF8A8480);
+                        if (!Tile.roadish(r.t(tx, ty + 1)) && Tile.water(r.t(tx, ty + 1))) rect(out, side, px, py + p - lw * 2, p, lw * 2, 0xFF8A8480);
+                        if (!Tile.roadish(r.t(tx - 1, ty)) && Tile.water(r.t(tx - 1, ty))) rect(out, side, px, py, lw * 2, p, 0xFF8A8480);
+                        if (!Tile.roadish(r.t(tx + 1, ty)) && Tile.water(r.t(tx + 1, ty))) rect(out, side, px + p - lw * 2, py, lw * 2, p, 0xFF8A8480);
                         break;
                     default:
                 }
             }
         // kerbs: a pale kerbstone on the pavement side, a dark gutter on the road side
+        float kw = Math.max(1, p * 0.09f);
         for (int y = 0; y < CHUNK; y++)
             for (int x = 0; x < CHUNK; x++) {
                 int tx = tx0 + x, ty = ty0 + y;
@@ -626,22 +791,61 @@ public final class MapPainter {
                     int nx = tx + (d == 0 ? -1 : d == 1 ? 1 : 0), ny = ty + (d == 2 ? -1 : d == 3 ? 1 : 0);
                     int n = r.t(nx, ny);
                     if (Tile.roadish(n)) continue;
-                    float kw = Math.max(1, p * 0.09f);
-                    g.color(0x50000000);
-                    if (d == 0) g.fillRect(px, py, kw, p);
-                    else if (d == 1) g.fillRect(px + p - kw, py, kw, p);
-                    else if (d == 2) g.fillRect(px, py, p, kw);
-                    else g.fillRect(px, py + p - kw, p, kw);
+                    if (d == 0) rect(out, side, px, py, kw, p, 0x50000000);
+                    else if (d == 1) rect(out, side, px + p - kw, py, kw, p, 0x50000000);
+                    else if (d == 2) rect(out, side, px, py, p, kw, 0x50000000);
+                    else rect(out, side, px, py + p - kw, p, kw, 0x50000000);
                     if (n == Tile.PAVEMENT || n == Tile.PLAZA) {
-                        g.color(0xFFC4C0B6);
-                        if (d == 0) g.fillRect(px - kw, py, kw, p);
-                        else if (d == 1) g.fillRect(px + p, py, kw, p);
-                        else if (d == 2) g.fillRect(px, py - kw, p, kw);
-                        else g.fillRect(px, py + p, p, kw);
+                        if (d == 0) rect(out, side, px - kw, py, kw, p, 0xFFC4C0B6);
+                        else if (d == 1) rect(out, side, px + p, py, kw, p, 0xFFC4C0B6);
+                        else if (d == 2) rect(out, side, px, py - kw, p, kw, 0xFFC4C0B6);
+                        else rect(out, side, px, py + p, p, kw, 0xFFC4C0B6);
                     }
                 }
             }
-        // lane markings and crossings from the road graph
+        // trees: clustered canopies with a shadow, a body and a sunlit top
+        for (int y = 0; y < CHUNK; y++)
+            for (int x = 0; x < CHUNK; x++) {
+                int tx = tx0 + x, ty = ty0 + y;
+                int t = r.t(tx, ty);
+                boolean tree = t == Tile.TREE || (t == Tile.FOREST && Rng.unit(r.seed, tx * 7, ty) < 0.7f)
+                        || ((t == Tile.PARK || t == Tile.YARD) && Rng.unit(r.seed, tx * 5, ty * 3) < 0.06f);
+                if (!tree) continue;
+                // the beach stays clear
+                if (t == Tile.FOREST && (Tile.water(r.t(tx - 1, ty)) || Tile.water(r.t(tx + 1, ty)) || Tile.water(r.t(tx, ty - 1)) || Tile.water(r.t(tx, ty + 1)))) continue;
+                float jx = (Rng.unit(r.seed, tx, ty + 11) - 0.5f) * p * 0.6f, jy = (Rng.unit(r.seed, tx + 5, ty) - 0.5f) * p * 0.6f;
+                float rad = p * (0.5f + Rng.unit(r.seed, tx + 1, ty + 1) * 0.35f);
+                float cx = x * p + p / 2f + jx, cy = y * p + p / 2f + jy;
+                boolean forest = t == Tile.FOREST;
+                int base = forest ? 0xFF33502F : 0xFF3D6034;
+                if (Rng.unit(r.seed, tx + 3, ty + 9) < 0.25f) base = forest ? 0xFF2D4A33 : 0xFF4A6A36;
+                disc(out, side, cx + rad * 0.35f, cy + rad * 0.45f, rad * 1.05f, 0x48000000);
+                disc(out, side, cx, cy, rad, shade(base, 0.85f));
+                if (high) {
+                    disc(out, side, cx - rad * 0.3f, cy + rad * 0.1f, rad * 0.62f, base);
+                    disc(out, side, cx + rad * 0.25f, cy - rad * 0.15f, rad * 0.6f, base);
+                }
+                disc(out, side, cx - rad * 0.28f, cy - rad * 0.3f, rad * 0.42f, shade(base, 1.22f));
+            }
+    }
+
+    /** Does any road with markings at this level pass near the chunk? (Else the canvas needn't be touched.) */
+    boolean hasLanes(int tx0, int ty0, int lvl) {
+        if (lvl < 1) return false;
+        RoadGraph rg = r.roads;
+        float ox = tx0 * 16f, oy = ty0 * 16f, size = CHUNK * 16f;
+        for (int e = 0; e < rg.edgeCount; e++) {
+            if (!rg.ealive[e] || rg.ekind[e] == RoadGraph.STREET && lvl < 2) continue;
+            float ax = rg.nx[rg.ea[e]], ay = rg.ny[rg.ea[e]], bx = rg.nx[rg.eb[e]], by = rg.ny[rg.eb[e]];
+            if (Math.max(ax, bx) < ox - 60 || Math.min(ax, bx) > ox + size + 60 || Math.max(ay, by) < oy - 60 || Math.min(ay, by) > oy + size + 60) continue;
+            return true;
+        }
+        return false;
+    }
+
+    /** Lane markings and crossings from the road graph, on the canvas (over everything else). */
+    void paintLanes(Gfx g, int tx0, int ty0, int p, int lvl) {
+        boolean high = lvl >= 2;
         RoadGraph rg = r.roads;
         float ox = tx0 * 16f, oy = ty0 * 16f, sc = p / 16f, size = CHUNK * 16f;
         for (int e = 0; e < rg.edgeCount; e++) {
@@ -697,34 +901,6 @@ public final class MapPainter {
                 }
             }
         }
-        // trees: clustered canopies with a shadow, a body and a sunlit top
-        for (int y = 0; y < CHUNK; y++)
-            for (int x = 0; x < CHUNK; x++) {
-                int tx = tx0 + x, ty = ty0 + y;
-                int t = r.t(tx, ty);
-                boolean tree = t == Tile.TREE || (t == Tile.FOREST && Rng.unit(r.seed, tx * 7, ty) < 0.7f)
-                        || ((t == Tile.PARK || t == Tile.YARD) && Rng.unit(r.seed, tx * 5, ty * 3) < 0.06f);
-                if (!tree) continue;
-                // the beach stays clear
-                if (t == Tile.FOREST && (Tile.water(r.t(tx - 1, ty)) || Tile.water(r.t(tx + 1, ty)) || Tile.water(r.t(tx, ty - 1)) || Tile.water(r.t(tx, ty + 1)))) continue;
-                float jx = (Rng.unit(r.seed, tx, ty + 11) - 0.5f) * p * 0.6f, jy = (Rng.unit(r.seed, tx + 5, ty) - 0.5f) * p * 0.6f;
-                float rad = p * (0.5f + Rng.unit(r.seed, tx + 1, ty + 1) * 0.35f);
-                float cx = x * p + p / 2f + jx, cy = y * p + p / 2f + jy;
-                boolean forest = t == Tile.FOREST;
-                int base = forest ? 0xFF33502F : 0xFF3D6034;
-                if (Rng.unit(r.seed, tx + 3, ty + 9) < 0.25f) base = forest ? 0xFF2D4A33 : 0xFF4A6A36;
-                g.color(0x48000000);
-                g.fillCircle(cx + rad * 0.35f, cy + rad * 0.45f, rad * 1.05f);
-                g.color(shade(base, 0.85f));
-                g.fillCircle(cx, cy, rad);
-                if (high) {
-                    g.color(base);
-                    g.fillCircle(cx - rad * 0.3f, cy + rad * 0.1f, rad * 0.62f);
-                    g.fillCircle(cx + rad * 0.25f, cy - rad * 0.15f, rad * 0.6f);
-                }
-                g.color(shade(base, 1.22f));
-                g.fillCircle(cx - rad * 0.28f, cy - rad * 0.3f, rad * 0.42f);
-            }
     }
 
     private static void drawLine(Gfx g, float x1, float y1, float x2, float y2, float w, float dash) {
@@ -742,6 +918,10 @@ public final class MapPainter {
 
     public void clear() {
         for (GImage i : cache.values()) i.recycle();
+        for (int l = 0; l < spare.length; l++) {
+            if (spare[l] != null) spare[l].recycle();
+            spare[l] = null;
+        }
         cache.clear();
         cacheBytes = 0;
         if (regionImage != null) regionImage.recycle();

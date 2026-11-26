@@ -41,6 +41,7 @@ final class Texts {
             "- The President can lower the alert, lift martial law and end mobilisation as well as declare them. Formations can be tapped at any zoom. A new game starts on your own city, station, squad or person, with a button to the outbreak.",
             "- The officer and the survivor can skip ahead while none of the dead are near. Your best on a challenge is one whole game; results show minutes; the radio log shows whole messages; the editor works sideways; challenge codes say when a role or scenario can't be used.",
             "- Sturdier on phones: an error no longer closes the game (it saves and offers the menu), a damaged save is set aside, loads can be cancelled with back, the renderer setting is honoured, and the game saves every three minutes.",
+            "- Cars and trucks never sit on top of each other: they wait their turn at junctions and each parks in a place of its own at the kerb. Saves from 1.2 still load, and friends' result codes from 1.2 read right. The autosave no longer stutters, and the close-up map paints faster.",
             "1.2  Together",
             "- Pass-and-play: up to four players share a game, each in a role (President, Military commander, Incident commander, Precinct commander, Squad leader). Players in the pause menu; the P button hands over.",
             "- Friends' results: share your result on a challenge as a code, add theirs, and see who did best on the report.",
