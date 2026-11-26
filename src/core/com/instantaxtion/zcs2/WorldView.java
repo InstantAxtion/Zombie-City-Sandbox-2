@@ -1089,6 +1089,10 @@ public final class WorldView {
 
     // ------------------------------------------------------------------ vehicles
 
+    /** The colours of the city's cars: mostly greys, whites and blacks, some dark blues and reds, a few bright ones. */
+    private static final int[] CAR_COLORS = {0xFFE8E8E6, 0xFFB8BCC2, 0xFF2B2D31, 0xFF8C9096, 0xFFF4F4F2, 0xFF1F3A5F, 0xFF7A1E22,
+            0xFF4A4E54, 0xFFD9D4C7, 0xFF2E5E3A, 0xFFC23B22, 0xFF3D6FA8, 0xFFE0B13A, 0xFF5B3A29, 0xFF16181B, 0xFFA7ADB3};
+
     private void vehicles(Gfx g, Camera cam, float x0, float y0, float x1, float y1, boolean air) {
         Vehicles v = w.veh;
         float z = cam.zoom;
@@ -1106,6 +1110,8 @@ public final class WorldView {
             float L = t.length * k, W = t.width * k;
             boolean wreck = v.state[i] == Vehicles.V_WRECK;
             int col = wreck ? 0xFF2A2624 : t.color;
+            // the city's own cars: each its own colour
+            if (!wreck && v.role[i] == Vehicles.R_LIFE && "car".equals(t.id)) col = CAR_COLORS[(v.uid[i] * 7 + (v.uid[i] >> 3)) % CAR_COLORS.length];
             float lift = inAir ? v.alt[i] * 26 * k : 0;
             if (inAir) {
                 // shadow on the ground, the aircraft above it
@@ -1198,7 +1204,7 @@ public final class WorldView {
         float s = Math.max(4 * dp, Math.min(7 * dp, 30 * z));
         float x0 = -s, y0 = -s, x1 = cam.sw + s, y1 = cam.sh + s;
         for (int i = 0; i < v.top; i++) {
-            if (v.state[i] == Vehicles.V_NONE || v.state[i] == Vehicles.V_PARKED) continue;
+            if (v.state[i] == Vehicles.V_NONE || v.state[i] == Vehicles.V_PARKED || v.role[i] == Vehicles.R_LIFE) continue;
             Content.VType t = v.type(i);
             float sx = cam.toScreenX(v.x[i]), sy = cam.toScreenY(v.y[i]);
             if (sx < x0 || sy < y0 || sx > x1 || sy > y1) continue;

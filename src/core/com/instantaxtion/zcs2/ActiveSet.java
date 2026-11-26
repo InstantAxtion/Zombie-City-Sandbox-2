@@ -246,6 +246,8 @@ public final class ActiveSet {
         for (int k = 0; k < v.top; k++) {
             byte st = v.state[k];
             if (st == Vehicles.V_NONE || st == Vehicles.V_WRECK || v.flying(k)) continue;
+            // (the city's own traffic lives inside the camera's area and never pulls the map along)
+            if (v.role[k] == Vehicles.R_LIFE) continue;
             boolean busy = st == Vehicles.V_DRIVE || st == Vehicles.V_PARKING || st == Vehicles.V_PULLIN || v.crewN[k] > 0;
             if (busy && mark[pageOfPx(v.x[k], v.y[k])] == gen) wantRingPx(v.x[k], v.y[k]);
         }

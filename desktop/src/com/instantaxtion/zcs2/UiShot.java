@@ -393,7 +393,78 @@ public final class UiShot {
         frames(30);
     }
 
+    /**
+     * A normal day (Life): a calm morning and a rush hour, in the capital's centre and in a suburb, then the first
+     * minutes of an outbreak with the traffic fleeing. The weather is set clear for the pictures.
+     *   UiShot outDir w h density life [code] [only]
+     */
+    static void lifeShots(String code) throws Exception {
+        tap("new");
+        frames(2);
+        if (code.startsWith("ZC2-") && !game.applyCode(code)) throw new IllegalStateException("code refused: " + code);
+        frames(2);
+        tap("start");
+        long t0 = System.currentTimeMillis();
+        while (game.screen() != Game.S_PLAY) {
+            frames(1);
+            Thread.sleep(50);
+            if (System.currentTimeMillis() - t0 > 300000) throw new IllegalStateException("never started");
+        }
+        World w = game.world();
+        System.out.println("game: " + w.r.name + ", " + w.r.W + " tiles");
+        game.speedIdx = 0;
+        Region.Settlement cap = w.r.city();
+        float[] centre = ScaleProbe.lifeSpot(w, "centre"), suburb = ScaleProbe.lifeSpot(w, "suburb");
+        String[] names = {"l1-morning-centre", "l2-morning-suburb", "l3-rush-centre", "l4-rush-suburb"};
+        float[] hours = {9.5f, 9.6f, 17.5f, 17.6f};
+        for (int k = 0; k < 4; k++) {
+            float[] at = k % 2 == 0 ? centre : suburb;
+            toHour(w, hours[k]);
+            w.weather.state = Weather.CLEAR;
+            look(0.5f, at[0], at[1]);
+            frames(900);
+            shot(names[k]);
+            lifeLine(names[k], w);
+        }
+        // the outbreak's first minutes in the centre, at the evening rush
+        look(0.5f, centre[0], centre[1]);
+        frames(300);
+        Tools.paintZombies(w, centre[0] + 300, centre[1] - 900, 300, 260, -1);
+        frames(450);
+        shot("l5-outbreak-1min");
+        lifeLine("l5-outbreak-1min", w);
+        frames(900);
+        shot("l6-outbreak-2min");
+        lifeLine("l6-outbreak-2min", w);
+        look(0.32f, centre[0], centre[1] - 400);
+        shot("l7-outbreak-wide");
+        lifeLine("l7-outbreak-wide", w);
+        w.shutdown();
+        System.exit(0);
+    }
+
+    static void toHour(World w, float h) {
+        w.time += ((h - w.hour()) % 24 + 24) % 24 * 60;
+    }
+
+    static void lifeLine(String name, World w) {
+        Life l = w.life;
+        int civ = 0, cops = 0, sol = 0;
+        for (int i = 0; i < w.e.top; i++)
+            if (w.e.loc[i] == Ents.FREE) {
+                if (w.e.kind[i] == Ents.CIV) civ++;
+                else if (w.e.kind[i] == Ents.COP) cops++;
+                else if (w.e.kind[i] == Ents.SOLDIER) sol++;
+            }
+        System.out.printf("%s: %s cars %d parked %d buses %d abandoned %d trains %d, on foot %d, police %d, soldiers %d, dead %d, ledger %d%n", name, w.clock(), l.cars,
+                l.parked, l.buses, l.abandoned, l.trains(), civ, cops, sol, w.totalZombies(), Audit.ledger(w));
+    }
+
     static void modeShots(String mode) throws Exception {
+        if (mode.equals("life")) {
+            lifeShots(extra != null ? extra : "ZC2-28672-0-7-sandbox");
+            return;
+        }
         if (mode.equals("national")) {
             nationalShots(extra != null ? extra : "ZC2-28672-0-7-lab_leak");
             return;

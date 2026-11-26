@@ -86,7 +86,7 @@ public final class Audit {
         Ents e = w.e;
         for (int i = 0; i < e.top; i++) if ((e.loc[i] == Ents.FREE || e.loc[i] == Ents.ABOARD) && e.kind[i] == Ents.CIV && w.stats.resident(i)) n++;
         for (Logistics.Convoy c : w.logistics.convoys) if (c.alive) n += c.refugees;
-        return n + w.strat.refugeeTotal() + w.strat.abroad();
+        return n + w.strat.refugeeTotal() + w.strat.abroad() + w.life.carried();
     }
 
     /**

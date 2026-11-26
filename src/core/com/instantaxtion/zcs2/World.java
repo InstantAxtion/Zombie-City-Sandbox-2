@@ -65,6 +65,8 @@ public final class World {
     public final Recovery recovery;
     /** What the dead do beyond chasing and biting (smashing, feeding, alphas, lunges), and its state. */
     public final Undead undead;
+    /** A normal day round the camera: traffic, parked cars, buses, trains, patrols, people with somewhere to be (Life). */
+    public final Life life;
     /** Systems plugged in (updated, saved and drawn in this order). */
     public final List<Module> modules = new ArrayList<Module>();
     /** Strategic fast-forward: everything as numbers, ten game seconds a step. */
@@ -179,6 +181,9 @@ public final class World {
         modules.add(rules);
         modules.add(defs);
         modules.add(orders);
+        life = new Life(this);
+        // (saved and stepped only when its rules are on: a game without them is exactly as before)
+        if (life.on || life.flowOn) modules.add(life);
         zai = new ZombieAI(this);
         cai = new CivAI(this);
         aai = new ArmedAI(this);

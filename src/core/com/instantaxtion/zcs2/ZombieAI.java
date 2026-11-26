@@ -297,6 +297,8 @@ final class ZombieAI {
         float x = e.x[i], y = e.y[i];
         int v = w.veh.near(x, y, 22);
         if (v < 0 || w.veh.spd[v] >= 25 || w.veh.type(v).flies) return;
+        // a parked car with nobody in it: nothing in there (brushing past it sets its alarm off: Life)
+        if (w.veh.role[v] == Vehicles.R_LIFE && w.veh.crewN[v] == 0) return;
         float dx = w.veh.x[v] - x, dy = w.veh.y[v] - y, d = (float) Math.sqrt(dx * dx + dy * dy) + 0.01f;
         f[DX] = dx / d;
         f[DY] = dy / d;

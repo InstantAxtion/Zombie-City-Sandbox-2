@@ -476,6 +476,8 @@ public final class Sectors {
                     e.home[i] = s;
                     popIn[s]--;
                     ambient[s]++;
+                    // somewhere to be (Life: commuting, shopping, home for the night), and company
+                    if (w.life.on) w.life.pedestrian(i, s, k);
                 }
             }
         }
