@@ -1758,7 +1758,7 @@ public final class Game {
     private String[][] palette() {
         switch (tool) {
             case "dead": {
-                String[] types = {"z:-1", "Mixed", "z:walker", "Walker", "z:runner", "Runner", "z:brute", "Brute", "z:armoured", "Armour", "z:giant", "Giant"};
+                String[] types = {"z:-1", "Mixed", "z:walker", "Walker", "z:runner", "Runner", "z:dog", "Dogs", "z:bruiser", "Bruiser", "z:brute", "Brute", "z:armoured", "Armour", "z:giant", "Giant"};
                 String[] sizes = {"b:1", "1", "b:10", "10", "b:50", "50", "b:250", "250", "b:2000", "Horde 2k"};
                 return new String[][]{types, sizes};
             }

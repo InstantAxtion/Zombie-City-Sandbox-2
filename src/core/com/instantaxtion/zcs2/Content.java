@@ -33,6 +33,14 @@ public final class Content {
         public int index, color, strain;
         public float hp, walk, run, bite, infect, radius, weight;
         public boolean smash, helmet, night, placedOnly;
+        /** How hard each blow lands on a barricade, fence or wall (smash; 0 = can't); smash >= 5 also counts as smash. */
+        public float smashPower;
+        /** Lunges after a wind-up (lunge), charges and knocks the living back (charge), runs in packs (pack). */
+        public boolean lunge, charge, pack;
+        /** False for the dead that can't get into buildings or claw at cars (dogs). */
+        public boolean breakIn = true;
+        /** The share of these that lead the others (alphas, pack leaders); -1 = the rules' default. */
+        public float leads = -1;
     }
 
     public static final class VType {
@@ -222,7 +230,14 @@ public final class Content {
         z.color = color(b, "color", 0xFF7F9C5A);
         z.weight = f(b, "weight", 0);
         z.strain = (int) f(b, "strain", 0);
-        z.smash = f(b, "smash", 0) > 0;
+        z.smashPower = f(b, "smash", 1);
+        z.smash = z.smashPower >= 5;
+        z.lunge = f(b, "lunge", 0) > 0;
+        z.charge = f(b, "charge", 0) > 0;
+        z.pack = f(b, "pack", 0) > 0;
+        z.breakIn = f(b, "breakIn", 1) > 0;
+        if (!z.breakIn) z.smashPower = 0;
+        z.leads = f(b, "leads", -1);
         z.helmet = f(b, "helmet", 0) > 0;
         z.night = f(b, "night", 0) > 0;
         z.placedOnly = f(b, "placedOnly", 0) > 0;

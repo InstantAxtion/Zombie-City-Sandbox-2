@@ -6,7 +6,8 @@ import java.util.Arrays;
  * The scent of the living, as one distance field over the navigation grid (32 px cells), rebuilt twice a second.
  * Every zombie just walks downhill on it: thousands of the dead find their way round buildings to the living
  * for the cost of one breadth-first search, instead of thousands of path searches or steering checks.
- * Noise (gunfire, alarms, explosions) seeds it too, so the dead drift towards a fight they can't yet smell.
+ * Noise seeds it too (gunfire, alarms, explosions, screams, an alpha's roar, a barricade being beaten), so the dead
+ * drift towards a fight they can't yet smell.
  */
 public final class Flow {
     public static final short INF = Short.MAX_VALUE;

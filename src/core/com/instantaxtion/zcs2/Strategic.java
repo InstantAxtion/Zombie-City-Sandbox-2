@@ -344,7 +344,8 @@ public final class Strategic {
             } else if (sec.popIn[s] > 0 || sec.hot[s] > 0 || sec.cam[s] || w.sp.secCiv[s] + w.sp.secCop[s] + w.sp.secSol[s] > 0) {
                 // reached people, a fight, or a watched place: break up into the sector
                 w.ecology.hordeArrived(h, s, sec.zIn[s]);
-                sec.zIn[s] += h.count;
+                // (watched: its front comes on as individuals, the rest is the mass behind them)
+                sec.zIn[s] += h.count - w.undead.watchedHorde(h, s);
                 sec.hot[s] = Math.max(sec.hot[s], 10);
                 h.alive = false;
                 continue;

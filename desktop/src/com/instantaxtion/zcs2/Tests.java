@@ -76,6 +76,91 @@ public final class Tests {
         return true;
     }
 
+    /**
+     * Someone who doesn't move, on a street in the capital, ringed by a barricade (one navigation cell, two tiles,
+     * thick, two cells out: the dead can see them but not reach them), and n of the dead (type -1: mixed) outside it
+     * to the west. Returns {the middle navigation cell x, y, the person}.
+     */
+    static int[] barricadeArena(World w, int n, int ztype) {
+        RoadGraph g = w.r.roads;
+        Region.Settlement c = w.r.city();
+        int ccx = -1, ccy = -1;
+        for (int k = 0; k < g.edgeCount && ccx < 0; k++) {
+            if (g.ekind[k] != RoadGraph.STREET || g.nset[g.ea[k]] != c.id || g.elen[k] < 300) continue;
+            float mx = (g.nx[g.ea[k]] + g.nx[g.eb[k]]) / 2, my = (g.ny[g.ea[k]] + g.ny[g.eb[k]]) / 2;
+            int x = (int) (mx / 32), y = (int) (my / 32);
+            // room outside the ring, to the west, for the dead
+            boolean room = w.r.navOpen(x, y) && w.r.navOpen(x - 3, y) && w.r.navOpen(x - 4, y);
+            if (room) {
+                ccx = x;
+                ccy = y;
+            }
+        }
+        check(ccx >= 0, "no street for the arena");
+        // at night, with everyone else indoors: nobody else on the streets for the dead to go after
+        w.time = 14 * 60;
+        for (int i = 0; i < w.e.top; i++) if (w.e.loc[i] == Ents.FREE && w.e.kind[i] == Ents.CIV) w.sec.shelter(i);
+        int x0 = Integer.MAX_VALUE, y0 = Integer.MAX_VALUE, x1 = -1, y1 = -1;
+        for (int dy = -2; dy <= 2; dy++)
+            for (int dx = -2; dx <= 2; dx++) {
+                if (Math.max(Math.abs(dx), Math.abs(dy)) != 2) continue;
+                for (int ty = (ccy + dy) * 2; ty <= (ccy + dy) * 2 + 1; ty++)
+                    for (int tx = (ccx + dx) * 2; tx <= (ccx + dx) * 2 + 1; tx++)
+                        if (Tile.walkable(w.r.t(tx, ty))) {
+                            w.r.set(tx, ty, Tile.BARRICADE);
+                            x0 = Math.min(x0, tx);
+                            y0 = Math.min(y0, ty);
+                            x1 = Math.max(x1, tx);
+                            y1 = Math.max(y1, ty);
+                        }
+            }
+        w.r.rebuildNav(x0 - 1, y0 - 1, x1 + 1, y1 + 1);
+        w.sec.connectivity();
+        w.r.closeBarricadedRoads(x0, y0, x1, y1);
+        float cx = ccx * 32 + 16, cy = ccy * 32 + 16;
+        int civ = w.spawnCiv(cx, cy, w.c.unit("civilian"));
+        w.e.state[civ] = CivAI.S_PLAYER;
+        w.playerEnt = civ;
+        w.strat.playerFire = false;
+        w.e.hp[civ] = w.e.maxHp[civ] = 1e9f;
+        camOver(w, cx, cy);
+        for (int k = 0; k < n; k++) {
+            float zx = cx - 100 - (k % 4) * 8, zy = cy + ((k / 4) % 7 - 3) * 8;
+            if (!w.r.walkablePx(zx, zy)) zy = cy;
+            Content.ZType t = ztype >= 0 ? w.c.ztypes.get(ztype) : w.pickZType(-1, k);
+            if (!t.breakIn) t = w.c.ztype("walker");
+            w.e.flags[w.spawnZombie(zx, zy, t)] |= Ents.F_PLACED;
+        }
+        return new int[]{ccx, ccy, civ};
+    }
+
+    /** True if one of the dead is inside the ring of an arena round navigation cell (ccx, ccy). */
+    static boolean insideRing(World w, int ccx, int ccy) {
+        for (int i = 0; i < w.e.top; i++)
+            if (w.e.loc[i] == Ents.FREE && w.e.kind[i] == Ents.ZOMBIE && Math.abs((int) (w.e.x[i] / 32) - ccx) <= 1 && Math.abs((int) (w.e.y[i] / 32) - ccy) <= 1)
+                return true;
+        return false;
+    }
+
+    /** True if any cell of the arena's ring is open now. */
+    static boolean ringOpen(World w, int ccx, int ccy) {
+        for (int dy = -2; dy <= 2; dy++)
+            for (int dx = -2; dx <= 2; dx++)
+                if (Math.max(Math.abs(dx), Math.abs(dy)) == 2 && w.r.navOpen(ccx + dx, ccy + dy)) return true;
+        return false;
+    }
+
+    static float meanZombieX(World w) {
+        float sx = 0;
+        int n = 0;
+        for (int i = 0; i < w.e.top; i++)
+            if (w.e.loc[i] == Ents.FREE && w.e.kind[i] == Ents.ZOMBIE) {
+                sx += w.e.x[i];
+                n++;
+            }
+        return n == 0 ? 0 : sx / n;
+    }
+
     public static void main(String[] args) throws Exception {
         content = Content.load(new FileInputStream("assets/content.ini"));
         define();
@@ -1566,6 +1651,240 @@ public final class Tests {
                     check(Math.abs(f.hq.x - hx[i]) + Math.abs(f.hq.y - hy[i]) < 50, f.name + " moved with nobody ordering it");
                 }
                 m.shutdown();
+            }
+        });
+        test("zombies: a crowd breaks a barricade and the paths open", new T() {
+            public void run() {
+                World[] ws = {game(5, 1024, "sandbox", 1), game(5, 1024, "sandbox", 2)};
+                int[] ar = null;
+                for (World w : ws) ar = barricadeArena(w, 26, w.c.ztype("walker").index);
+                World w = ws[0];
+                Undead u = w.undead;
+                // the arena: someone ringed by a barricade (they can be seen through it), the dead outside
+                int ccx = ar[0], ccy = ar[1], civ = ar[2];
+                check(!ringOpen(w, ccx, ccy), "the ring isn't closed");
+                boolean broke = false;
+                float firstDamage = -1, brokeAt = -1, t0 = (float) w.time;
+                for (int k = 0; k < 20 * 180 && !broke; k++) {
+                    for (World x : ws) x.step();
+                    if (k % 100 == 0) {
+                        check(Audit.hash(ws[0]) == Audit.hash(ws[1]), "1 and 2 threads differ at step " + k);
+                        check(Audit.check(w).isEmpty(), Audit.check(w));
+                    }
+                    if (firstDamage < 0 && !u.damage.isEmpty()) firstDamage = (float) w.time;
+                    if (ringOpen(w, ccx, ccy)) {
+                        broke = true;
+                        brokeAt = (float) w.time - t0;
+                    }
+                }
+                check(firstDamage >= 0, "nobody beat on the barricade");
+                check(broke, "the crowd never broke through (" + u.broken + " tiles broken, damage on " + u.damage.size() + ")");
+                check(u.broken >= 2, "broken count " + u.broken);
+                check(Audit.hash(ws[0]) == Audit.hash(ws[1]), "1 and 2 threads differ");
+                // the paths caught up: the navigation grid matches one built from scratch
+                byte[] nav = w.r.nav.clone();
+                w.r.rebuildNav(0, 0, w.r.W - 1, w.r.H - 1);
+                check(java.util.Arrays.equals(nav, w.r.nav), "navigation grid not updated after the break");
+                // and the dead come through to them
+                boolean through = false;
+                for (int k = 0; k < 20 * 30 && !through; k++) {
+                    w.step();
+                    through = insideRing(w, ccx, ccy) || w.e.hp[civ] < 1e9f;
+                }
+                check(through, "nobody came through the gap");
+                // a brute alone smashes through far faster than one of the walkers could
+                World b = game(5, 1024, "sandbox", 1);
+                barricadeArena(b, 1, b.c.ztype("brute").index);
+                int bk = 0;
+                while (b.undead.broken == 0 && bk < 20 * 60) {
+                    b.step();
+                    bk++;
+                }
+                check(b.undead.broken > 0, "a brute alone couldn't break a barricade in a minute");
+                System.out.printf("        26 walkers broke through at %.0f s; one brute broke a tile in %.0f s%n", brokeAt, bk / 20f);
+                for (World x : ws) x.shutdown();
+                b.shutdown();
+            }
+        });
+        test("zombies: dogs and bruisers come out and behave", new T() {
+            public void run() {
+                World w = game(7, 768, "sandbox", 1);
+                Content.ZType dog = w.c.ztype("dog"), bruiser = w.c.ztype("bruiser"), walker = w.c.ztype("walker");
+                check(dog != null && bruiser != null, "no dog or bruiser in content");
+                check(dog.pack && !dog.breakIn && dog.smashPower == 0 && dog.hp < walker.hp && dog.run > walker.run * 2, "dogs aren't fast, small and weak");
+                check(bruiser.lunge && bruiser.hp > walker.hp, "bruisers don't lunge");
+                // they come out in an ordinary outbreak
+                int dogs = 0, bruisers = 0;
+                for (int k = 0; k < 4000; k++) {
+                    Content.ZType t = w.pickZType(-1, k);
+                    if (t == dog) dogs++;
+                    if (t == bruiser) bruisers++;
+                }
+                check(dogs > 0 && bruisers > 0, "dogs " + dogs + ", bruisers " + bruisers + " in 4000 of the dead");
+                // a pack of dogs: they find a leader and run together
+                float[] p = w.r.openGroundNear(Setup.originX + 2000, Setup.originY, false);
+                Tools.paintZombies(w, p[0], p[1], 12, 60, dog.index);
+                play(w, 8, true);
+                int led = 0, n = 0;
+                for (int i = 0; i < w.e.top; i++)
+                    if (w.e.loc[i] == Ents.FREE && w.e.kind[i] == Ents.ZOMBIE && w.e.type[i] == dog.index) {
+                        n++;
+                        if (w.undead.isLeader(i) || w.undead.leaderOf(i) >= 0) led++;
+                    }
+                check(n >= 8, "only " + n + " dogs");
+                check(led >= n / 2, "only " + led + " of " + n + " dogs run in a pack");
+                // a bruiser winds up, lunges, then rests; a brute charges and knocks people back
+                for (String type : new String[]{"bruiser", "brute"}) {
+                    World v = game(7, 768, "sandbox", 1);
+                    float[] q = v.r.openGroundNear(Setup.originX + 1500, Setup.originY + 300, false);
+                    int civ = v.spawnCiv(q[0], q[1], v.c.unit("civilian"));
+                    v.e.state[civ] = CivAI.S_PLAYER;
+                    v.playerEnt = civ;
+                    v.strat.playerFire = false;
+                    v.e.hp[civ] = v.e.maxHp[civ] = 100000;
+                    float dist = type.equals("brute") ? 100 : 55;
+                    int z = -1;
+                    for (int a = 0; a < 16 && z < 0; a++) {
+                        float zx = q[0] + (float) Math.cos(a * 0.39) * dist, zy = q[1] + (float) Math.sin(a * 0.39) * dist;
+                        if (v.r.walkablePx(zx, zy) && v.r.lineOfSight(zx, zy, q[0], q[1])) z = v.spawnZombie(zx, zy, v.c.ztype(type));
+                    }
+                    check(z >= 0, "no room for a " + type);
+                    boolean wound = false, lunged = false, charged = false, knocked = false;
+                    float hp0 = v.e.hp[civ];
+                    for (int k = 0; k < 20 * 8; k++) {
+                        float cx = v.e.x[civ], cy = v.e.y[civ];
+                        v.step();
+                        int ph = v.undead.phase(z);
+                        if (ph == Undead.P_WINDUP) wound = true;
+                        if (ph == Undead.P_LUNGE) lunged = true;
+                        if (ph == Undead.P_CHARGE) charged = true;
+                        if (Math.hypot(v.e.x[civ] - cx, v.e.y[civ] - cy) > 12) knocked = true;
+                    }
+                    check(v.e.hp[civ] < hp0, "the " + type + " never hurt anyone");
+                    if (type.equals("bruiser")) check(wound && lunged, "no wind-up and lunge (" + wound + ", " + lunged + ")");
+                    else check(charged && knocked, "no charge and knock-back (" + charged + ", " + knocked + ")");
+                    check(v.undead.coolUntil[z] > 0, "no cooldown after the attack");
+                    check(Audit.check(v).isEmpty(), Audit.check(v));
+                    v.shutdown();
+                }
+                w.shutdown();
+            }
+        });
+        test("zombies: feeding at a body delays its rising, or stops it", new T() {
+            public void run() {
+                World w = game(9, 768, "sandbox", 1);
+                Ents e = w.e;
+                Content.Unit cu = w.c.unit("civilian");
+                Content.ZType walker = w.c.ztype("walker");
+                // three bodies far apart: nobody feeding, one of the dead feeding, four feeding
+                float[][] at = new float[3][];
+                int[] body = new int[3];
+                for (int c = 0; c < 3; c++) {
+                    at[c] = w.r.openGroundNear(Setup.originX + 1800 + c * 350, Setup.originY - 1500, false);
+                    body[c] = w.spawnCiv(at[c][0], at[c][1], cu);
+                }
+                int[] feeders = {0, 1, 4};
+                // watched, so nobody folds back into the counts
+                camOver(w, at[1][0], at[1][1]);
+                for (int c = 0; c < 3; c++) {
+                    int killer = -1;
+                    for (int f = 0; f < feeders[c]; f++) {
+                        int z = w.spawnZombie(at[c][0] + 6 + f * 3, at[c][1] + 3, walker);
+                        if (killer < 0) killer = z;
+                    }
+                    w.sp.build(e);
+                    w.combat.kill(body[c], Combat.CAUSE_BITE, killer);
+                    e.timer[body[c]] = 10;
+                }
+                float[] rose = {-1, -1, -1};
+                int[] uid = {e.uid[body[0]], e.uid[body[1]], e.uid[body[2]]};
+                for (int k = 0; k < 20 * 60; k++) {
+                    w.step();
+                    for (int c = 0; c < 3; c++)
+                        if (rose[c] < 0 && e.uid[body[c]] == uid[c] && e.loc[body[c]] == Ents.FREE && e.kind[body[c]] == Ents.ZOMBIE) rose[c] = (float) w.time;
+                }
+                check(rose[0] > 0 && rose[0] < 12, "an untouched body rose at " + rose[0]);
+                check(rose[1] > rose[0] + 4, "one feeding didn't delay the rising: " + rose[1] + " vs " + rose[0]);
+                check(rose[2] < 0, "a body four fed on still rose at " + rose[2]);
+                check(w.undead.devoured >= 1, "nothing devoured");
+                check(Audit.check(w).isEmpty(), Audit.check(w));
+                w.shutdown();
+            }
+        });
+        test("save: damaged barricades load exactly", new T() {
+            public void run() throws Exception {
+                World w = game(5, 1024, "sandbox", 2);
+                barricadeArena(w, 20, -1);
+                int k = 0;
+                while (w.undead.damage.size() < 3 && k++ < 20 * 120) w.step();
+                check(w.undead.damage.size() >= 3, "no damage to save");
+                ByteArrayOutputStream bo = new ByteArrayOutputStream();
+                SaveIO.save(w, bo);
+                World l = SaveIO.load(content, new ByteArrayInputStream(bo.toByteArray()), 2);
+                check(l.undead.damage.equals(w.undead.damage), "damage map differs after loading");
+                check(Audit.hash(l) == Audit.hash(w), "different straight after loading");
+                for (int s = 0; s < 20 * 60; s++) {
+                    w.step();
+                    l.step();
+                    if (s % 100 == 0) check(Audit.hash(l) == Audit.hash(w), "diverged " + s + " steps after loading");
+                }
+                check(l.undead.damage.equals(w.undead.damage) && l.undead.broken == w.undead.broken, "barricade damage diverged");
+                check(java.util.Arrays.equals(l.r.tile, w.r.tile) && java.util.Arrays.equals(l.r.nav, w.r.nav), "the map diverged");
+                check(Audit.check(l).isEmpty(), Audit.check(l));
+                w.shutdown();
+                l.shutdown();
+            }
+        });
+        test("zombies: a watched horde comes on as individuals at its front", new T() {
+            public void run() {
+                World w = game(11, 768, "sandbox", 1);
+                float[] p = w.r.openGroundNear(Setup.originX + 1200, Setup.originY + 1200, false);
+                camOver(w, p[0], p[1]);
+                int s = w.r.sectorOfPx(p[0], p[1]);
+                w.sec.cam[s] = true;
+                Strategic.Horde h = w.strat.addHorde(p[0], p[1], 900);
+                h.tx = p[0] + 2000;
+                h.ty = p[1];
+                int z0 = w.sp.zCount;
+                int made = w.undead.watchedHorde(h, s);
+                check(made > 50 && made <= 160, made + " came out at the front");
+                w.sp.build(w.e);
+                check(w.sp.zCount - z0 == made, "individuals " + (w.sp.zCount - z0) + " vs " + made);
+                // they walk on along its heading
+                float before = meanZombieX(w);
+                play(w, 10, true);
+                float after = meanZombieX(w);
+                check(after > before + 40, "the front didn't move on: " + before + " -> " + after);
+                w.shutdown();
+            }
+        });
+        test("zombies: strains change the dead themselves, and alphas roar", new T() {
+            public void run() {
+                World w = game(13, 768, "sandbox", 1);
+                Content.ZType walker = w.c.ztype("walker");
+                float[] p = w.r.openGroundNear(Setup.originX + 1500, Setup.originY - 900, false);
+                int s = w.r.sectorOfPx(p[0], p[1]);
+                w.ecology.strain[s] = 2;
+                int a = w.spawnZombie(p[0], p[1], walker);
+                float hp0 = w.e.maxHp[a];
+                w.step();
+                check(w.undead.strain(a) == 2 && w.e.maxHp[a] > hp0 * 1.2f, "the armoured strain isn't tougher");
+                w.ecology.strain[s] = 1;
+                int b = w.spawnZombie(p[0] + 20, p[1], walker);
+                w.step();
+                check(w.undead.speedMul(b) > 1.1f, "the runners' strain isn't faster");
+                // alphas: some of the dead lead, and their roars are noises on the scent field
+                int leaders = 0;
+                Tools.paintZombies(w, p[0], p[1], 400, 300, walker.index);
+                for (int i = 0; i < w.e.top; i++) if (w.e.loc[i] == Ents.FREE && w.e.kind[i] == Ents.ZOMBIE && w.undead.isLeader(i)) leaders++;
+                check(leaders >= 3 && leaders < 40, leaders + " leaders in 400");
+                int civ = w.spawnCiv(p[0] + 100, p[1], w.c.unit("civilian"));
+                w.e.state[civ] = CivAI.S_PLAYER;
+                w.playerEnt = civ;
+                w.e.hp[civ] = w.e.maxHp[civ] = 100000;
+                play(w, 30, true);
+                check(w.undead.roars > 0, "no alpha roared");
+                w.shutdown();
             }
         });
         test("perf: 20,000 of the dead", new T() {

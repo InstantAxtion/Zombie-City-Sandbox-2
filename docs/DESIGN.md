@@ -28,7 +28,7 @@ All in one package, `com.instantaxtion.zcs2`. The core (`src/core`) never touche
 | The region | `RegionGen`, `Region`, `RoadGraph`, `Tile`, `Noise`, `Names` | Terrain, rivers, settlements, street grids, blocks and lots, facilities, the army base and prison, highways (A* over the terrain, smoothed, bridged), farms; the road graph and its routing |
 | The world | `World`, `Ents`, `Spatial`, `Flow`, `NavPath`, `Parallel`, `Rng` | Entity storage, the spatial grid, the scent field, foot paths, the worker pool, deterministic randomness, and the order of a step |
 | Two tiers | `Sectors` | The counted population and dead, indoor infection, coming out onto the streets and going back in, migration |
-| Behaviour | `ZombieAI`, `CivAI`, `ArmedAI`, `Combat` | Thinking (in parallel) and carrying it out (in order): bites, shots, blasts, deaths, rising |
+| Behaviour | `ZombieAI`, `Undead`, `CivAI`, `ArmedAI`, `Combat` | Thinking (in parallel) and carrying it out (in order): bites, shots, blasts, deaths, rising; the dead smashing, feeding, leading, lunging |
 | Forces | `Squads`, `Vehicles`, `Dispatch`, `Military` | Squads and their orders; driving on the road graph and flying; 911 calls, cordons; the army, gunships, tanks, air strikes, supply, outside help |
 | The region-wide | `Strategic`, `Gov`, `News`, `Stats` | Facilities, power grids, ammunition, hordes, refugees, bridges, strains, goals; the alert level, trust, curfews, evacuations, rumours; the radio log; the numbers and the report |
 | Player | `Tools`, `Setup`, `Actions`, `Roles` | Everything the player can do (every change goes through `Actions`, which records it); building a new game, its scenario and the player's role; the country-scale campaign goals |
@@ -78,6 +78,31 @@ buildings to a fight for the cost of one search, instead of a path search or a s
 targets are chased directly; separation looks at a sample of the same cell only. 20,000 individual zombies in
 the city with its police run at about 2.5 ms per step on the 4-core desktop the tests ran on (the first game's
 brief measured 15-19 ms for 20,000 on its own machine; not the same machine or the same fight, but the same scale).
+
+## The dead up close
+
+`Undead` (a module) holds what the dead do beyond chasing and biting. Each zombie's small state lives in its own
+`Ents.state` byte (set up, strain, attack phase, feeding, led, marching; spawning and rising clear it), so most of
+the dead read nothing new; the rest is kept by slot and read only when the byte says it means something. All of it
+follows the think-phase rule: each zombie writes only its own slot, and reads others only through state the think
+phase never writes (position, velocity, uid, type). Leaders are a hash of the uid, so anyone can ask.
+
+- *Barricades, fences and walls* have hit points (`[rules zombies]`) in a sparse damage map (saved). A zombie
+  pressing towards someone (or along the scent) into one beats on it (`smash` per blow: a walker 1, a brute 12, a
+  giant 45); a broken tile becomes rubble and, at the end of the step, the navigation grid, the sectors' connectivity
+  and the roads closed by barricades catch up. Dogs (`breakIn = 0`) can't.
+- *Feeding*: whoever bites someone to death, and a few idle dead round them, stop at the body; each feeder slows its
+  rising, and enough feeding (`feedDevour`) leaves nothing to rise.
+- *Frenzy*: close on a victim with others pressed round, they move faster and bite again sooner.
+- *Alphas* (`leaderShare`, a pack leader for dogs) roar when they have someone or are on a fresh scent: a noise on
+  the scent field. The dead round about keep with them: on the scent they slow when ahead of their leader and hurry
+  when behind; without one they follow its way.
+- *Big ones*: brutes and giants charge (knocking the living back) and shove cars aside, denting them until they're
+  wrecks; bruisers wind up, lunge, then rest.
+- *Strains* change the dead themselves: runners' strain is faster, the armoured tougher, stalkers see further and
+  move faster at night.
+- *A watched horde* (`Strategic` asks `Undead.watchedHorde`) comes on with its front (`hordeFront`) as individuals in
+  a band walking on along its heading; the rest is the mass behind them in the sector's count.
 
 ## One owner for every entity
 
