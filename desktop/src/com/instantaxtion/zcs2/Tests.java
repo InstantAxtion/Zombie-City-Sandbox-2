@@ -120,6 +120,18 @@ public final class Tests {
      * Checkpoint hashes of the golden games, recorded on the code before P3 (91fecad: P2, P4, P8 and P9a in; the save
      * format, part of each hash, last changed in P4).
      */
+    static final long[][] GOLDEN_STATE = {
+            {6154099638746837556L, -9156902886684524058L, 1866682250405222742L, -9217401520979297812L, 1537591524836997222L, -8950698979581103624L,
+                    3059366993590332249L},
+            {-4697992628451381715L, -6931469245727560265L, -5508742737116565048L, -3574159798741121094L, 4128291540105232830L, -3076895070413400139L,
+                    -7482936298783282732L, -2565931173707041015L, 8901680440373551788L},
+            {2669539334927021982L, 5082642762841353669L, 2603151380757143770L, -6044626732400343070L, 3507074812292639330L, -3478852375069038352L,
+                    1787556130824858488L, 5193441266276925038L, -883700040074343183L, -85772300382242973L, -8993930778584621293L},
+            {2265108056685414850L, 8850664470762981082L, 5771621299069563770L, 3680484559685360948L, -813934901969217142L, -3596638819943977356L,
+                    -4150637171513662266L, 2513615130887085674L, 5484921617596929969L, 5484921617596929969L, 5484921617596929969L},
+            {9203599559297672127L, 322868898503127492L, -7576750052767853140L, -1181182264550250388L, -2554451663253278120L, 4810535057634520153L,
+                    6368992452856273708L, -6427083911352453662L, 7221599643894830012L},
+    };
     static final long[][] GOLDEN = {
             {-1852739393811985745L, 1878149831152644648L, -7640874906170157643L, 8628387922473821497L, 9120933238854093509L, -7504494522535006955L,
                     2973783148979764145L},
@@ -137,7 +149,7 @@ public final class Tests {
      * One golden game: a few street checkpoints, then days of fast-forward with one each game day. Each checkpoint
      * is Audit.hash mixed with a hash of the whole save (sector drift left out: it is only read where the dead walk).
      */
-    static long[] golden(int which) throws Exception {
+    static long[][] golden(int which) throws Exception {
         World w;
         int streetSecs, days;
         if (which == 0) {
@@ -172,21 +184,61 @@ public final class Tests {
             streetSecs = 45;
             days = 6;
         }
-        java.util.List<Long> out = new java.util.ArrayList<Long>();
+        java.util.List<Long> out = new java.util.ArrayList<Long>(), state = new java.util.ArrayList<Long>();
         for (int k = 0; k < 3; k++) {
             play(w, streetSecs / 3f, false);
             out.add(deepHash(w));
+            state.add(stateHash(w));
         }
         w.camDetail = false;
         w.setStrategic(true);
         for (int d = 0; d < days; d++) {
             for (int k = 0; k < 144; k++) w.step();
             out.add(deepHash(w));
+            state.add(stateHash(w));
         }
         w.shutdown();
-        long[] a = new long[out.size()];
-        for (int k = 0; k < a.length; k++) a[k] = out.get(k);
+        long[][] a = new long[2][out.size()];
+        for (int k = 0; k < out.size(); k++) {
+            a[0][k] = out.get(k);
+            a[1][k] = state.get(k);
+        }
         return a;
+    }
+
+    /**
+     * A hash of the simulation's state that doesn't depend on the save format: Audit.hash, every sector's counts,
+     * timers and ecology, the hordes, and the running statistics.
+     */
+    static long stateHash(World w) {
+        long h = Audit.hash(w);
+        Sectors s = w.sec;
+        for (int k = 0; k < s.n; k++) {
+            h = (h ^ s.popIn[k]) * 1099511628211L;
+            h = (h ^ s.zIn[k]) * 1099511628211L;
+            h = (h ^ s.bodies[k]) * 1099511628211L;
+            h = (h ^ Float.floatToIntBits(s.inf[k])) * 1099511628211L;
+            h = (h ^ Float.floatToIntBits(s.hot[k])) * 1099511628211L;
+            h = (h ^ Float.floatToIntBits(s.panic[k])) * 1099511628211L;
+            h = (h ^ Float.floatToIntBits(s.firstZ[k])) * 1099511628211L;
+            h = (h ^ (s.holdout[k] ? 1 : 0)) * 1099511628211L;
+            h = (h ^ Float.floatToIntBits(w.ecology.hunger[k])) * 1099511628211L;
+            h = (h ^ Float.floatToIntBits(w.ecology.nestT[k])) * 1099511628211L;
+            h = (h ^ w.ecology.strain[k]) * 1099511628211L;
+            h = (h ^ Float.floatToIntBits(w.director.peak[k])) * 1099511628211L;
+        }
+        for (Strategic.Horde hd : w.strat.hordes) {
+            h = (h ^ hd.count) * 1099511628211L;
+            h = (h ^ Float.floatToIntBits(hd.x)) * 1099511628211L;
+            h = (h ^ hd.target) * 1099511628211L;
+        }
+        Stats st = w.stats;
+        long[] v = {st.civDeaths, st.civTurned, st.zombiesMade, st.zombieKills, st.infectedTotal, st.rotted, st.holdouts, st.lootings, w.strat.evacuatedOut,
+                w.strat.evacuatedArrived, w.news.log.size(), w.gov.level, Float.floatToIntBits(w.gov.trust)};
+        for (long x : v) h = (h ^ x) * 1099511628211L;
+        for (int x : st.popBySettlement) h = (h ^ x) * 1099511628211L;
+        for (int x : st.lostBySettlement) h = (h ^ x) * 1099511628211L;
+        return h;
     }
 
     static long deepHash(World w) throws Exception {
@@ -566,11 +618,16 @@ public final class Tests {
                 StringBuilder bad = new StringBuilder();
                 SectorIndex.paranoid = true;
                 for (int k = 0; k < GOLDEN.length; k++) {
-                    long[] got = golden(k);
-                    StringBuilder sb = new StringBuilder();
-                    for (long v : got) sb.append(sb.length() > 0 ? ", " : "").append(v).append('L');
-                    if (System.getenv("GOLDEN_PRINT") != null) System.out.println("golden " + k + ": {" + sb + "}");
-                    if (!java.util.Arrays.equals(got, GOLDEN[k])) bad.append("\n  scenario ").append(k).append(" now {").append(sb).append('}');
+                    long[][] got = golden(k);
+                    String[] sb = new String[2];
+                    for (int j = 0; j < 2; j++) {
+                        StringBuilder b = new StringBuilder();
+                        for (long v : got[j]) b.append(b.length() > 0 ? ", " : "").append(v).append('L');
+                        sb[j] = b.toString();
+                    }
+                    if (System.getenv("GOLDEN_PRINT") != null) System.out.println("golden " + k + ": {" + sb[0] + "}\nstate " + k + ": {" + sb[1] + "}");
+                    if (!java.util.Arrays.equals(got[0], GOLDEN[k])) bad.append("\n  scenario ").append(k).append(" now {").append(sb[0]).append('}');
+                    if (!java.util.Arrays.equals(got[1], GOLDEN_STATE[k])) bad.append("\n  scenario ").append(k).append(" state now {").append(sb[1]).append('}');
                 }
                 SectorIndex.paranoid = false;
                 check(bad.length() == 0, "outcomes changed:" + bad);
