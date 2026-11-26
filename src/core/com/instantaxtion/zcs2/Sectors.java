@@ -190,9 +190,9 @@ public final class Sectors {
     }
 
     public void update(float dt) {
-        float bite = w.c.rule("indoorBite", 0.003f), dens = w.c.rule("indoorDensity", 10000), turnTime = w.c.rule("turnTime", 180), clear = w.c.rule("clearRate", 0.015f);
+        float bite = w.c.rule("indoorBite", 0.003f), dens = w.rule("indoorDensity", 10000), turnTime = w.c.rule("turnTime", 180), clear = w.c.rule("clearRate", 0.015f);
         maxBite = w.c.rule("maxBitePerHour", 0.05f);
-        float spillAt = w.c.rule("sectorSpill", 3000);
+        float spillAt = w.rule("sectorSpill", 3000);
         Ents e = w.e;
         Spatial sp = w.sp;
         int individuals = e.live;
@@ -226,7 +226,7 @@ public final class Sectors {
                 float attackers = Math.min(zIn[s], popIn[s] * 0.5f + 20);
                 float k = (w.strat.lit(s) ? 1f : 1.35f) * (holdout(s) ? 0.3f : 1f) * w.gov.compliance(settlement[s]);
                 float rate = attackers * bite * dt * k * popIn[s] / (popIn[s] + dens);
-                float cap = popIn[s] * maxBite * dt / 60f + 0.5f * dt / 10f;
+                float cap = popIn[s] * maxBite * dt / 60f + w.rule("biteFloor", 0.5f) * dt / 10f;
                 float bites = Math.min(popIn[s], Math.min(rate, cap));
                 int b = stoch(bites, s * 7L + 1);
                 popIn[s] -= b;
@@ -341,7 +341,7 @@ public final class Sectors {
         // the dead break out to the living (or come out anyway, slowly, when watched)
         if (zIn[s] > 0 && room) {
             float rate = livingOut > 0 || cam[s] ? 0.12f : 0.03f;
-            int m = Math.min(Math.min(zIn[s], 40), stoch(zIn[s] * rate + 0.3f, s * 11L + 1));
+            int m = Math.min(Math.min(zIn[s], (int) w.rule("emergeDead", 40)), stoch(zIn[s] * rate + 0.3f, s * 11L + 1));
             for (int k = 0; k < m; k++) {
                 float[] p = spot(s, k);
                 if (p == null) break;
@@ -353,7 +353,7 @@ public final class Sectors {
         // people stay barricaded in while the dead are only outside; once the dead get in, they run
         int zHere = zO + zIn[s];
         if (popIn[s] > 0 && zIn[s] > 0 && room) {
-            int m = Math.min(popIn[s], Math.min(12, stoch(0.5f + zIn[s] * 0.3f + panic[s] * 2, s * 11L + 2)));
+            int m = Math.min(popIn[s], Math.min((int) w.rule("emergeFleeing", 12), stoch(0.5f + zIn[s] * 0.3f + panic[s] * 2, s * 11L + 2)));
             for (int k = 0; k < m; k++) {
                 float[] p = spot(s, 100 + k);
                 if (p == null) break;
@@ -366,7 +366,7 @@ public final class Sectors {
         }
         // ordinary life on the streets, where the camera is
         if (cam[s] && zHere == 0 && popIn[s] > 0 && room && !w.gov.streetsClosed() && !w.command.sheltering(settlement[s]) && w.daylight() > 0.3f) {
-            int want = Math.min(28, popIn[s] / 25 + 2);
+            int want = Math.min((int) w.rule("emergeStreet", 28), popIn[s] / 25 + 2);
             if (ambient[s] < want) {
                 int m = Math.min(want - ambient[s], 3);
                 for (int k = 0; k < m && popIn[s] > 0; k++) {
@@ -421,12 +421,12 @@ public final class Sectors {
                 bd = d;
             }
         }
-        float rate = 0.02f;
+        float rate = w.rule("migrateRate", 0.02f);
         if (bd < 0) {
             // nothing to go to: shamble about a little (more when hungry)
             if (Rng.unit(w.seed, w.tick, s * 5L) < 0.08f * Math.min(1, dt)) bd = Rng.hashInt(w.seed, w.tick, s, 8);
             if (bd < 0 || (connect[s] & (1 << bd)) == 0) return;
-            rate = 0.003f;
+            rate = w.rule("shambleRate", 0.003f);
         }
         int t = neighbour(s, bd);
         int m = Math.min(zIn[s], stoch((zIn[s] * rate + 0.2f) * dt * w.weather.zombieSpeed() * w.ecology.migrateFactor(s), s * 13L));

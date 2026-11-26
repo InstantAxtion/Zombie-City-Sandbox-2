@@ -170,7 +170,7 @@ public final class Navy extends Module {
             float dx = sh.tx - sh.x, dy = sh.ty - sh.y, d = (float) Math.sqrt(dx * dx + dy * dy) + 0.01f;
             // steam closer, staying on deep water
             if (d > range * 0.8f) {
-                float step = vt.speed * dt;
+                float step = w.rule("warshipSpeed", vt.speed) * dt;
                 float a = (float) Math.atan2(dy, dx);
                 for (int k = 0; k < 5; k++) {
                     float ta = a + (k == 0 ? 0 : (k % 2 == 1 ? 1 : -1) * ((k + 1) / 2) * 0.6f);
@@ -276,7 +276,7 @@ public final class Navy extends Module {
 
     /** Would a formation going to (x, y) be flown (far, with working airfields at both ends)? */
     public boolean airliftable(Forces.Formation f, float x, float y) {
-        float far = w.c.rule("airliftDistance", 9000);
+        float far = w.rule("airliftDistance", 9000);
         float dx = x - f.hq.x, dy = y - f.hq.y;
         if (dx * dx + dy * dy < far * far) return false;
         Region.Facility a = airfieldNear(f.hq.x, f.hq.y, 5000, null);
@@ -285,7 +285,7 @@ public final class Navy extends Module {
 
     /** Formations sent far go by air when there are working airfields at both ends. */
     private void airlift(float dt) {
-        float far = w.c.rule("airliftDistance", 9000);
+        float far = w.rule("airliftDistance", 9000);
         for (Forces.Formation f : w.forces.formations) {
             if (!f.alive || f.state != Forces.MOVING || f.route == null || f.ri > 0) continue;
             float dx = f.gx - f.hq.x, dy = f.gy - f.hq.y;
@@ -306,7 +306,7 @@ public final class Navy extends Module {
             w.news.count("airlift", "Airlift: the " + f.name + " is being flown to " + b.name + "|Airlift: %d more formation{s} flown across the country", 1, b.x, b.y);
         }
         Content.VType pl = w.c.vtype("transport_plane");
-        float speed = pl != null ? pl.speed : 420;
+        float speed = w.rule("airliftSpeed", pl != null ? pl.speed : 420);
         for (int k = flights.size() - 1; k >= 0; k--) {
             Flight fl = flights.get(k);
             Forces.Formation f = w.forces.formations.get(fl.formation);

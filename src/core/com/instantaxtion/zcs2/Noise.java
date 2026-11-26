@@ -8,11 +8,11 @@ public final class Noise {
         this.seed = seed;
     }
 
-    private float lattice(int x, int y) {
+    float lattice(int x, int y) {
         return Rng.unit(seed, x, y) * 2f - 1f;
     }
 
-    private static float fade(float t) {
+    static float fade(float t) {
         return t * t * (3 - 2 * t);
     }
 

@@ -307,7 +307,7 @@ public final class Forces extends Module {
         RoadGraph rg = w.r.rails;
         if (rg.nodeCount < 2 || rg.adjStart == null) return false;
         float dx = x - f.hq.x, dy = y - f.hq.y;
-        float over = w.c.rule("troopTrainOver", 4000);
+        float over = w.rule("troopTrainOver", 4000);
         if (dx * dx + dy * dy < over * over) return false;
         if (w.navy.airliftable(f, x, y)) return false; // flown instead (Navy)
         int a = rg.nearestNode(f.hq.x, f.hq.y, 700), b = rg.nearestNode(x, y, 2500);
@@ -330,7 +330,7 @@ public final class Forces extends Module {
     /** Along the railway at train speed; at the end, on by road. A cut line (a blown bridge) puts them off early. */
     private void rail(Formation f, float dt) {
         RoadGraph g = w.r.rails;
-        float budget = w.c.rule("trainSpeed", 90) * dt;
+        float budget = w.rule("trainSpeed", 90) * dt;
         boolean cut = false;
         while (budget > 0 && f.route != null && f.ri < f.route.length - 1) {
             int nn = f.route[f.ri + 1];
@@ -363,7 +363,7 @@ public final class Forces extends Module {
 
     private void move(Formation f, float dt) {
         RoadGraph g = w.r.roads;
-        float budget = f.t.speed * dt * (w.weather.zombieSpeed() < 1 ? 0.85f : 1);
+        float budget = w.rule("formationSpeed", f.t.speed) * dt * (w.weather.zombieSpeed() < 1 ? 0.85f : 1);
         while (budget > 0 && f.route != null && f.ri < f.route.length - 1) {
             int nn = f.route[f.ri + 1];
             int e = g.edgeBetween(f.route[f.ri], nn);

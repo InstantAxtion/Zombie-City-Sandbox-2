@@ -90,7 +90,7 @@ public final class Ecology extends Module {
 
     /** The dead a sector needs before they set off as a horde (fewer when hungry). */
     public int hordeThreshold(int s) {
-        return (int) (w.c.rule("hordeSize", 300) * (1 - 0.6f * hunger[s]));
+        return (int) (w.rule("hordeSize", 300) * (1 - 0.6f * hunger[s]));
     }
 
     /** People were bitten here: the dead have fed. */
@@ -164,7 +164,7 @@ public final class Ecology extends Module {
         float hungerTime = w.c.rule("hungerDays", 2f) * 1440f;
         float starve = w.c.rule("starvePerDay", 0.02f) / 1440f;
         float nestDays = w.c.rule("nestDays", 2f) * 1440f;
-        int nestMin = (int) w.c.rule("nestMin", 400);
+        int nestMin = (int) w.rule("nestMin", 400);
         float overrun = w.c.rule("overrunRatio", 20);
         float strainDays = w.c.rule("strainDays", 1.5f) * 1440f;
         // (only awake sectors: a sleeping one has no dead, no hunger, no nest and no strain, and stays so)
