@@ -324,7 +324,7 @@ public final class SaveIO {
         readSquads(in, w, ver, map);
         if (ver >= 8) readSectorsSparse(in, w.sec);
         else readSectors(in, w.sec);
-        readDispatch(in, w.disp);
+        readDispatch(in, w.disp, ver);
         readMilitary(in, w.mil);
         readStrategic(in, w.strat);
         readGov(in, w.gov);
@@ -759,7 +759,7 @@ public final class SaveIO {
      * a[0..n) with its zeros in runs: the count, then (zeros, values, the values) until the end. small: the values as
      * zigzag varints (counts), else as plain ints (float bits).
      */
-    private static void runs(DataOutputStream o, int[] a, int n, boolean small) throws IOException {
+    static void runs(DataOutputStream o, int[] a, int n, boolean small) throws IOException {
         Overlay.writeVar(o, n);
         int i = 0;
         while (i < n) {
@@ -778,7 +778,7 @@ public final class SaveIO {
     }
 
     /** Reads what runs() wrote into a (zeros where it says none; values past a's end are read and dropped). */
-    private static void readRuns(DataInputStream in, int[] a, boolean small) throws IOException {
+    static void readRuns(DataInputStream in, int[] a, boolean small) throws IOException {
         int n = Overlay.readVar(in), i = 0;
         java.util.Arrays.fill(a, 0);
         while (i < n) {
@@ -819,11 +819,14 @@ public final class SaveIO {
         }
         o.writeInt(d.callsTotal);
         o.writeFloat(d.cordonT);
-        ints(o, d.secIncident, d.secIncident.length);
+        // version 8: sparse, against -1 (most sectors have no incident)
+        int[] inc = new int[d.secIncident.length];
+        for (int i = 0; i < inc.length; i++) inc[i] = d.secIncident[i] + 1;
+        runs(o, inc, inc.length, true);
         bools(o, d.perimeter, d.perimeter.length);
     }
 
-    private static void readDispatch(DataInputStream in, Dispatch d) throws IOException {
+    private static void readDispatch(DataInputStream in, Dispatch d, int ver) throws IOException {
         int n = in.readInt();
         d.incidents.clear();
         for (int k = 0; k < n; k++) {
@@ -845,7 +848,11 @@ public final class SaveIO {
         }
         d.callsTotal = in.readInt();
         d.cordonT = in.readFloat();
-        readInts(in, d.secIncident);
+        if (ver >= 8) {
+            int[] inc = new int[d.secIncident.length];
+            readRuns(in, inc, true);
+            for (int i = 0; i < inc.length; i++) d.secIncident[i] = inc[i] - 1;
+        } else readInts(in, d.secIncident);
         readBools(in, d.perimeter);
     }
 
