@@ -141,6 +141,11 @@ final class Icons {
             case "fog":
                 for (int i = -1; i <= 1; i++) g.fillRoundRect(x - h * 0.85f + (i & 1) * h * 0.2f, y + i * h * 0.45f - lw / 2, h * 1.5f, lw * 1.1f, lw / 2);
                 break;
+            case "chart": // bars rising, a line over them
+                g.fillRect(x - h * 0.8f, y + h * 0.2f, h * 0.4f, h * 0.6f);
+                g.fillRect(x - h * 0.2f, y - h * 0.2f, h * 0.4f, h * 1.0f);
+                g.fillRect(x + h * 0.4f, y - h * 0.7f, h * 0.4f, h * 1.5f);
+                break;
             case "help":
                 g.strokeCircle(x, y, h * 0.85f, lw);
                 g.text("?", x, y + h * 0.4f, h * 1.2f, Gfx.ALIGN_CENTER, true);

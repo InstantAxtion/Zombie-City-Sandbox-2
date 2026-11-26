@@ -30,6 +30,10 @@ public final class UiShot {
             directorShots(pf);
             return;
         }
+        if (a.length > 4 && a[4].equals("legible")) {
+            legibleShots();
+            return;
+        }
         if (a.length > 4 && a[4].equals("coop")) {
             coop();
             return;
@@ -343,6 +347,105 @@ public final class UiShot {
         }
         System.out.println("ok " + mode + ": " + game.world().clock() + ", " + game.world().totalZombies() + " dead");
         game.world().shutdown();
+        System.exit(0);
+    }
+
+    /** What makes the outbreak legible: the numbers panel, callouts, the inspector's tracer, a town's fall, an alert, the report. */
+    static void legibleShots() throws Exception {
+        tap("new");
+        frames(2);
+        tap("mode:0");
+        frames(1);
+        tap("scen:1"); // lab leak
+        frames(1);
+        tap("start");
+        waitPlay();
+        World w = game.world();
+        game.speedIdx = 2;
+        frames(150);
+        // a fight in the middle, and police into it
+        float cx = game.cam.cx, cy = game.cam.cy;
+        Tools.paintZombies(w, cx + 60, cy, 120, 120, -1);
+        frames(240);
+        // the numbers, open
+        if (!game.statsOpen) tap("statsp");
+        // a few things happening on screen at once (the real ones are rarer than a screenshot needs)
+        Records rc = w.stats.rec;
+        rc.callout("Barricade broken", cx - 120, cy - 160, Records.C_BREACH);
+        rc.callout("Horde sighted", cx + 140, cy + 200, Records.C_HORDE);
+        rc.callout("Officer down", cx - 60, cy + 80, Records.C_LOSS);
+        rc.callout("Officer down", cx - 50, cy + 90, Records.C_LOSS);
+        rc.callout("Bridge blown", cx + 100, cy - 60, Records.C_BLAST);
+        frames(8);
+        shot("L1-hud-callouts");
+        // an armed person, with their last ten seconds
+        int best = -1;
+        float bd = Float.MAX_VALUE;
+        for (int i = 0; i < w.e.top; i++) {
+            if (w.e.loc[i] != Ents.FREE || !w.e.armed(i) || rc.traceLength(i) < 5) continue;
+            float d = Math.abs(w.e.x[i] - cx) + Math.abs(w.e.y[i] - cy);
+            if (d < bd) {
+                bd = d;
+                best = i;
+            }
+        }
+        if (best >= 0) {
+            game.inspEnt = best;
+            game.cam.cx = w.e.x[best];
+            game.cam.cy = w.e.y[best];
+            frames(3);
+            shot("L2-inspect-unit");
+        }
+        // one who fell, and why (if nobody has yet, one is left with no ammunition among the dead)
+        if (best >= 0 && w.stats.fallen.isEmpty()) {
+            w.e.ammo[best] = 0;
+            w.e.hp[best] = Math.min(w.e.hp[best], 10);
+            Tools.paintZombies(w, w.e.x[best], w.e.y[best], 30, 30, w.c.ztype("walker").index);
+            for (int k = 0; k < 600 && w.e.loc[best] == Ents.FREE; k++) w.step();
+            frames(2);
+        }
+        int fell = -1;
+        for (int i = 0; i < w.e.top; i++)
+            if (w.e.loc[i] == Ents.BODY && (w.e.kind[i] == Ents.COP || w.e.kind[i] == Ents.SOLDIER) && rc.deathReason(w.e.uid[i]).length() > 0) fell = i;
+        if (fell >= 0) {
+            game.inspEnt = fell;
+            frames(3);
+            shot("L3-inspect-fallen");
+        }
+        game.closeInspector();
+        // a town that has been given up
+        Region.Settlement town = null;
+        for (Region.Settlement t : w.r.settlements) if (t.kind == Region.S_TOWN && !t.capital && (town == null || t.residents > town.residents)) town = t;
+        if (town != null) {
+            Tools.paintZombies(w, town.cx * 16f, town.cy * 16f, 300, 300, -1);
+            frames(60);
+            w.command.abandon(null, town.id);
+            frames(200);
+            game.inspSettle = town.id;
+            game.cam.flyTo(town.cx * 16f, town.cy * 16f, 0.15f);
+            frames(60);
+            shot("L4-inspect-town");
+            game.closeInspector();
+        }
+        // fast-forward stopped for a big event
+        game.speedIdx = 4;
+        frames(5);
+        rc.alert("A horde of 2,400 is near " + (town != null ? town.name : "the city"), cx, cy, Records.A_HORDE);
+        frames(4);
+        shot("L5-alert");
+        // the report: the top, then the story further down
+        tap("pause");
+        frames(2);
+        tap("report");
+        frames(2);
+        shot("L6-report");
+        for (int k = 1; k <= 4; k++) {
+            game.scroll = k * H * 0.8f;
+            frames(2);
+            shot("L6-report-" + k);
+        }
+        System.out.println("ok legible: " + w.clock() + ", callouts " + rc.calloutSeq + ", alerts " + rc.alertSeq + ", fallen " + w.stats.fallen.size());
+        w.shutdown();
         System.exit(0);
     }
 

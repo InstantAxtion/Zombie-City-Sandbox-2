@@ -26,6 +26,16 @@ public final class Settings {
     public boolean unitNames = true;
     /** Colours for the dead, the living, police and army that differ for every kind of colour blindness. */
     public boolean colourBlind = false;
+    /** Fast-forward slows to 1x for big events (and offers to go there): 2 all of them, 1 the biggest, 0 never. */
+    public int autoSlow = 2;
+    public static final String[] AUTOSLOW_NAMES = {"Never", "Biggest only", "All events"};
+
+    /** Does fast-forward stop for this kind of alert (Records.A_*)? */
+    public boolean slowsFor(int kind) {
+        if (autoSlow <= 0) return false;
+        return autoSlow >= 2 || kind != Records.A_HORDE && kind != Records.A_FACILITY;
+    }
+
     public static final int[] MAX_OPTIONS = {20000, 40000, 60000, 100000};
 
     public void load(Platform p) {
@@ -51,6 +61,7 @@ public final class Settings {
         captions = b(p, "captions", captions);
         unitNames = b(p, "unitNames", unitNames);
         colourBlind = b(p, "colourBlind", colourBlind);
+        autoSlow = Math.max(0, Math.min(2, i(p, "autoSlow", autoSlow)));
     }
 
     public void save(Platform p) {
@@ -76,6 +87,7 @@ public final class Settings {
         p.setPref("captions", "" + captions);
         p.setPref("unitNames", "" + unitNames);
         p.setPref("colourBlind", "" + colourBlind);
+        p.setPref("autoSlow", "" + autoSlow);
     }
 
     private static int i(Platform p, String k, int def) {

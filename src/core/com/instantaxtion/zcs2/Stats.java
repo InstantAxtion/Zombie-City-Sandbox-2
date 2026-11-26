@@ -46,8 +46,12 @@ public final class Stats {
     // timeline: every 10 s
     public static final int MAXT = 4000;
     public final float[] tTime = new float[MAXT];
-    public final int[] tZombies = new int[MAXT], tAlive = new int[MAXT], tPolice = new int[MAXT], tArmy = new int[MAXT];
+    /** tPolice and tArmy are those out in squads; tPoliceAll and tArmyAll everyone (waiting at stations and bases too; -1 unknown). */
+    public final int[] tZombies = new int[MAXT], tAlive = new int[MAXT], tPolice = new int[MAXT], tArmy = new int[MAXT],
+            tPoliceAll = new int[MAXT], tArmyAll = new int[MAXT];
     public int tN;
+    /** Why things happened: the tracer, towns, formations, moments, callouts (a module of its own, saved with the modules). */
+    public final Records rec;
 
     public static final class Event {
         public final String text;
@@ -75,6 +79,26 @@ public final class Stats {
         zBySettlement = new int[w.r.settlements.size()];
         popBySettlement = new int[w.r.settlements.size()];
         lostBySettlement = new int[w.r.settlements.size()];
+        java.util.Arrays.fill(tPoliceAll, -1);
+        java.util.Arrays.fill(tArmyAll, -1);
+        rec = new Records(w);
+    }
+
+    /** Police out in squads, and in all (out, and waiting at stations and in formations). The HUD, panel and report use these. */
+    public int policeOut() {
+        return w.sq.count(Ents.COP);
+    }
+
+    public int policeAll() {
+        return rec.policeAll();
+    }
+
+    public int soldiersOut() {
+        return w.sq.count(Ents.SOLDIER);
+    }
+
+    public int soldiersAll() {
+        return rec.soldiersAll();
     }
 
     public void event(String text, float x, float y) {
@@ -85,14 +109,17 @@ public final class Stats {
     /** Where people were lost, biggest first ("412,000 in their homes, 31,000 on the roads"), or "" if nobody was. */
     public String lossSummary() {
         StringBuilder sb = new StringBuilder();
-        boolean[] used = new boolean[lossBy.length];
-        for (int n = 0; n < lossBy.length; n++) {
+        // the counted causes, and those bitten in the streets one by one (kept by the records)
+        int[] by = java.util.Arrays.copyOf(lossBy, lossBy.length + 1);
+        by[lossBy.length] = rec.streetLost;
+        boolean[] used = new boolean[by.length];
+        for (int n = 0; n < by.length; n++) {
             int best = -1;
-            for (int i = 0; i < lossBy.length; i++) if (!used[i] && lossBy[i] > 0 && (best < 0 || lossBy[i] > lossBy[best])) best = i;
+            for (int i = 0; i < by.length; i++) if (!used[i] && by[i] > 0 && (best < 0 || by[i] > by[best])) best = i;
             if (best < 0) break;
             used[best] = true;
             if (sb.length() > 0) sb.append(", ");
-            sb.append(News.num(lossBy[best])).append(' ').append(LOSS_CAUSES[best]);
+            sb.append(News.num(by[best])).append(' ').append(best < LOSS_CAUSES.length ? LOSS_CAUSES[best] : "in the streets");
         }
         return sb.toString();
     }
@@ -118,9 +145,11 @@ public final class Stats {
     }
 
     void noteFallen(int i, int cause) {
+        // why, from their last seconds (the tracer), and a callout where they fell
+        String why = rec.died(i, cause);
+        rec.callout(w.e.kind[i] == Ents.COP ? "Officer down" : "Man down", w.e.x[i], w.e.y[i], Records.C_LOSS);
         if (fallen.size() > 500) return;
-        String[] how = {"bitten", "shot", "in a blast", "in a crash", "turned", ""};
-        fallen.add(w.clock() + "  " + w.nameOf(i) + " (" + w.unitOf(i).name + ", " + w.e.kills[i] + " kills), " + how[Math.min(5, cause)]);
+        fallen.add(w.clock() + "  " + w.nameOf(i) + ": " + why + " (" + w.unitOf(i).name + ", " + w.e.kills[i] + " kills)");
     }
 
     /** The people and the dead in each settlement (also after loading a save, where they aren't stored). */
@@ -151,6 +180,8 @@ public final class Stats {
                 tAlive[k] = tAlive[i];
                 tPolice[k] = tPolice[i];
                 tArmy[k] = tArmy[i];
+                tPoliceAll[k] = tPoliceAll[i];
+                tArmyAll[k] = tArmyAll[i];
             }
             tN = k;
             tEvery *= 2;
@@ -161,6 +192,8 @@ public final class Stats {
             tAlive[tN] = w.livingCivilians();
             tPolice[tN] = w.sq.count(Ents.COP);
             tArmy[tN] = w.sq.count(Ents.SOLDIER);
+            tPoliceAll[tN] = policeAll();
+            tArmyAll[tN] = soldiersAll();
             tN++;
         }
     }
