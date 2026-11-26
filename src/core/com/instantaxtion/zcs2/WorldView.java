@@ -37,8 +37,30 @@ public final class WorldView {
     private final SecMap infection = new SecMap(0), dark = new SecMap(1), heat = new SecMap(2);
     private final CrowdMap crowd = new CrowdMap();
 
-    public static final int DEAD_RIM = 0xFF6E1616, LIVING_LINE = 0xFF1C1712;
-    public static final int C_DEAD = 0xFF8FAAA6, C_CIV = 0xFFF0DCB0, C_COP = 0xFF4C88FF, C_ARMY = 0xFFCDBE78;
+    public static final int LIVING_LINE = 0xFF1C1712;
+    // the people's colours (palette() switches them to a colour-blind-safe set)
+    public static int DEAD_RIM = 0xFF6E1616, C_DEAD = 0xFF8FAAA6, C_DEAD_FAR = 0xFFB8483E, C_CIV = 0xFFF0DCB0, C_COP = 0xFF4C88FF,
+            C_ARMY = 0xFFCDBE78;
+    static boolean colourBlind;
+
+    /**
+     * The colours for the dead, the living, police and army: the usual ones, or a set that stays apart for every kind
+     * of colour blindness (vermilion, white, sky blue and yellow differ in brightness as well as hue).
+     */
+    public static void palette(boolean cb) {
+        colourBlind = cb;
+        C_DEAD = cb ? 0xFFD55E00 : 0xFF8FAAA6;
+        C_DEAD_FAR = cb ? 0xFFD55E00 : 0xFFB8483E;
+        DEAD_RIM = cb ? 0xFF4A1800 : 0xFF6E1616;
+        C_CIV = cb ? 0xFFF4F4F4 : 0xFFF0DCB0;
+        C_COP = cb ? 0xFF56B4E9 : 0xFF4C88FF;
+        C_ARMY = cb ? 0xFFF0E442 : 0xFFCDBE78;
+    }
+
+    /** Particle detail: 0 low, 1 normal, 2 high. */
+    public int effects = 1;
+    /** Names under formations' symbols. */
+    public boolean unitNames = true;
 
     public WorldView(World w, Platform pf) {
         this.w = w;
@@ -689,7 +711,7 @@ public final class WorldView {
             // big crowd is a mass rather than a heap of rings), the living over them, police and soldiers on top
             // with a pale outline so they don't vanish among the dead
             float size = Math.max(2.4f * dp, Math.min(4.2f * dp, 8 * z));
-            dots(g, cam, x0, y0, x1, y1, Ents.ZOMBIE, z > 0.4f ? C_DEAD : 0xFFB8483E, z > 0.4f ? DEAD_RIM : 0, size * 0.9f);
+            dots(g, cam, x0, y0, x1, y1, Ents.ZOMBIE, z > 0.4f ? C_DEAD : C_DEAD_FAR, z > 0.4f ? DEAD_RIM : 0, size * 0.9f);
             dots(g, cam, x0, y0, x1, y1, Ents.CIV, C_CIV, LIVING_LINE, size);
             dots(g, cam, x0, y0, x1, y1, Ents.COP, C_COP, 0xFFF2F4F8, size * 1.3f);
             dots(g, cam, x0, y0, x1, y1, Ents.SOLDIER, C_ARMY, 0xFFF2F4F8, size * 1.3f);
@@ -766,6 +788,7 @@ public final class WorldView {
             head = kind == Ents.CIV ? 0xFFE6C29C : MapPainter.shade(u.color, 0.7f);
             if (kind == Ents.CIV && u.weapon == null) body = civColor(e.uid[i]);
         }
+        if (colourBlind) body = dead ? C_DEAD : kind == Ents.COP ? C_COP : kind == Ents.SOLDIER ? C_ARMY : body;
         float a = e.face[i];
         float fx = (float) Math.cos(a), fy = (float) Math.sin(a);
         float r = Math.max(rad * z, rad / 4 * 1.9f * dp);
@@ -977,18 +1000,20 @@ public final class WorldView {
         for (int k = 0; k < fx.count; k++) {
             int i = (fx.head - 1 - k + Effects.MAX) % Effects.MAX;
             if (fx.age[i] >= fx.life[i]) continue;
+            byte fk = fx.kind[i];
+            if (effects == 0 && (fk == Effects.SMOKE && (i & 1) == 1 || fk == Effects.SPARK || fk == Effects.FLASH && (i & 1) == 1)) continue;
             float x = fx.fx[i], y = fx.fy[i];
             if (x < x0 - 300 || x > x1 + 300 || y < y0 - 300 || y > y1 + 300) continue;
             float t = fx.age[i] / fx.life[i];
             float sx = cam.toScreenX(x), sy = cam.toScreenY(y);
             switch (fx.kind[i]) {
                 case Effects.TRACER:
-                    if (z < 0.2f) break;
+                    if (z < (effects == 2 ? 0.12f : 0.2f)) break;
                     g.color(((int) ((1 - t) * 230) << 24) | 0xFFE890);
                     g.line(sx, sy, cam.toScreenX(fx.fx2[i]), cam.toScreenY(fx.fy2[i]), Math.max(0.8f * dp, 1.2f * z));
                     break;
                 case Effects.FLASH: {
-                    if (z < 0.3f) break;
+                    if (z < (effects == 2 ? 0.2f : 0.3f)) break;
                     // a muzzle star
                     float a = fx.fx2[i];
                     float mx = sx + (float) Math.cos(a) * Math.max(7 * z, 3 * dp), my = sy + (float) Math.sin(a) * Math.max(7 * z, 3 * dp);

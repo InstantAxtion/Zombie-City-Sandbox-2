@@ -21,6 +21,8 @@ public final class Game {
     final Settings settings = new Settings();
     final Ui ui = new Ui();
     final Camera cam = new Camera();
+    /** What's heard (and the captions, vibration and screen shake that go with it): reads the world, never changes it. */
+    final AudioDirector audio;
     Content content;
     World w;
     WorldView view;
@@ -96,7 +98,6 @@ public final class Game {
     Forces.Formation inspFormation;
     private float msgT;
     private String msg;
-    private int soundsSeen;
     private float fps, frameAcc;
     private int frames;
     private boolean ended;
@@ -105,6 +106,7 @@ public final class Game {
     public Game(Platform pf) {
         this.pf = pf;
         settings.load(pf);
+        audio = new AudioDirector(pf);
         try {
             // a content.ini in the app's own files replaces the built-in one (modding)
             InputStream in;
@@ -119,7 +121,8 @@ public final class Game {
         }
         loadCustomScenarios();
         ngSeed = System.currentTimeMillis() % 1000000;
-        pf.setMusic(0, settings.music / 100f);
+        audio.applySettings(settings);
+        WorldView.palette(settings.colourBlind);
     }
 
     void loadCustomScenarios() {
@@ -264,6 +267,7 @@ public final class Game {
             case S_HANDOFF: handoff(g); break;
             default:
         }
+        if (screen != S_PLAY && screen != S_PAUSE && screen != S_PLAYERS) audio.idle(dt);
         if (msg != null && msgT > 0) {
             msgT -= dt;
             toastBox(g);
@@ -957,7 +961,6 @@ public final class Game {
             speedIdx = 0;
             tool = replay != null ? "look" : defaultTool();
             ended = w.ended;
-            soundsSeen = w.fx.sHead;
             closeInspector();
             sinceAutosave = 0;
             achieved = 0;
@@ -977,10 +980,13 @@ public final class Game {
             view.blood = settings.blood;
             view.healthBars = settings.healthBars;
             view.names = settings.names;
+            view.unitNames = settings.unitNames;
+            view.effects = settings.effects;
             view.map.realistic = settings.realistic;
         }
         if (w != null && replay == null) Actions.maxIndividuals(w, settings.maxIndividuals);
-        pf.setMusic(0, settings.music / 100f);
+        audio.applySettings(settings);
+        WorldView.palette(settings.colourBlind);
     }
 
     private void closeWorld() {
@@ -1106,12 +1112,6 @@ public final class Game {
                 autosave();
             }
         }
-        musicT -= dt;
-        if (musicT <= 0) {
-            musicT = 5;
-            int track = w.gov.level >= 2 || w.sp.zCount > 200 ? 1 : 0;
-            pf.setMusic(track, settings.music / 100f);
-        }
         if (w.ended && !ended) {
             ended = true;
             paused = true;
@@ -1121,7 +1121,7 @@ public final class Game {
             bestNoted = true;
             recordBest();
         }
-        sounds();
+        audio.update(w, cam, settings, dt, paused || screen != S_PLAY, skipping ? 3000 : SPEEDS[speedIdx]);
         view.selected = inspSquad;
         view.selectedFormation = inspFormation;
         view.inspectEnt = inspEnt;
@@ -1131,45 +1131,23 @@ public final class Game {
             for (int k = 0; k < hudKeepN; k++) view.keepOut(hudKeep[k * 4], hudKeep[k * 4 + 1], hudKeep[k * 4 + 2], hudKeep[k * 4 + 3]);
         }
         hudKeepN = 0;
+        // screen shake: only the picture moves (the camera the simulation sees is set above)
+        float shX = settings.shake ? audio.shakeX * ui.d / cam.zoom : 0, shY = settings.shake ? audio.shakeY * ui.d / cam.zoom : 0;
+        cam.cx += shX;
+        cam.cy += shY;
         view.draw(g, cam, dt);
-        if (!hideUi) hud(g);
-        else {
+        cam.cx -= shX;
+        cam.cy -= shY;
+        if (!hideUi) {
+            hud(g);
+            audio.drawCaptions(g, ui.d, (freeL + freeR) / 2, freeB - ui.dp(40)); // above the radio line
+        } else {
             ui.button("showui", W - ui.dp(52), ui.dp(10), ui.dp(44), ui.dp(34), "UI", false, 12);
         }
         if (w.ended && screen == S_PLAY && !hideUi) endPanel(g);
     }
 
-    private float musicT;
     private boolean bestNoted;
-
-    private void sounds() {
-        Effects fx = w.fx;
-        int n = (fx.sHead - soundsSeen + Effects.SOUNDS) % Effects.SOUNDS;
-        if (n > Effects.SOUNDS / 2) n = Effects.SOUNDS / 2;
-        soundsSeen = fx.sHead;
-        if (paused) return;
-        float vol = settings.sound / 100f;
-        if (vol <= 0) return;
-        int played = 0;
-        for (int k = 0; k < n && played < 6; k++) {
-            int i = (fx.sHead - 1 - k + Effects.SOUNDS) % Effects.SOUNDS;
-            String name = fx.sName[i];
-            if (name == null) continue;
-            float x = fx.sx[i], y = fx.sy[i];
-            float v, pan = 0;
-            if (x < 0) v = 0.7f; // news chime: everywhere
-            else {
-                float dx = (x - cam.cx) * cam.zoom, dy = (y - cam.cy) * cam.zoom;
-                float dist = (float) Math.sqrt(dx * dx + dy * dy) / Math.max(cam.sw, cam.sh);
-                v = Math.max(0, 1 - dist * 1.2f) * Math.min(1, cam.zoom * 2.5f + 0.15f);
-                if (name.contains("boom")) v = Math.max(v, 0.35f * Math.max(0, 1 - dist * 0.4f));
-                pan = Math.max(-1, Math.min(1, dx / (cam.sw * 0.6f)));
-            }
-            if (v < 0.04f) continue;
-            pf.playSound(name, v * vol, pan);
-            played++;
-        }
-    }
 
     private String fmt(int n) {
         return WorldView.fmt(n);
@@ -2331,16 +2309,23 @@ public final class Game {
                 {"set:sound", "Sound effects", s.sound + "%"},
                 {"set:music", "Music", s.music + "%"},
                 {"set:vibrate", "Vibration", "?" + s.vibrate},
+                {"set:mono", "Mono sound", "?" + s.mono},
+                {"set:captions", "Captions for sounds", "?" + s.captions},
                 {"#", "The map"},
                 {"set:lean3d", "Buildings stand up (3D)", "?" + s.lean3d},
                 {"set:realistic", "Textured ground", "?" + s.realistic},
                 {"set:blood", "Blood", "?" + s.blood},
                 {"set:health", "Health bars", "?" + s.healthBars},
                 {"set:names", "Place names", "?" + s.names},
+                {"set:unitnames", "Unit name tags", "?" + s.unitNames},
+                {"set:cb", "Colour-blind palette", "?" + s.colourBlind},
+                {"set:shake", "Screen shake", "?" + s.shake},
+                {"set:effects", "Effects", new String[]{"Low", "Normal", "High"}[s.effects]},
                 {"#", "On the screen"},
                 {"set:radio", "Radio messages", "?" + s.radio},
                 {"set:minimap", "Minimap", "?" + s.minimap},
                 {"set:ui", "Button size", new String[]{"Small", "Normal", "Large"}[s.uiSize]},
+                {"set:fps", "Frame rate", s.fpsCap == 30 ? "30 (saver)" : "60"},
                 {"set:debug", "Frame rate (for testing)", "?" + s.debug},
                 {"#", "The simulation"},
                 {"set:max", "People in detail", WorldView.fmt(s.maxIndividuals)},
@@ -2874,7 +2859,7 @@ public final class Game {
     // ------------------------------------------------------------------ buttons
 
     private void onButton(String id) {
-        pf.playSound("click", 0.4f * settings.sound / 100f, 0);
+        pf.playSound("click", 0.4f, 0); // (the mixer applies the sound setting)
         if (id.length() == 0) return;
         switch (id) {
             case "new": screen = S_NEW; scroll = 0; return;
@@ -3154,7 +3139,17 @@ public final class Game {
             case "names": s.names = !s.names; break;
             case "radio": s.radio = !s.radio; break;
             case "minimap": s.minimap = !s.minimap; break;
-            case "vibrate": s.vibrate = !s.vibrate; break;
+            case "vibrate":
+                s.vibrate = !s.vibrate;
+                if (s.vibrate) pf.vibrate(40);
+                break;
+            case "mono": s.mono = !s.mono; break;
+            case "captions": s.captions = !s.captions; break;
+            case "unitnames": s.unitNames = !s.unitNames; break;
+            case "cb": s.colourBlind = !s.colourBlind; break;
+            case "shake": s.shake = !s.shake; break;
+            case "effects": s.effects = (s.effects + 1) % 3; break;
+            case "fps": s.fpsCap = s.fpsCap == 30 ? 60 : 30; break;
             case "debug": s.debug = !s.debug; break;
             case "gpu":
                 s.gpu = !s.gpu;

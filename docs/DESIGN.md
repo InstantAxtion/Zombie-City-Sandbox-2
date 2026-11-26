@@ -35,7 +35,7 @@ All in one package, `com.instantaxtion.zcs2`. The core (`src/core`) never touche
 | Director | `Director`, `Replay`, `DirectorScreens` | The record of inputs, replays from a game's start, the timelapse, heatmaps; the replay list, timelapse and scenario editor screens |
 | Checking | `Audit`, `SaveIO` | Invariants and state hashes; saves |
 | Presentation | `Gfx`, `GImage`, `Platform`, `Camera`, `MapPainter`, `WorldView`, `Ui`, `Icons`, `Game`, `Settings`, `Texts` | Drawing at every zoom, the interface, the screens |
-| Sound | `Synth`, `Mixer` | Every effect and the score, synthesised; mixing |
+| Sound | `Synth`, `Mixer`, `AudioDirector` | Every effect, bed and score stem, synthesised once; mixing with priorities and a limiter; what to play, where, and the captions, vibration and shake that go with it |
 | Android | `MainActivity`, `GameView`, `GLGameView`, `AndroidGfx`, `GLGfx`, `AndroidImage`, `AndroidPlatform` | The shell: Canvas by default, the GPU renderer if chosen |
 | Desktop | `DesktopMain`, `DesktopGfx`, `DesktopPlatform`, `Tests`, `Probe`, `Shot`, `UiShot` | Window, tests and tools |
 
@@ -236,6 +236,19 @@ button (or replaced by another) is thrown away and its world shut down when it f
 counted as a second finger. An exception in a frame is caught: the game saves (unless it happened mid-step, when
 the world may be half-changed), shows what happened and offers the menu. It also saves every three minutes of
 play. The sound runs on its own thread, one at a time (a quick pause and resume can't leave two mixing).
+
+Sound never touches the simulation. The simulation only leaves sound events in `Effects` (a name and a place);
+`AudioDirector` reads them, and the world, on the game's thread after the frame's steps, with its own dice. A
+sound's loudness and pan come from its distance to a listener above the camera's centre (higher the further out
+the camera is, so a zoomed-out map is quieter and farther guns are their muffled "far" versions). Each frame
+plays a handful at most, the important and loud first, merging repeats; the mixer caps copies of one sound, lets
+a sound take only a voice of no higher priority, fades out any voice it takes, and limits the sum. Loops (sirens,
+engines and rotors from the nearest vehicles of each kind, with Doppler; the town's hum, wind, birds or crickets,
+rain, storms, fire, a panicking crowd, a horde's rumble, a fight off-screen) glide to the levels the director
+sets every quarter second. The score is seven stems in one key and tempo (24 s loops); a cue (calm, tension,
+battle, aftermath, strategic) is a mix of them, so changing cue is a cross-fade that stays in time. Everything is
+rendered once at start on a background thread (about 10 MB); until a buffer is ready it is simply skipped. On
+the desktop `AudioDump` writes it all, and a captured game, to WAV files.
 
 The simulation steps inside the frame within a 28 ms budget; when a fast-forward speed is more than the phone can
 do, the rest is dropped rather than queued, and the speed button shows the rate actually reached.

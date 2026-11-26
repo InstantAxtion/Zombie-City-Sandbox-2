@@ -558,6 +558,7 @@ public final class Forces extends Module {
                     oy += tmp[1] - ty;
                 }
                 if (w.sp.livingNear(w.e, tx + ox, ty + oy, 90, 1) > 0) continue;
+                w.fx.sound("whistle", tx + ox, ty + oy); // heard only: the shell's whistle before the blast
                 w.combat.blast(tx + ox, ty + oy, 70, gun != null ? gun.blastDmg : 400, -1, Ents.SOLDIER);
             }
         } else {
@@ -969,6 +970,7 @@ public final class Forces extends Module {
         if (!w.strategic && (w.sec.hot[s] > 0 || w.sec.cam[s])) {
             for (int k = 0; k < best.t.guns; k++) {
                 float ox = (Rng.unit(w.seed, w.tick, k * 2L + 40) - 0.5f) * 200, oy = (Rng.unit(w.seed, w.tick, k * 2L + 41) - 0.5f) * 200;
+                w.fx.sound("whistle", x + ox, y + oy);
                 w.combat.blast(x + ox, y + oy, 70, gun != null ? gun.blastDmg : 400, -1, Ents.SOLDIER);
             }
         } else {
@@ -1134,7 +1136,7 @@ public final class Forces extends Module {
                 g.color(0xFFFFE040);
                 g.strokeRect(x - hw - 4 * dp, y - hh - 4 * dp, hw * 2 + 8 * dp, hh * 2 + 8 * dp, 2 * dp);
             }
-            if (cam.zoom > 0.05f || f.player || view.selectedFormation == f) {
+            if (cam.zoom > 0.05f && view.unitNames || f.player || view.selectedFormation == f) {
                 String lab = shortName(f) + "  " + f.strength();
                 float tw = g.textWidth(lab, 10 * dp, false), ly = y + hh + 17 * dp;
                 if (view.place(x - tw / 2, ly - 10 * dp, x + tw / 2, ly + 3 * dp) || view.selectedFormation == f)

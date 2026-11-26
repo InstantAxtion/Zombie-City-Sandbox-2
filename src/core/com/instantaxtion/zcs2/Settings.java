@@ -12,6 +12,20 @@ public final class Settings {
     public boolean realistic = true;
     /** Draw with the GPU (OpenGL ES) rather than Canvas. Takes effect on the next start. */
     public boolean gpu = false; // experimental until it has run on real phones
+    /** The screen shakes with nearby blasts. */
+    public boolean shake = true;
+    /** Effects: 0 low (fewer particles), 1 normal, 2 high. */
+    public int effects = 1;
+    /** Frames a second at most: 60, or 30 to save the battery. */
+    public int fpsCap = 60;
+    /** Both ears the same (one earbud, a phone's single speaker). */
+    public boolean mono = false;
+    /** Short lines on the screen for the important sounds, with where they came from. */
+    public boolean captions = false;
+    /** Names under the formations' and squads' symbols. */
+    public boolean unitNames = true;
+    /** Colours for the dead, the living, police and army that differ for every kind of colour blindness. */
+    public boolean colourBlind = false;
     public static final int[] MAX_OPTIONS = {20000, 40000, 60000, 100000};
 
     public void load(Platform p) {
@@ -30,6 +44,13 @@ public final class Settings {
         realistic = b(p, "realistic", realistic);
         gpu = b(p, "gpuOptIn", gpu);
         debug = b(p, "debug", debug);
+        shake = b(p, "shake", shake);
+        effects = Math.max(0, Math.min(2, i(p, "effects", effects)));
+        fpsCap = i(p, "fpsCap", fpsCap) == 30 ? 30 : 60;
+        mono = b(p, "mono", mono);
+        captions = b(p, "captions", captions);
+        unitNames = b(p, "unitNames", unitNames);
+        colourBlind = b(p, "colourBlind", colourBlind);
     }
 
     public void save(Platform p) {
@@ -48,6 +69,13 @@ public final class Settings {
         p.setPref("realistic", "" + realistic);
         p.setPref("gpuOptIn", "" + gpu);
         p.setPref("debug", "" + debug);
+        p.setPref("shake", "" + shake);
+        p.setPref("effects", "" + effects);
+        p.setPref("fpsCap", "" + fpsCap);
+        p.setPref("mono", "" + mono);
+        p.setPref("captions", "" + captions);
+        p.setPref("unitNames", "" + unitNames);
+        p.setPref("colourBlind", "" + colourBlind);
     }
 
     private static int i(Platform p, String k, int def) {

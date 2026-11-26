@@ -34,7 +34,11 @@ public interface Platform {
     /** Called with the sound events of this frame; volume 0..1, pan -1..1. */
     void playSound(String name, float volume, float pan);
 
+    /** The score's cue (see {@link Mixer#CUE_NAMES}) and its volume. */
     void setMusic(int track, float volume);
+
+    /** The mixer the game's sound goes through, or null where there's no sound. */
+    Mixer mixer();
 
     void vibrate(int ms);
 

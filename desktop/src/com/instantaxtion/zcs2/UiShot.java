@@ -128,7 +128,7 @@ public final class UiShot {
         waitPlay();
         frames(10);
         shot("15-loaded");
-        System.out.println("ok: " + game.world().clock() + ", " + game.world().totalZombies() + " dead, sounds " + pf.sounds);
+        System.out.println("ok: " + game.world().clock() + ", " + game.world().totalZombies() + " dead, sounds " + (pf.sounds + pf.mixer.requests));
         game.world().shutdown();
         System.exit(0);
     }

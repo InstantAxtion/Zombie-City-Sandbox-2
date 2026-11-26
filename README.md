@@ -66,6 +66,15 @@ one person.
   The after-action report has a timeline, the turning point, the numbers, where people were lost (in their homes,
   on the roads, to hordes, to our own guns, in fires), the best fighters, what happened, the fallen, and your best
   for the challenge.
+- **Sound, all made by code.** Guns near and far, blasts, shells whistling in, screams and the dead's groans,
+  police and fire sirens (rising and falling as they pass), engines, tank tracks, helicopters and jets, car
+  alarms, the radio. Under them the place: a town's hum, wind, birds by day and crickets at night, rain and
+  thunder, fires, a panicking crowd, a horde's rumble, a fight a few streets away. Everything is placed left or
+  right and quieter the further out you zoom. The score changes with what's happening (calm, tension, battle,
+  aftermath, the strategic map) and cross-fades between them.
+- **Settings for everyone.** Mono sound, captions for important sounds (with an arrow to where they came from),
+  vibration on blasts and bites, screen shake, effects level, a 30 fps battery saver, place and unit name tags,
+  and a colour-blind-safe palette for the dead, the living, police and army.
 
 ## Controls
 
