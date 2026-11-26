@@ -39,7 +39,9 @@ one person.
   and lights, break into buildings, and gather into hordes that march across the country. New strains appear as
   the days pass.
 - **Play as anyone** (chosen on the New Game screen; the AI runs everything else):
-  - *God*: every tool. Paint the dead, place forces, strike, order anyone, decide everything.
+  - *God*: every tool. Paint the dead (up to a quarter of a million at a stroke), place any unit, vehicle or squad
+    in the game's content, build defences and the ground itself, strike, order anyone, drive any vehicle or take
+    over any person, change the rules, decide everything.
   - *President*: alert level (up and down), martial law and mobilisation (declared and lifted), curfews, quarantines, evacuations, air strikes,
     artillery, bridges, and every formation, or hand the army to the AI general ("Let the general command" in the
     Order tool) or release single formations to it (and take them back) from a formation's sheet.
@@ -86,7 +88,15 @@ one person.
 
 ## Controls
 
-Drag to move, pinch to zoom, tap to look. The tools are along the bottom (down the left side when the phone is
+Drag to move, pinch to zoom, tap to look. The **Build** tool puts down barricades, walls, sandbags, razor wire,
+machine-gun nests, ammunition crates, medical kits and command posts (God also lays roads, builds houses, clears the
+ground and puts people on the street); the **Clear** tool drags the dead away or clears wrecks, blood, barricades,
+everyone, or a town's dead. In the **Order** tool a squad can move, follow a route, fall back, hold a cordon line,
+clear an area or escort someone, with a stance (hold fire, normal, aggressive) and mount up; formations attack,
+defend, screen, withdraw or dig in; God can send any vehicle (go, orbit, attack an area, return) or take the wheel,
+and take over any person (Control on their sheet). **Rules** on the New Game screen and in God's pause menu set the
+dead's speed and infection, the forces' strength, civilians, fleeing, outside help, the weather and the time of
+day. Every one of these is recorded, so replays stay exact. The tools are along the bottom (down the left side when the phone is
 sideways); each says in a line above its options what a tap does. The **Map** tool switches the national map's
 layers, and its first button jumps out to the whole country and back (on a tall phone the country fills the
 screen's height and can be panned sideways); the minimap jumps too. Strikes are aimed,

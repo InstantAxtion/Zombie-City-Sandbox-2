@@ -18,7 +18,13 @@ final class Texts {
             "THE RESPONSE",
             "People call 911. Police wait at their stations and come out as squads when they're sent. When a town has too many of the dead, its police hold a cordon and the army goes in. The army moves as formations on the national map: battalions, armour, artillery, marines, Guard brigades. As the alert level rises, help arrives by the interstates.",
             "THE TOOLS",
-            "Along the bottom (down the left side when the phone is sideways). Each tool says what a tap does in a line above its options. Strikes are aimed first: a reticle shows where it lands, then Fire or Cancel. Orders: tap a squad or formation, then where it should go; a flag marks the spot.",
+            "Along the bottom (down the left side when the phone is sideways). Each tool says what a tap does in a line above its options. Strikes are aimed first: a reticle shows where it lands, then Fire or Cancel. Orders: tap a squad or formation, then where it should go; a flag marks the spot. The Dead, Police and Army tools offer every kind in the game's content (a mod's own too): officers, soldiers, vehicles, and whole squads that come with their vehicles. The Dead tool paints from one to a quarter of a million; past a thousand and a half, the rest go into the streets' counts.",
+            "ORDERS",
+            "Pick a squad with the Order tool, then: Move, a Route of points (tap them, then Go), Fall back (they don't stop to fight on the way), a Cordon line between two taps, Clear area (they hunt the dead in it, then hold), or Escort someone or a vehicle. Its stance: Normal, Hold fire (only when the dead are on them) or Aggressive (they close in on the dead near them). Mount up keeps them in their vehicle. A formation can Attack, Defend, Screen, Withdraw or Dig in. Every order shows as a line and flags on the map. As God, tap any vehicle with the Order tool (or Orders on its sheet): go here, orbit, attack an area, return; Take the wheel drives it with the stick. Control on a person's sheet lets you move anyone with the stick; Release gives them back.",
+            "BUILDING AND CLEARING",
+            "The Build tool: barricades and walls the dead must smash through, sandbags (cover for the armed behind them), razor wire (slows the dead and cuts them), machine-gun nests (a gunner who stays put and fires along an arc), ammunition crates and medical kits (they restock and patch up the armed near them), command posts (steadier nerves round them). God can also lay roads, build houses, clear rubble and trees, and put people and civil vehicles on the street. The Clear tool drags the dead away, or clears wrecks, blood and bodies, barricades and defences, everyone on the streets, or a town's counted dead.",
+            "THE RULES",
+            "Rules on the New Game screen (and in God's pause menu during a game): how fast the dead are and how easily they infect, how strong the forces are, civilians on the streets or not, how early people flee, outside help, the weather and the time of day. Replays and saves keep them.",
             "TIME",
             "An hour passes every minute at 1x. 1h/s, 6h/s and 1d/s fast-forward through days and weeks: everyone folds into the counts and fights are settled by the numbers until you slow down again. Seasons and weather matter: the cold slows the dead, the heat rots them, rain and fog shorten sight.",
             "CAMPAIGNS AND YOUR OWN",
@@ -28,6 +34,12 @@ final class Texts {
     };
 
     static final String[] NOTES = {
+            "1.4  Your tools",
+            "- Build: barricades, walls, sandbags, razor wire, machine-gun nests, ammunition crates, medical kits and command posts; for God also roads, houses, clearing the ground, and people and civil vehicles on the street.",
+            "- Richer orders: stance (hold fire, aggressive), routes of waypoints, falling back, cordon lines, clearing an area, escorting, mounting up; formations attack, defend, screen, withdraw or dig in. Each order shows on the map.",
+            "- Vehicles under your orders: go, orbit, attack an area, return, or take the wheel and drive with the stick. God can take over anyone and move them, then give them back.",
+            "- The palettes are built from the game's content, a mod's included: every kind of the dead, every officer, soldier, vehicle and squad (squads come with their vehicles). Brushes of 10,000, 50,000 and 250,000 dead.",
+            "- A rules sheet in the New Game screen and God's pause menu; the Clear tool clears wrecks, blood, barricades, everyone, or a town's dead. All of it is recorded, so replays stay exact.",
             "1.3  A country that makes sense, and a look that reads",
             "- Wars at the scale of a country: a small outbreak is put down within a day; a big one is a war of weeks that can be won or lost. Bites indoors, turning and fights by the numbers are paced over hours, and ammunition comes from depots and escorted convoys.",
             "- Things come down again: the alert is lowered a step at a time, curfews, shelter orders, evacuations and quarantines are lifted, outside units go home, people return to their towns, and a town clear of the dead is declared safe with what it cost.",
