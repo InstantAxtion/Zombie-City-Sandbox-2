@@ -6,12 +6,12 @@ public final class Tile {
 
     public static final byte GRASS = 0, FARM = 1, FOREST = 2, WATER = 3, SAND = 4, ROAD = 5, HIGHWAY = 6, PAVEMENT = 7,
             BUILDING = 8, PARK = 9, BRIDGE = 10, BASE = 11, FENCE = 12, RUBBLE = 13, ROCK = 14, LOT = 15, YARD = 16,
-            TREE = 17, DEEP = 18, PLAZA = 19, WALL = 20, RUNWAY = 21;
-    public static final int KINDS = 22;
+            TREE = 17, DEEP = 18, PLAZA = 19, WALL = 20, RUNWAY = 21, RAIL = 22, BARRICADE = 23, CAMP = 24;
+    public static final int KINDS = 25;
 
     public static final String[] NAMES = {"Grass", "Farmland", "Forest", "Water", "Sand", "Street", "Highway", "Pavement",
             "Building", "Park", "Bridge", "Base", "Fence", "Rubble", "Rock", "Car park", "Yard", "Trees", "Sea", "Plaza",
-            "Wall", "Runway"};
+            "Wall", "Runway", "Railway", "Barricade", "Camp"};
 
     private static final boolean[] WALK = new boolean[KINDS];
     private static final boolean[] SIGHT_BLOCK = new boolean[KINDS];
@@ -25,7 +25,7 @@ public final class Tile {
             WALK[i] = true;
             SLOW[i] = 1f;
         }
-        WALK[WATER] = WALK[BUILDING] = WALK[FENCE] = WALK[ROCK] = WALK[DEEP] = WALK[WALL] = false;
+        WALK[WATER] = WALK[BUILDING] = WALK[FENCE] = WALK[ROCK] = WALK[DEEP] = WALK[WALL] = WALK[BARRICADE] = false;
         SIGHT_BLOCK[BUILDING] = SIGHT_BLOCK[ROCK] = SIGHT_BLOCK[WALL] = true;
         ROADISH[ROAD] = ROADISH[HIGHWAY] = ROADISH[BRIDGE] = ROADISH[RUNWAY] = true;
         SLOW[FOREST] = 0.6f;
@@ -56,6 +56,9 @@ public final class Tile {
         c[PLAZA] = 0xFFB0A898;
         c[WALL] = 0xFF6A6058;
         c[RUNWAY] = 0xFF505052;
+        c[RAIL] = 0xFF6E5E52;
+        c[BARRICADE] = 0xFFB09040;
+        c[CAMP] = 0xFFA89870;
     }
 
     public static boolean walkable(int t) {

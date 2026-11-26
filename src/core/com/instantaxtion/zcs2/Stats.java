@@ -10,7 +10,7 @@ import java.util.List;
 public final class Stats {
     private final World w;
     public int civDeaths, zombieKills, zombiesMade, risen, infectedTotal, shots, vehiclesLost, facilitiesLost,
-            buildingsLost, airStrikes, bridgesBlown, supplyRuns, outsidePolice, outsideSoldiers, peakZombies;
+            buildingsLost, airStrikes, bridgesBlown, supplyRuns, outsidePolice, outsideSoldiers, peakZombies, rotted, artillery;
     public final int[] killsBySide = new int[3]; // civilians, police, army
     public final int[] armedDeaths = new int[4];
     public final int[] zBySettlement, popBySettlement;

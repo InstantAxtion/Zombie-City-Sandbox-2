@@ -25,10 +25,9 @@ public final class Strategic {
     }
 
     private final World w;
-    public final boolean[] online;
-    public final float[] overrunT;
-    public final int[] ammo;
-    public final boolean[] supplyOnWay;
+    public boolean[] online;
+    public float[] overrunT;
+    public boolean[] supplyOnWay;
     public final boolean[] gridOn;
     public final List<Horde> hordes = new ArrayList<Horde>();
     public final List<Column> columns = new ArrayList<Column>();
@@ -49,11 +48,9 @@ public final class Strategic {
         int nf = w.r.facilities.size();
         online = new boolean[nf];
         overrunT = new float[nf];
-        ammo = new int[nf];
         supplyOnWay = new boolean[nf];
         for (Region.Facility f : w.r.facilities) {
             online[f.id] = true;
-            ammo[f.id] = f.kind == Region.F_BASE ? AMMO_START * 8 : f.kind == Region.F_POLICE || f.kind == Region.F_ARMORY ? AMMO_START : 0;
         }
         gridOn = new boolean[Math.max(1, w.r.gridCount)];
         java.util.Arrays.fill(gridOn, true);
@@ -65,6 +62,17 @@ public final class Strategic {
     }
 
     // ------------------------------------------------------------------ facilities
+
+    /** Runtime facilities (camps, headquarters, forward bases) were added: make room for them. */
+    public void extendFacilities() {
+        int nf = w.r.facilities.size();
+        if (online.length >= nf) return;
+        int old = online.length;
+        online = java.util.Arrays.copyOf(online, nf);
+        overrunT = java.util.Arrays.copyOf(overrunT, nf);
+        supplyOnWay = java.util.Arrays.copyOf(supplyOnWay, nf);
+        for (int i = old; i < nf; i++) online[i] = true;
+    }
 
     public boolean online(int f) {
         return f >= 0 && f < online.length && online[f];
@@ -95,14 +103,15 @@ public final class Strategic {
 
     public int drawAmmo(int facility, int need) {
         if (facility < 0 || need <= 0 || !online(facility)) return 0;
-        int got = Math.min(need, ammo[facility]);
-        ammo[facility] -= got;
+        Region.Facility f = w.r.facilities.get(facility);
+        int got = (int) Math.min(need, f.ammo);
+        f.ammo -= got;
         return got;
     }
 
     public void deliverAmmo(int facility, int amount) {
         if (facility < 0) return;
-        ammo[facility] += amount;
+        w.r.facilities.get(facility).ammo += amount;
         supplyOnWay[facility] = false;
         Region.Facility f = w.r.facilities.get(facility);
         if (w.stats.supplyRuns <= 3) w.news.radio("Supply truck delivered ammunition to " + f.name, f.x, f.y, News.UNIT);
@@ -111,23 +120,23 @@ public final class Strategic {
     private void facilities() {
         Ents e = w.e;
         for (Region.Facility f : w.r.facilities) {
-            if (f.kind == Region.F_HELIPAD || f.kind == Region.F_PARK) continue;
+            if (f.kind == Region.F_HELIPAD || f.kind == Region.F_PARK || f.kind == Region.F_HQ) continue;
             int s = w.r.sectorOfPx(f.x, f.y);
             float rad = f.kind == Region.F_BASE ? 500 : 170;
             int z = w.sp.zombiesNear(e, f.x, f.y, rad, 40) + Math.min(30, w.sec.zIn[s] / 4);
             int a = w.sp.livingNear(e, f.x, f.y, rad + 60, 40) - w.sp.secCiv[s] / 4;
             if (online[f.id]) {
                 if (z >= (f.kind == Region.F_BASE ? 30 : 8) && a < z / 3) {
-                    overrunT[f.id] += 1;
+                    overrunT[f.id] += dt;
                     if (overrunT[f.id] > 15) {
                         online[f.id] = false;
                         overrunT[f.id] = 0;
                         lost(f);
                     }
-                } else overrunT[f.id] = Math.max(0, overrunT[f.id] - 1);
+                } else overrunT[f.id] = Math.max(0, overrunT[f.id] - dt);
             } else {
                 if (z == 0 && w.sp.secCop[s] + w.sp.secSol[s] >= 3) {
-                    overrunT[f.id] += 1;
+                    overrunT[f.id] += dt;
                     if (overrunT[f.id] > 30) {
                         online[f.id] = true;
                         overrunT[f.id] = 0;
@@ -286,7 +295,7 @@ public final class Strategic {
                 continue;
             }
             float dx = gx - h.x, dy = gy - h.y, d = (float) Math.sqrt(dx * dx + dy * dy) + 0.01f;
-            float speed = 11;
+            float speed = 11 * dt * w.weather.zombieSpeed();
             h.x += dx / d * Math.min(d, speed);
             h.y += dy / d * Math.min(d, speed);
         }
@@ -406,12 +415,12 @@ public final class Strategic {
         for (int s = 0; s < sec.n; s++) {
             int st = sec.settlement[s];
             if (st < 0 || !w.gov.evacuating(st) || sec.popIn[s] == 0 || sec.zIn[s] > 0) continue;
-            float rate = 0.004f + 0.004f * w.gov.trust / 100f;
+            float rate = (0.004f + 0.004f * w.gov.trust / 100f) * dt;
             int m = Math.min(sec.popIn[s], (int) (sec.popIn[s] * rate) + (Rng.unit(w.seed, w.tick, s) < 0.5f ? 1 : 0));
             sec.popIn[s] -= m;
             pending[st] += m;
         }
-        columnT -= 1;
+        columnT -= dt;
         if (columnT > 0) return;
         columnT = 15;
         for (int st = 0; st < pending.length; st++) {
@@ -451,7 +460,7 @@ public final class Strategic {
         for (int k = 0; k < columns.size(); k++) {
             Column c = columns.get(k);
             if (!c.alive) continue;
-            float budget = 28; // px per second: people on foot, cars, buses
+            float budget = 28 * dt; // px per second: people on foot, cars, buses
             while (budget > 0 && c.ri < c.route.length - 1) {
                 int nn = c.route[c.ri + 1];
                 int e = g.edgeBetween(c.route[c.ri], nn);
@@ -597,7 +606,7 @@ public final class Strategic {
     // ------------------------------------------------------------------ strains
 
     private void strains() {
-        if (w.totalZombies() > 50) strainClock += 1;
+        if (w.totalZombies() > 50) strainClock += dt;
         if (strain < 3 && strainClock > 2160 * (strain + 1)) {
             strain++;
             String[] what = {"", "RUNNERS: a fast strain of the dead is spreading", "ARMOURED: the dead in riot gear and helmets are shrugging off headshots", "STALKERS: a strain that hunts at night has appeared"};
@@ -672,7 +681,9 @@ public final class Strategic {
         w.news.headline(title, -1, -1);
     }
 
-    void update() {
+    void update(float dt) {
+        this.dt = dt;
+        extendFacilities();
         facilities();
         hordes();
         evacuation();
@@ -680,4 +691,6 @@ public final class Strategic {
         strains();
         goals();
     }
+
+    private float dt = 1;
 }

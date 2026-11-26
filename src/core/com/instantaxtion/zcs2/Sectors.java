@@ -145,7 +145,8 @@ public final class Sectors {
         return f + (Rng.unit(w.seed, w.tick, salt) < v - f ? 1 : 0);
     }
 
-    public void update() {
+    public void update(float dt) {
+        float bite = w.c.rule("indoorBite", 0.006f), dens = w.c.rule("indoorDensity", 40), turnTime = w.c.rule("turnTime", 40), clear = w.c.rule("clearRate", 0.015f);
         Ents e = w.e;
         Spatial sp = w.sp;
         int individuals = e.live;
@@ -176,8 +177,8 @@ public final class Sectors {
             }
             // indoors: the dead get at the people sheltering
             if (zIn[s] > 0 && popIn[s] > 0) {
-                float rate = zIn[s] * 0.016f * (w.strat.lit(s) ? 1f : 1.35f);
-                float bites = Math.min(popIn[s], rate * popIn[s] / (popIn[s] + 40f));
+                float rate = zIn[s] * bite * dt * (w.strat.lit(s) ? 1f : 1.35f) * (holdout(s) ? 0.3f : 1f);
+                float bites = Math.min(popIn[s], rate * popIn[s] / (popIn[s] + dens));
                 int b = stoch(bites, s * 7L + 1);
                 popIn[s] -= b;
                 int killed = stoch(b * 0.2f, s * 7L + 2);
@@ -185,10 +186,10 @@ public final class Sectors {
                 inf[s] += b - killed;
                 w.stats.civDeaths += killed;
                 w.stats.infectedTotal += b - killed;
-                panic[s] = Math.min(1, panic[s] + 0.1f);
+                panic[s] = Math.min(1, panic[s] + 0.1f * Math.min(1, dt));
             }
             if (inf[s] > 0) {
-                float turn = Math.max(0.2f, inf[s] / 40f);
+                float turn = Math.max(0.2f * dt, inf[s] / turnTime * dt);
                 int t = Math.min((int) Math.ceil(inf[s]), stoch(turn, s * 7L + 3));
                 inf[s] -= t;
                 if (inf[s] < 0) inf[s] = 0;
@@ -199,26 +200,53 @@ public final class Sectors {
             if (inf[s] >= 4 && settlement[s] >= 0) {
                 int hs = w.strat.hospitalSector(settlement[s]);
                 if (hs >= 0 && hs != s) {
-                    int m = stoch(inf[s] * 0.02f, s * 7L + 4);
+                    int m = Math.min((int) inf[s], stoch(inf[s] * 0.02f * dt, s * 7L + 4));
                     inf[s] -= m;
                     inf[hs] += m;
                 }
             }
             // armed units clearing buildings, one room at a time
             if (arm >= 2 && zIn[s] > 0) {
-                int k = Math.min(zIn[s], stoch(arm * 0.015f, s * 7L + 5));
+                int k = Math.min(zIn[s], stoch(arm * clear * dt, s * 7L + 5));
                 zIn[s] -= k;
                 bodies[s] += k;
                 w.stats.killsBySide[sp.secSol[s] > sp.secCop[s] ? 2 : 1] += k;
             }
-            if (hot[s] > 0 || cam[s]) emerge(s, zO, cO, arm, roomForMore);
-            if (panic[s] > 0) panic[s] = Math.max(0, panic[s] - 0.01f);
+            if (!w.strategic && (hot[s] > 0 || cam[s])) emerge(s, zO, cO, arm, roomForMore);
+            if (panic[s] > 0) panic[s] = Math.max(0, panic[s] - 0.01f * dt);
             // the unwatched dead wander towards people and lights
-            if (zIn[s] > 0 && popIn[s] == 0 && hot[s] <= 0) migrate(s);
-            if (hot[s] > 0) hot[s] -= 1;
+            if (zIn[s] > 0 && popIn[s] == 0 && hot[s] <= 0) migrate(s, dt);
+            if (hot[s] > 0) hot[s] -= dt;
         }
         drift();
-        demote();
+        if (!w.strategic) demote();
+    }
+
+    /** A holdout: people who've held their streets for days barricade themselves in (set by the society systems). */
+    public boolean holdout(int s) {
+        return holdout != null && holdout[s];
+    }
+
+    public boolean[] holdout;
+
+    /** Every individual (but the armed and the player) folds back into the counts: for strategic fast-forward. */
+    public void demoteAll() {
+        Ents e = w.e;
+        for (int i = 0; i < e.top; i++) {
+            if (e.loc[i] == Ents.BODY) {
+                if ((e.flags[i] & Ents.F_RISES) != 0) zIn[w.r.sectorOfPx(e.x[i], e.y[i])]++;
+                e.remove(i);
+                continue;
+            }
+            if (e.loc[i] != Ents.FREE || e.armed(i) || i == w.playerEnt) continue;
+            int s = w.r.sectorOfPx(e.x[i], e.y[i]);
+            if (e.kind[i] == Ents.ZOMBIE) zIn[s]++;
+            else if ((e.flags[i] & Ents.F_INFECTED) != 0) inf[s] += 1;
+            else popIn[s]++;
+            w.retire(i);
+        }
+        java.util.Arrays.fill(ambient, 0);
+        java.util.Arrays.fill(hot, 0);
     }
 
     private void emerge(int s, int zO, int cO, int arm, boolean room) {
@@ -292,7 +320,7 @@ public final class Sectors {
         return null;
     }
 
-    private void migrate(int s) {
+    private void migrate(int s, float dt) {
         float best = attraction(s);
         int bd = -1;
         for (int d = 0; d < 8; d++) {
@@ -310,7 +338,7 @@ public final class Sectors {
             if (bd < 0 || (connect[s] & (1 << bd)) == 0) return;
         }
         int t = neighbour(s, bd);
-        int m = Math.min(zIn[s], stoch(zIn[s] * 0.02f + 0.2f, s * 13L));
+        int m = Math.min(zIn[s], stoch((zIn[s] * 0.02f + 0.2f) * dt * w.weather.zombieSpeed(), s * 13L));
         if (m <= 0) return;
         // a big mass on the move becomes a horde you can see on the map
         if (zIn[s] >= 300 && popIn[t] == 0 && settlement[s] < 0) {

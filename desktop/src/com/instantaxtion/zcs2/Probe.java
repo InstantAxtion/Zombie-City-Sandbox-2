@@ -41,6 +41,25 @@ public final class Probe {
             }
         }
         System.out.printf("worst step %.1f ms%n", worst / 1e6);
+        String strat = System.getenv("STRAT");
+        if (strat != null) {
+            // strategic fast-forward for that many game days, printing twice a day
+            w.camDetail = false;
+            w.setStrategic(true);
+            int days = Integer.parseInt(strat);
+            long t1 = System.nanoTime();
+            for (int k = 1; k <= days * 1440 / 10; k++) {
+                w.step();
+                if (k % 72 == 0) {
+                    int alive = 0;
+                    System.out.printf("%s %s  dead %7d  people %8d  police %5d  army %5d  formations %d  kills P%7d A%7d  lost civ %7d cop %5d sol %5d  hordes %d  evacuated %d  gov %d trust %d%s%n",
+                            w.clock(), w.weather.status(), w.totalZombies(), w.livingCivilians(), w.forces.total(Ents.COP), w.forces.total(Ents.SOLDIER), w.forces.formations.size(),
+                            w.stats.killsBySide[1], w.stats.killsBySide[2], w.stats.civDeaths, w.stats.armedDeaths[1], w.stats.armedDeaths[2], w.strat.hordes.size(),
+                            w.strat.evacuatedOut + w.strat.evacuatedArrived, w.gov.level, (int) w.gov.trust, Audit.check(w).isEmpty() ? "" : " AUDIT " + Audit.check(w));
+                }
+            }
+            System.out.printf("%d strategic days in %.1f s%n", days, (System.nanoTime() - t1) / 1e9);
+        }
         for (int i = Math.max(0, w.news.log.size() - 25); i < w.news.log.size(); i++) System.out.println("  " + w.news.log.get(i).text);
         w.shutdown();
     }

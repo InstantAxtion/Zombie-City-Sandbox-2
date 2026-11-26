@@ -81,65 +81,69 @@ public final class Setup {
 
     static void forces(World w) {
         Region r = w.r;
-        boolean hq = false;
-        for (Region.Facility f : r.facilities) {
+        Forces fo = w.forces;
+        float perRes = w.c.rule("policePerResident", 0.0022f);
+        boolean hq;
+        java.util.Set<Integer> hqDone = new java.util.HashSet<Integer>();
+        int nStatic = r.facilities.size();
+        for (int fi = 0; fi < nStatic; fi++) {
+            Region.Facility f = r.facilities.get(fi);
             Region.Settlement st = f.settlement >= 0 ? r.settlements.get(f.settlement) : null;
             if (f.kind == Region.F_POLICE && st != null) {
+                // officers wait at the station as numbers; a squad is made only when it's sent out
                 int stations = 0;
                 for (Region.Facility g : r.facilities) if (g.kind == Region.F_POLICE && g.settlement == f.settlement) stations++;
-                int officers = st.residents / 55 / Math.max(1, stations) + (st.kind == Region.S_CITY ? 12 : 8);
-                int cars = officers / 4;
-                List<float[]> park = spots(w, f, cars + 4);
-                for (int k = 0; k < cars; k++) {
-                    Squads.Squad s = squad(w, f, Ents.COP, "Patrol", repeat("patrol", 4), "patrol_car", park.get(k));
-                    // some cars are out on patrol when the day starts
-                    if (k % 3 == 0) {
-                        RoadGraph g = r.roads;
-                        int n = Rng.hashInt(w.seed, f.id, k, g.nodeCount);
-                        for (int a = 0; a < 20 && g.nset[n] != f.settlement; a++) n = Rng.hashInt(w.seed, f.id * 31 + a, k, g.nodeCount);
-                        w.sq.order(s, Squads.O_PATROL, g.nx[n], g.ny[n]);
-                    }
-                }
-                if (st.kind == Region.S_CITY && !hq) {
-                    hq = true;
+                int officers = (int) (st.residents * perRes / Math.max(1, stations)) + 8;
+                fo.addSquadToPool(f, w.c.squadT("patrol"), Math.max(2, officers / 4));
+                hq = (st.kind == Region.S_CITY) && hqDone.add(st.id);
+                if (hq) {
                     f.name = st.name + " Police HQ";
-                    squad(w, f, Ents.COP, "SWAT", repeat("swat", 8), "swat_van", park.get(cars));
-                    squad(w, f, Ents.COP, "Riot squad", repeat("riot", 8), "riot_van", park.get(cars + 1));
-                    squad(w, f, Ents.COP, "Marksmen", repeat("marksman", 3), "patrol_car", park.get(cars + 2));
+                    int teams = 1 + st.residents / 300000;
+                    fo.addSquadToPool(f, w.c.squadT("swat"), teams);
+                    fo.addSquadToPool(f, w.c.squadT("riot"), teams);
                     Content.VType heli = w.c.vtype("police_heli");
-                    if (heli != null) w.veh.add(heli, park.get(cars + 3)[0], park.get(cars + 3)[1], 0, f.id);
+                    List<float[]> park = spots(w, f, 1);
+                    if (heli != null) w.veh.add(heli, park.get(0)[0], park.get(0)[1], 0, f.id);
                 }
+                f.ammo = fo.armedAt(f, Ents.COP) * 150f;
             } else if (f.kind == Region.F_BASE) {
-                base(w, f);
+                fo.addSquadToPool(f, w.c.squadT("rifle"), 2);
+                f.ammo = 40000;
+                f.fuel = 100;
+                // the base's battalion (and, at the first base, armour and guns)
+                fo.createFormation(w.c.formationT("infantry"), f.x, f.y, false).home = f.id;
+                if (firstBase(w, f)) {
+                    if (r.W > 1024) fo.createFormation(w.c.formationT("armour"), f.x, f.y, false).home = f.id;
+                    fo.createFormation(w.c.formationT("artillery"), f.x, f.y, false).home = f.id;
+                }
+                aircraft(w, f);
+            } else if (f.kind == Region.F_AIRBASE) {
+                fo.addSquadToPool(f, w.c.squadT("fireteam"), 3);
+                f.ammo = 20000;
+                aircraft(w, f);
+            } else if (f.kind == Region.F_PORT) {
+                fo.addSquadToPool(f, w.c.squadT("fireteam"), 2);
+                f.ammo = 20000;
+                fo.createFormation(w.c.formationT("marines"), f.x, f.y, false).home = f.id;
             } else if (f.kind == Region.F_ARMORY) {
-                List<float[]> park = spots(w, f, 2);
-                squad(w, f, Ents.SOLDIER, "Guard", repeat("guard", 8), "army_truck", park.get(0));
-                squad(w, f, Ents.SOLDIER, "Guard", repeat("guard", 4), "humvee", park.get(1));
+                fo.addSquadToPool(f, w.c.squadT("guard"), 2);
+                f.ammo = 6000;
             } else if (f.kind == Region.F_PRISON) {
-                Squads.Squad s = squad(w, f, Ents.COP, "Prison guards", repeat("patrol", 4), null, null);
-                s.order = Squads.O_GUARD;
-                Squads.Squad s2 = squad(w, f, Ents.COP, "Prison guards", repeat("patrol", 4), null, null);
-                s2.order = Squads.O_GUARD;
+                fo.addSquadToPool(f, w.c.squadT("patrol"), 3);
+                f.ammo = 2000;
             }
         }
     }
 
-    private static void base(World w, Region.Facility f) {
-        int scale = w.r.W >= 1536 ? 3 : w.r.W >= 1024 ? 2 : 1;
-        List<float[]> park = spots(w, f, 60);
-        int p = 0;
-        String[] rifle = {"rifleman", "rifleman", "rifleman", "rifleman", "gunner", "grenadier", "rifleman", "sniper"};
-        for (int k = 0; k < 4 * scale + 2; k++) squad(w, f, Ents.SOLDIER, "Rifle squad", rifle, "army_truck", park.get(p++));
-        String[] team = {"rifleman", "rifleman", "gunner", "grenadier"};
-        for (int k = 0; k < 3 * scale; k++) squad(w, f, Ents.SOLDIER, "Fire team", team, "humvee", park.get(p++));
-        String[] mech = {"rifleman", "rifleman", "rifleman", "gunner", "grenadier", "rifleman"};
-        for (int k = 0; k < scale + 1; k++) squad(w, f, Ents.SOLDIER, "Mechanised", mech, "apc", park.get(p++));
-        squad(w, f, Ents.SOLDIER, "Engineers", repeat("engineer", 4), "humvee", park.get(p++));
-        // tanks: their own crews, no squad
-        Content.VType tank = w.c.vtype("tank");
-        for (int k = 0; k < scale + 1 && tank != null; k++) w.veh.add(tank, park.get(p)[0], park.get(p++)[1], -1.57f, f.id);
-        // aircraft on the pads
+    private static boolean firstBase(World w, Region.Facility f) {
+        for (Region.Facility g : w.r.facilities) if (g.kind == Region.F_BASE) return g == f;
+        return false;
+    }
+
+    /** Helicopters on the pads of a base's settlement. */
+    private static void aircraft(World w, Region.Facility f) {
         int gun = 0;
+        int scale = w.r.W >= 1536 ? 2 : 1;
         for (Region.Facility h : w.r.facilities) {
             if (h.kind != Region.F_HELIPAD || h.settlement != f.settlement) continue;
             Content.VType t = w.c.vtype(gun < 1 + scale ? "gunship" : "transport_heli");

@@ -43,6 +43,23 @@ public final class Content {
         public Weapon weapon, weapon2;
     }
 
+    /** A squad: who goes out together, in what, from where. */
+    public static final class SquadT {
+        public String id, name, faction;
+        public int index;
+        public Unit[] units;
+        public VType vehicle;
+        public String[] homes;
+    }
+
+    /** A formation on the national map. */
+    public static final class FormationT {
+        public String id, name, faction;
+        public int index, tanks, guns;
+        public SquadT[] squads;
+        public float speed;
+    }
+
     public static final class Scenario {
         public String id, name, mode, origin, goal, desc;
         public int zombies, days, index, hordes, hordeSize;
@@ -53,6 +70,11 @@ public final class Content {
     public final List<ZType> ztypes = new ArrayList<ZType>();
     public final List<VType> vtypes = new ArrayList<VType>();
     public final List<Scenario> scenarios = new ArrayList<Scenario>();
+    public final List<SquadT> squads = new ArrayList<SquadT>();
+    public final List<FormationT> formations = new ArrayList<FormationT>();
+    private final Map<String, SquadT> squadById = new HashMap<String, SquadT>();
+    private final Map<String, FormationT> formationById = new HashMap<String, FormationT>();
+    private final Map<String, Float> rules = new HashMap<String, Float>();
     private final Map<String, Weapon> weaponById = new HashMap<String, Weapon>();
     private final Map<String, Unit> unitById = new HashMap<String, Unit>();
     private final Map<String, ZType> zById = new HashMap<String, ZType>();
@@ -95,8 +117,13 @@ public final class Content {
             else if (kind.equals("zombie")) c.addZombie(id, b);
             else if (kind.equals("vehicle")) c.addVehicle(id, b);
             else if (kind.equals("scenario")) c.addScenario(id, b);
-            else if (!kind.equals("weapon")) throw new IOException("unknown section kind: " + kind);
+            else if (kind.equals("rules")) {
+                for (Map.Entry<String, String> en : b.entrySet()) c.rules.put(en.getKey(), Float.parseFloat(en.getValue()));
+            } else if (!kind.equals("weapon") && !kind.equals("squad") && !kind.equals("formation"))
+                throw new IOException("unknown section kind: " + kind);
         }
+        for (int i = 0; i < heads.size(); i++) if (heads.get(i)[0].equals("squad")) c.addSquad(heads.get(i)[1], bodies.get(i));
+        for (int i = 0; i < heads.size(); i++) if (heads.get(i)[0].equals("formation")) c.addFormation(heads.get(i)[1], bodies.get(i));
         for (String need : new String[]{"civilian", "patrol", "rifleman"}) if (c.unit(need) == null) throw new IOException("content needs unit " + need);
         if (c.ztype("walker") == null) throw new IOException("content needs zombie walker");
         for (String need : new String[]{"patrol_car", "army_truck", "humvee"}) if (c.vtype(need) == null) throw new IOException("content needs vehicle " + need);
@@ -222,6 +249,69 @@ public final class Content {
         sc.index = scenarios.size();
         scenarios.add(sc);
         scById.put(id, sc);
+    }
+
+    private void addSquad(String id, Map<String, String> b) throws IOException {
+        SquadT t = new SquadT();
+        t.id = id;
+        t.name = s(b, "name", id);
+        t.faction = s(b, "faction", "army");
+        List<Unit> us = new ArrayList<Unit>();
+        for (String part : s(b, "units", "").split(",")) {
+            part = part.trim();
+            if (part.length() == 0) continue;
+            String[] p = part.split("\\*");
+            Unit u = unit(p[0].trim());
+            if (u == null) throw new IOException("squad " + id + ": no unit " + p[0]);
+            int n = p.length > 1 ? Integer.parseInt(p[1].trim()) : 1;
+            for (int k = 0; k < n; k++) us.add(u);
+        }
+        t.units = us.toArray(new Unit[0]);
+        t.vehicle = vtype(s(b, "vehicle", ""));
+        String[] h = s(b, "homes", "").split(",");
+        for (int i = 0; i < h.length; i++) h[i] = h[i].trim();
+        t.homes = h;
+        t.index = squads.size();
+        squads.add(t);
+        squadById.put(id, t);
+    }
+
+    private void addFormation(String id, Map<String, String> b) throws IOException {
+        FormationT t = new FormationT();
+        t.id = id;
+        t.name = s(b, "name", id);
+        t.faction = s(b, "faction", "army");
+        List<SquadT> sq = new ArrayList<SquadT>();
+        for (String part : s(b, "squads", "").split(",")) {
+            part = part.trim();
+            if (part.length() == 0) continue;
+            String[] p = part.split("\\*");
+            SquadT st = squadById.get(p[0].trim());
+            if (st == null) throw new IOException("formation " + id + ": no squad " + p[0]);
+            int n = p.length > 1 ? Integer.parseInt(p[1].trim()) : 1;
+            for (int k = 0; k < n; k++) sq.add(st);
+        }
+        t.squads = sq.toArray(new SquadT[0]);
+        t.tanks = (int) f(b, "tanks", 0);
+        t.guns = (int) f(b, "guns", 0);
+        t.speed = f(b, "speed", 30);
+        t.index = formations.size();
+        formations.add(t);
+        formationById.put(id, t);
+    }
+
+    public SquadT squadT(String id) {
+        return squadById.get(id);
+    }
+
+    public FormationT formationT(String id) {
+        return formationById.get(id);
+    }
+
+    /** A number from the [rules] section. */
+    public float rule(String key, float def) {
+        Float v = rules.get(key);
+        return v == null ? def : v;
     }
 
     public Weapon weapon(String id) {

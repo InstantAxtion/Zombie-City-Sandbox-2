@@ -69,7 +69,7 @@ public final class Gov {
         w.news.headline(on ? "Curfew: everyone indoors until further notice." : "Curfew lifted.", -1, -1);
     }
 
-    void update() {
+    void update(float dt) {
         int z = w.totalZombies();
         if (z > 60 && level < 2 && reported) raise(2);
         if (z > 1500 && level < 3) raise(3);
@@ -78,12 +78,12 @@ public final class Gov {
         int deaths = w.stats.civDeaths + w.stats.armedDeaths[1] + w.stats.armedDeaths[2];
         int newDeaths = deaths - lastDeaths;
         lastDeaths = deaths;
-        trust -= Math.min(2f, newDeaths * 0.004f);
-        if (z < 30 && level >= 1) trust += 0.02f;
-        for (boolean g : w.strat.gridOn) if (!g) trust -= 0.004f;
+        trust -= Math.min(2f * dt, newDeaths * 0.004f);
+        if (z < 30 && level >= 1) trust += 0.02f * dt;
+        for (boolean g : w.strat.gridOn) if (!g) trust -= 0.004f * dt;
         if (trust < 5) trust = 5;
         if (trust > 95) trust = 95;
-        rumourT -= 1;
+        rumourT -= dt;
         if (rumourT <= 0 && level >= 1) {
             rumourT = 240 + w.rng.nextFloat() * 300;
             rumour();
@@ -95,7 +95,7 @@ public final class Gov {
             if (s.kind != Region.S_CITY && s.kind != Region.S_TOWN) continue;
             int zs = w.stats.zBySettlement[s.id];
             int pop = Math.max(1, w.stats.popBySettlement[s.id]);
-            if (!evac[s.id] && level >= 2 && (zs > 400 || zs > pop * 0.25f)) setEvac(s.id, true);
+            if (!evac[s.id] && level >= 2 && (zs > Math.max(400, s.residents * 0.01f) || zs > pop * 0.25f)) setEvac(s.id, true);
         }
     }
 

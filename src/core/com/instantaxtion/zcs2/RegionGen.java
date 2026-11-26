@@ -13,8 +13,9 @@ import java.util.Map;
 public final class RegionGen {
     public static final int COAST = 0, VALLEY = 1, HIGHLANDS = 2, LAKES = 3;
     public static final String[] PRESETS = {"Coast", "River Valley", "Highlands", "Lake District"};
-    public static final int[] SIZES = {768, 1024, 1536};
-    public static final String[] SIZE_NAMES = {"Small", "Default", "Large"};
+    /** Map sides in tiles: a state, a country, a large country (a tile is 16 px, about 4 m). */
+    public static final int[] SIZES = {1536, 2304, 3072};
+    public static final String[] SIZE_NAMES = {"One state", "Country", "Large country"};
 
     private final Region r;
     private final Rng rng;
@@ -34,6 +35,7 @@ public final class RegionGen {
         H = size;
         height = new float[W * H];
         scale = size / 1024f;
+        HC = size > 2048 ? 8 : size > 1024 ? 6 : 4;
     }
 
     public static Region generate(int size, int preset, long seed) {
@@ -44,23 +46,53 @@ public final class RegionGen {
         for (Region.Settlement s : g.r.settlements) {
             if (s.kind == Region.S_BASE) g.layoutBase(s);
             else if (s.kind == Region.S_PRISON) g.layoutPrison(s);
+            else if (s.kind == Region.S_AIRBASE || s.kind == Region.S_AIRPORT) g.layoutAirfield(s);
+            else if (s.kind == Region.S_NAVAL) g.layoutNaval(s);
             else g.layoutTown(s);
         }
         g.highways();
+        g.railways();
         g.countryside();
         g.r.roads.finish(g.r.px());
+        g.r.rails.finish(g.r.px());
         g.r.rebuildNav(0, 0, g.W - 1, g.H - 1);
+        g.r.dirty.clear();
         g.powerGrids();
-        g.r.name = g.r.city().name + " Region";
+        g.states();
+        g.populations();
+        g.r.name = g.r.W > 1024 ? g.countryName : g.r.city().name + " Region";
         return g.r;
     }
 
     // ------------------------------------------------------------------ terrain
 
     private void terrain() {
-        int side = rng.nextInt(4);
-        float riverBias = rng.range(0.35f, 0.65f);
-        for (int y = 0; y < H; y++)
+        final int side = rng.nextInt(4);
+        final float riverBias = rng.range(0.35f, 0.65f);
+        // rows in parallel: the noise depends only on the position, so the result is the same
+        int threads = Math.max(1, Math.min(8, Runtime.getRuntime().availableProcessors()));
+        Thread[] ts = new Thread[threads];
+        for (int t = 0; t < threads; t++) {
+            final int t0 = t, tn = threads;
+            ts[t] = new Thread(new Runnable() {
+                public void run() {
+                    for (int y = t0; y < H; y += tn) terrainRow(y, side, riverBias);
+                }
+            });
+            ts[t].start();
+        }
+        for (Thread t : ts) {
+            try {
+                t.join();
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+        }
+        if (r.preset == COAST) sideOfSea = side;
+    }
+
+    private void terrainRow(int y, int side, float riverBias) {
+        {
             for (int x = 0; x < W; x++) {
                 float base = n1.fbm(x / (190f * scale), y / (190f * scale), 5);
                 float h;
@@ -99,14 +131,14 @@ public final class RegionGen {
                 }
                 r.tile[y * W + x] = t;
             }
-        // the sea along the coast, deep further out
-        if (r.preset == COAST) sideOfSea = side;
+        }
     }
 
     private int sideOfSea = -1;
 
     private void rivers() {
         int count = r.preset == VALLEY ? 1 : r.preset == LAKES ? 2 : r.preset == HIGHLANDS ? 1 : rng.range(1, 2);
+        if (W > 1024) count += W / 1024;
         for (int i = 0; i < count; i++) {
             float x, y, dx, dy;
             float width = r.preset == VALLEY && i == 0 ? 7 : rng.range(4f, 5.5f);
@@ -220,13 +252,15 @@ public final class RegionGen {
         return s;
     }
 
-    private void placeSettlements() {
-        // the city
-        int rc = (int) (W * 0.14f);
-        int bestX = W / 2, bestY = H / 2;
+    private String countryName = "";
+
+    private Region.Settlement placeCity(int rc, float x0, float x1, int gap, boolean capital) {
+        int bestX = -1, bestY = -1;
         float best = -9;
-        for (int i = 0; i < 120; i++) {
-            int x = rng.range((int) (W * 0.28f), (int) (W * 0.72f)), y = rng.range((int) (H * 0.28f), (int) (H * 0.72f));
+        for (int i = 0; i < 200; i++) {
+            int x = rng.range((int) (W * x0), (int) (W * x1)), y = rng.range((int) (H * x0), (int) (H * x1));
+            if (x < rc + 30 || y < rc + 30 || x > W - rc - 30 || y > H - rc - 30) continue;
+            if (!farFromOthers(x, y, rc, gap)) continue;
             float lf = landFrac(x, y, rc);
             if (lf < 0.72f) continue;
             float score = lf + Math.min(0.25f, waterNear(x, y, (int) (rc * 1.3f))) * 1.2f + rng.nextFloat() * 0.15f;
@@ -236,36 +270,53 @@ public final class RegionGen {
                 bestY = y;
             }
         }
-        addSettlement(Region.S_CITY, bestX, bestY, rc);
+        if (bestX < 0) return null;
+        Region.Settlement s = addSettlement(Region.S_CITY, bestX, bestY, rc);
+        s.capital = capital;
+        return s;
+    }
+
+    private void placeSettlements() {
+        boolean country = W > 1024;
+        // the capital: the biggest city
+        int rc = country ? (int) Math.min(230, Math.max(140, W * 0.085f)) : (int) (W * 0.14f);
+        Region.Settlement cap = placeCity(rc, 0.28f, 0.72f, 0, true);
+        if (cap == null) cap = addSettlement(Region.S_CITY, W / 2, H / 2, rc);
+        cap.capital = true;
+        countryName = Names.country(rng);
+        // the other cities
+        int cities = !country ? 0 : W <= 1536 ? 2 : W <= 2304 ? 3 : 5;
+        for (int i = 0; i < cities; i++) placeCity(rng.range(95, 135), 0.08f, 0.92f, 260, false);
         // towns
-        int towns = W <= 768 ? 3 : W <= 1024 ? 4 : 6;
-        placeMany(Region.S_TOWN, towns, (int) (42 * scale), (int) (62 * scale) + 4, 70, 0.72f);
-        // the army base, out of town
-        int baseR = (int) (34 * Math.max(1f, scale * 0.9f));
-        for (int i = 0; i < 400; i++) {
-            double ang = rng.range(0f, 6.283f);
-            float dist = rc + rng.range(70f, 200f) * scale + 40;
-            int x = bestX + (int) (Math.cos(ang) * dist), y = bestY + (int) (Math.sin(ang) * dist);
-            if (x < baseR + 20 || y < baseR + 20 || x > W - baseR - 20 || y > H - baseR - 20) continue;
-            if (landFrac(x, y, baseR + 4) < 0.98f || !farFromOthers(x, y, baseR, 40)) continue;
-            addSettlement(Region.S_BASE, x, y, baseR);
-            break;
+        int towns = W <= 768 ? 3 : W <= 1024 ? 4 : (int) (W * (float) H / (1024f * 1024f) * 3.2f);
+        placeMany(Region.S_TOWN, towns, (int) (42 * Math.min(1f, scale)), (int) (62 * Math.min(1f, scale)) + 4, 70, 0.72f);
+        // army bases, each out of town near a city
+        int bases = country ? 1 + cities / 2 : 1;
+        int baseR = (int) (34 * Math.max(1f, Math.min(1.3f, scale * 0.9f)));
+        List<Region.Settlement> cityList = new ArrayList<Region.Settlement>();
+        for (Region.Settlement s : r.settlements) if (s.kind == Region.S_CITY) cityList.add(s);
+        for (int b = 0; b < bases; b++) {
+            Region.Settlement near = cityList.get(b % cityList.size());
+            placeNear(Region.S_BASE, near, baseR, 70, 220, 40, 0.98f);
         }
-        // the prison, near a town
+        if (country) {
+            // an air base, a civilian airport by the capital, and a naval base on the coast
+            placeNear(Region.S_AIRBASE, cityList.get(Math.min(1, cityList.size() - 1)), 46, 90, 300, 40, 0.98f);
+            placeNear(Region.S_AIRPORT, cap, 40, 60, 160, 30, 0.98f);
+            if (r.preset == COAST || r.preset == LAKES) placeCoastal(Region.S_NAVAL, 30);
+        }
+        // prisons, near towns
+        int prisons = country ? 1 + W / 1536 : 1;
         int prisonR = 22;
-        outer:
-        for (int i = 0; i < 400; i++) {
-            Region.Settlement t = r.settlements.get(1 + rng.nextInt(Math.max(1, Math.min(towns, r.settlements.size() - 1))));
-            double ang = rng.range(0f, 6.283f);
-            float dist = t.radius + rng.range(40f, 90f);
-            int x = t.cx + (int) (Math.cos(ang) * dist), y = t.cy + (int) (Math.sin(ang) * dist);
-            if (x < 40 || y < 40 || x > W - 40 || y > H - 40) continue;
-            if (landFrac(x, y, prisonR + 3) < 0.98f || !farFromOthers(x, y, prisonR, 30)) continue;
-            addSettlement(Region.S_PRISON, x, y, prisonR);
-            break outer;
+        for (int p = 0; p < prisons; p++) {
+            for (int i = 0; i < 400; i++) {
+                Region.Settlement t = r.settlements.get(1 + rng.nextInt(Math.max(1, r.settlements.size() - 1)));
+                if (t.kind != Region.S_TOWN) continue;
+                if (placeNear(Region.S_PRISON, t, prisonR, 40, 90, 30, 0.98f) != null) break;
+            }
         }
         // villages
-        placeMany(Region.S_VILLAGE, W / 120, 15, 20, 34, 0.85f);
+        placeMany(Region.S_VILLAGE, country ? W / 60 : W / 120, 15, 20, 34, 0.85f);
         // clear trees and rock inside settlements
         for (Region.Settlement s : r.settlements) {
             int rad = s.radius + 3;
@@ -275,9 +326,35 @@ public final class RegionGen {
                     float dx = x - s.cx, dy = y - s.cy;
                     if (dx * dx + dy * dy > rad * rad) continue;
                     int t = r.tile[y * W + x];
-                    if (t == Tile.FOREST || t == Tile.ROCK || t == Tile.SAND) r.tile[y * W + x] = Tile.GRASS;
+                    if (t == Tile.FOREST || t == Tile.ROCK || (t == Tile.SAND && s.kind != Region.S_NAVAL)) r.tile[y * W + x] = Tile.GRASS;
                 }
         }
+    }
+
+    private Region.Settlement placeNear(int kind, Region.Settlement near, int rad, float dmin, float dmax, int gap, float land) {
+        for (int i = 0; i < 400; i++) {
+            double ang = rng.range(0f, 6.283f);
+            float dist = near.radius + rad + rng.range(dmin, dmax);
+            int x = near.cx + (int) (Math.cos(ang) * dist), y = near.cy + (int) (Math.sin(ang) * dist);
+            if (x < rad + 20 || y < rad + 20 || x > W - rad - 20 || y > H - rad - 20) continue;
+            if (landFrac(x, y, rad + 4) < land || !farFromOthers(x, y, rad, gap)) continue;
+            return addSettlement(kind, x, y, rad);
+        }
+        return null;
+    }
+
+    /** A place on the shore: land on one side, open water on the other. */
+    private Region.Settlement placeCoastal(int kind, int rad) {
+        Region.Settlement best = null;
+        for (int i = 0; i < 600; i++) {
+            int x = rng.range(rad + 40, W - rad - 40), y = rng.range(rad + 40, H - rad - 40);
+            float lf = landFrac(x, y, rad);
+            if (lf < 0.55f || lf > 0.8f || !farFromOthers(x, y, rad, 40)) continue;
+            if (waterNear(x, y, rad + 12) < 0.25f) continue;
+            best = addSettlement(kind, x, y, rad);
+            break;
+        }
+        return best;
     }
 
     private void placeMany(int kind, int count, int rmin, int rmax, int gap, float land) {
@@ -459,13 +536,23 @@ public final class RegionGen {
 
     private void facilitiesFor(Region.Settlement s, List<Block> blocks) {
         if (s.kind == Region.S_CITY) {
-            int stations = W >= 1536 ? 8 : W >= 1024 ? 6 : 5;
+            int stations = Math.max(4, Math.min(10, s.radius / 22));
             for (int i = 0; i < stations; i++) facility(s, pickBlock(blocks, 0.1f, 0.85f, 8), Region.F_POLICE);
-            facility(s, pickBlock(blocks, 0.1f, 0.6f, 9), Region.F_HOSPITAL);
-            facility(s, pickBlock(blocks, 0.4f, 0.9f, 9), Region.F_HOSPITAL);
+            int hospitals = 1 + s.radius / 70;
+            for (int i = 0; i < hospitals; i++) facility(s, pickBlock(blocks, 0.1f, 0.9f, 9), Region.F_HOSPITAL);
+            int fire = 1 + s.radius / 60;
+            for (int i = 0; i < fire; i++) facility(s, pickBlock(blocks, 0.1f, 0.9f, 7), Region.F_FIRE);
             facility(s, pickBlock(blocks, 0.75f, 1.2f, 9), Region.F_POWER);
+            facility(s, pickBlock(blocks, 0.7f, 1.2f, 8), Region.F_WATER);
+            facility(s, pickBlock(blocks, 0.2f, 0.6f, 7), Region.F_PHONE);
             facility(s, pickBlock(blocks, 0.7f, 1.2f, 8), Region.F_FUEL);
-            facility(s, pickBlock(blocks, 0f, 0.3f, 8), Region.F_LAB);
+            facility(s, pickBlock(blocks, 0.6f, 1.2f, 9), Region.F_FOODW);
+            facility(s, pickBlock(blocks, 0f, 0.2f, 8), Region.F_HALL);
+            facility(s, pickBlock(blocks, 0.55f, 0.95f, 9), Region.F_STATION);
+            if (s.capital) {
+                facility(s, pickBlock(blocks, 0f, 0.3f, 8), Region.F_LAB);
+                facility(s, pickBlock(blocks, 0f, 0.25f, 9), Region.F_GOV);
+            }
             facility(s, pickBlock(blocks, 0.3f, 0.7f, 9), Region.F_DEPOT);
             // a big central park, where the festival happens
             Block park = null;
@@ -482,7 +569,10 @@ public final class RegionGen {
             facility(s, pickBlock(blocks, 0f, 0.7f, 8), Region.F_HOSPITAL);
             facility(s, pickBlock(blocks, 0.4f, 1.2f, 7), Region.F_FUEL);
             facility(s, pickBlock(blocks, 0.3f, 1.2f, 8), Region.F_ARMORY);
-            if (s.id == largestTownId()) facility(s, pickBlock(blocks, 0.6f, 1.3f, 8), Region.F_POWER);
+            facility(s, pickBlock(blocks, 0f, 0.9f, 7), Region.F_FIRE);
+            facility(s, pickBlock(blocks, 0f, 0.4f, 7), Region.F_HALL);
+            if (W <= 1024 && s.id == largestTownId()) facility(s, pickBlock(blocks, 0.6f, 1.3f, 8), Region.F_POWER);
+            if (s.radius >= 52 && W > 1024) facility(s, pickBlock(blocks, 0.5f, 1.2f, 8), Region.F_STATION);
         }
     }
 
@@ -520,6 +610,13 @@ public final class RegionGen {
             case Region.F_LAB: bkind = Region.B_LAB; floors = 9; bwid = w - 4; bhei = h - 5; break;
             case Region.F_DEPOT: bkind = Region.B_DEPOT; floors = 2; bwid = w - 4; bhei = h / 3; break;
             case Region.F_ARMORY: bkind = Region.B_ARMORY; floors = 2; bwid = w / 2; bhei = h / 2; break;
+            case Region.F_WATER: bkind = Region.B_WATER; floors = 2; bwid = w / 2; bhei = h / 2; break;
+            case Region.F_PHONE: bkind = Region.B_PHONE; floors = 6; bwid = w / 2; bhei = h / 2; break;
+            case Region.F_FOODW: bkind = Region.B_FOODW; floors = 2; bwid = w - 4; bhei = h / 2; break;
+            case Region.F_FIRE: bkind = Region.B_FIRE; floors = 2; bwid = w / 2; bhei = h / 2; break;
+            case Region.F_HALL: bkind = Region.B_HALL; floors = 5; bwid = w - 5; bhei = h - 6; break;
+            case Region.F_STATION: bkind = Region.B_STATION; floors = 2; bwid = w - 4; bhei = h / 3; break;
+            case Region.F_GOV: bkind = Region.B_GOV; floors = 6; bwid = w - 5; bhei = h - 6; break;
             case Region.F_PARK: bkind = -1; floors = 0; bwid = 0; bhei = 0; break;
             default: bkind = Region.B_OFFICE; floors = 3; bwid = w / 2; bhei = h / 2;
         }
@@ -572,6 +669,16 @@ public final class RegionGen {
             case Region.B_ARMORY: return 0xFF6E7250;
             case Region.B_DEPOT: return 0xFF8A8A70;
             case Region.B_CELLBLOCK: return 0xFF8E8A84;
+            case Region.B_WATER: return 0xFF6A8AA0;
+            case Region.B_PHONE: return 0xFF7A7090;
+            case Region.B_FOODW: return 0xFF9A8A60;
+            case Region.B_FIRE: return 0xFFA83A30;
+            case Region.B_HALL: return 0xFFB8AC90;
+            case Region.B_STATION: return 0xFF8A6A50;
+            case Region.B_TERMINAL: return 0xFFB0B8C0;
+            case Region.B_DOCK: return 0xFF7A8088;
+            case Region.B_GOV: return 0xFFD0C8B0;
+            case Region.B_TENT: return 0xFFC8C0A0;
             case Region.B_FARMHOUSE: pal = new int[]{0xFF8C4A3C, 0xFF6E5040}; break;
             case Region.B_BARN: return 0xFF9A3A2E;
             case Region.B_CHURCH: return 0xFF7A6A5A;
@@ -794,9 +901,383 @@ public final class RegionGen {
         r.facilities.add(f);
     }
 
+    // ------------------------------------------------------------------ airfields and the naval base
+
+    private void layoutAirfield(Region.Settlement s) {
+        boolean military = s.kind == Region.S_AIRBASE;
+        int hw = s.radius, hh = (int) (s.radius * 0.6f);
+        int x0 = s.cx - hw, y0 = s.cy - hh, x1 = s.cx + hw, y1 = s.cy + hh;
+        for (int y = y0; y <= y1; y++)
+            for (int x = x0; x <= x1; x++) {
+                boolean edge = x == x0 || x == x1 || y == y0 || y == y1;
+                r.set(x, y, edge ? Tile.FENCE : military ? Tile.BASE : Tile.GRASS);
+            }
+        // the runway, across the top half
+        int ry = s.cy - hh / 2;
+        for (int y = ry - 3; y <= ry + 3; y++) for (int x = x0 + 4; x <= x1 - 4; x++) r.set(x, y, Tile.RUNWAY);
+        // apron and taxiway
+        for (int y = s.cy + 2; y <= s.cy + 10; y++) for (int x = x0 + 6; x <= x1 - 6; x++) r.set(x, y, Tile.LOT);
+        for (int y = ry + 4; y < s.cy + 2; y++) for (int x = s.cx - 2; x <= s.cx + 2; x++) r.set(x, y, Tile.LOT);
+        // buildings along the bottom: hangars (and a terminal)
+        int bx = x0 + 6;
+        if (!military) {
+            r.addBuilding(s.cx - 14, s.cy + 12, 28, 8, Region.B_TERMINAL, 3, s.id, 400, roofFor(Region.B_TERMINAL));
+        }
+        for (; bx + 10 <= x1 - 6; bx += 13) {
+            if (!military && bx + 10 > s.cx - 16 && bx < s.cx + 16) continue;
+            r.addBuilding(bx, s.cy + 12, 10, 7, Region.B_HANGAR, 2, s.id, 0, roofFor(Region.B_HANGAR));
+        }
+        // roads: a gate on the side away from the runway
+        int hub = r.roads.addNode(s.cx * 16 + 8, (s.cy + 6) * 16 + 8, s.id);
+        int gate = r.roads.addNode(s.cx * 16 + 8, (y1 + 1) * 16 + 8, s.id);
+        r.roads.addEdge(hub, gate, RoadGraph.AVENUE, 2.5f * 16);
+        for (int y = s.cy + 6; y <= y1 + 1; y++) for (int x = s.cx - 2; x <= s.cx + 2; x++) if (r.t(x, y) != Tile.BUILDING) r.set(x, y, Tile.ROAD);
+        s.hubNode = hub;
+        s.edgeNodes.add(gate);
+        Region.Facility f = new Region.Facility();
+        f.id = r.facilities.size();
+        f.kind = military ? Region.F_AIRBASE : Region.F_AIRPORT;
+        f.settlement = s.id;
+        f.x = s.cx * 16 + 8;
+        f.y = (s.cy + 6) * 16 + 8;
+        f.bx0 = x0;
+        f.by0 = y0;
+        f.bx1 = x1;
+        f.by1 = y1;
+        f.name = s.name;
+        r.facilities.add(f);
+        if (military) {
+            for (int k = 0; k < 4; k++) {
+                Region.Facility h = new Region.Facility();
+                h.id = r.facilities.size();
+                h.kind = Region.F_HELIPAD;
+                h.settlement = s.id;
+                h.x = (x0 + 10 + k * 8) * 16;
+                h.y = (s.cy + 4) * 16;
+                h.name = s.name + " Helipad";
+                r.facilities.add(h);
+            }
+        }
+    }
+
+    private void layoutNaval(Region.Settlement s) {
+        // which way is the sea?
+        double best = 0;
+        float bw = -1;
+        for (int a = 0; a < 16; a++) {
+            double ang = a * Math.PI / 8;
+            int wc = 0;
+            for (int d = 8; d <= s.radius + 16; d += 4)
+                if (Tile.water(r.t(s.cx + (int) (Math.cos(ang) * d), s.cy + (int) (Math.sin(ang) * d)))) wc++;
+            if (wc > bw) {
+                bw = wc;
+                best = ang;
+            }
+        }
+        float sx = (float) Math.cos(best), sy = (float) Math.sin(best);
+        // the land part: a fenced yard
+        int rad = s.radius;
+        for (int y = s.cy - rad; y <= s.cy + rad; y++)
+            for (int x = s.cx - rad; x <= s.cx + rad; x++) {
+                float dx = x - s.cx, dy = y - s.cy;
+                if (dx * dx + dy * dy > rad * rad || !r.in(x, y)) continue;
+                int t = r.t(x, y);
+                if (!Tile.water(t)) r.set(x, y, Tile.BASE);
+            }
+        // piers into the water
+        int shoreX = s.cx, shoreY = s.cy;
+        for (int d = 0; d < rad + 30; d++) {
+            int x = s.cx + (int) (sx * d), y = s.cy + (int) (sy * d);
+            if (Tile.water(r.t(x, y))) {
+                shoreX = x;
+                shoreY = y;
+                break;
+            }
+        }
+        for (int p = -1; p <= 1; p++) {
+            int ox = (int) (-sy * p * 10), oy = (int) (sx * p * 10);
+            for (int d = -2; d < 18; d++)
+                for (int wdt = -1; wdt <= 1; wdt++) {
+                    int x = shoreX + ox + (int) (sx * d) + (int) (-sy * wdt), y = shoreY + oy + (int) (sy * d) + (int) (sx * wdt);
+                    if (Tile.water(r.t(x, y))) r.set(x, y, Tile.PLAZA);
+                }
+        }
+        // warehouses on the land side
+        int lx = s.cx - (int) (sx * rad * 0.5f), ly = s.cy - (int) (sy * rad * 0.5f);
+        r.addBuilding(lx - 8, ly - 3, 7, 6, Region.B_DOCK, 2, s.id, 0, roofFor(Region.B_DOCK));
+        r.addBuilding(lx + 1, ly - 3, 7, 6, Region.B_DOCK, 2, s.id, 0, roofFor(Region.B_DOCK));
+        // the road in, from the land side
+        int hub = r.roads.addNode(shoreX * 16 - sx * 60, shoreY * 16 - sy * 60, s.id);
+        int gx = s.cx - (int) (sx * (rad + 2)), gy = s.cy - (int) (sy * (rad + 2));
+        int gate = r.roads.addNode(gx * 16 + 8, gy * 16 + 8, s.id);
+        r.roads.addEdge(hub, gate, RoadGraph.STREET, 2f * 16);
+        for (int k = 0; k <= 40; k++) {
+            int x = (int) ((r.roads.nx[hub] + (r.roads.nx[gate] - r.roads.nx[hub]) * k / 40f) / 16);
+            int y = (int) ((r.roads.ny[hub] + (r.roads.ny[gate] - r.roads.ny[hub]) * k / 40f) / 16);
+            for (int dy = -1; dy <= 1; dy++) for (int dx = -1; dx <= 1; dx++) if (!Tile.water(r.t(x + dx, y + dy)) && r.t(x + dx, y + dy) != Tile.BUILDING) r.set(x + dx, y + dy, Tile.ROAD);
+        }
+        s.hubNode = hub;
+        s.edgeNodes.add(gate);
+        Region.Facility f = new Region.Facility();
+        f.id = r.facilities.size();
+        f.kind = Region.F_PORT;
+        f.settlement = s.id;
+        f.x = r.roads.nx[hub];
+        f.y = r.roads.ny[hub];
+        f.bx0 = s.cx - rad;
+        f.by0 = s.cy - rad;
+        f.bx1 = s.cx + rad;
+        f.by1 = s.cy + rad;
+        f.name = s.name;
+        r.facilities.add(f);
+    }
+
+    // ------------------------------------------------------------------ railways
+
+    private final Map<Long, Integer> railNodeAt = new HashMap<Long, Integer>();
+
+    private void railways() {
+        if (W <= 1024) return;
+        List<Region.Facility> stations = new ArrayList<Region.Facility>();
+        for (Region.Facility f : r.facilities) if (f.kind == Region.F_STATION) stations.add(f);
+        if (stations.size() < 2) return;
+        for (Region.Facility f : stations) f.railNode = r.rails.addNode(f.x, f.y, f.settlement);
+        // a tree joining every station (the capital first), plus the capital to every city
+        int n = stations.size();
+        boolean[] in = new boolean[n];
+        int first = 0;
+        for (int i = 0; i < n; i++) if (r.settlements.get(stations.get(i).settlement).capital) first = i;
+        in[first] = true;
+        List<int[]> pairs = new ArrayList<int[]>();
+        for (int k = 1; k < n; k++) {
+            int ba = -1, bb = -1;
+            float bd = Float.MAX_VALUE;
+            for (int a = 0; a < n; a++) {
+                if (!in[a]) continue;
+                for (int b = 0; b < n; b++) {
+                    if (in[b]) continue;
+                    float dx = stations.get(a).x - stations.get(b).x, dy = stations.get(a).y - stations.get(b).y, d = dx * dx + dy * dy;
+                    if (d < bd) {
+                        bd = d;
+                        ba = a;
+                        bb = b;
+                    }
+                }
+            }
+            if (bb < 0) break;
+            in[bb] = true;
+            pairs.add(new int[]{ba, bb});
+        }
+        for (int i = 0; i < n; i++) {
+            if (i == first || r.settlements.get(stations.get(i).settlement).kind != Region.S_CITY) continue;
+            boolean have = false;
+            for (int[] p : pairs) if ((p[0] == first && p[1] == i) || (p[1] == first && p[0] == i)) have = true;
+            if (!have) pairs.add(new int[]{first, i});
+        }
+        for (int[] p : pairs) railRoute(stations.get(p[0]), stations.get(p[1]));
+    }
+
+    private void railRoute(Region.Facility fa, Region.Facility fb) {
+        int cw = W / HC, ch = H / HC;
+        Region.Settlement sa = r.settlements.get(fa.settlement), sb = r.settlements.get(fb.settlement);
+        int sx = clamp((int) (fa.x / 16 / HC), 0, cw - 1), sy = clamp((int) (fa.y / 16 / HC), 0, ch - 1);
+        int ex = clamp((int) (fb.x / 16 / HC), 0, cw - 1), ey = clamp((int) (fb.y / 16 / HC), 0, ch - 1);
+        float[] g = new float[cw * ch];
+        java.util.Arrays.fill(g, Float.MAX_VALUE);
+        int[] prev = new int[cw * ch];
+        java.util.Arrays.fill(prev, -1);
+        boolean[] done = new boolean[cw * ch];
+        int[] heap = new int[cw * ch * 4 + 4];
+        float[] key = new float[heap.length];
+        int hn = 0, start = sy * cw + sx, goal = ey * cw + ex;
+        g[start] = 0;
+        heap[++hn] = start;
+        int[] dxs = {1, -1, 0, 0, 1, 1, -1, -1}, dys = {0, 0, 1, -1, 1, -1, 1, -1};
+        while (hn > 0) {
+            int c = heap[1];
+            heap[1] = heap[hn];
+            key[1] = key[hn];
+            hn--;
+            for (int i = 1; ; ) {
+                int l = i * 2, rr = l + 1, m = i;
+                if (l <= hn && key[l] < key[m]) m = l;
+                if (rr <= hn && key[rr] < key[m]) m = rr;
+                if (m == i) break;
+                int t = heap[i]; heap[i] = heap[m]; heap[m] = t;
+                float tk = key[i]; key[i] = key[m]; key[m] = tk;
+                i = m;
+            }
+            if (done[c]) continue;
+            done[c] = true;
+            if (c == goal) break;
+            int cx = c % cw, cy = c / cw;
+            for (int d = 0; d < 8; d++) {
+                int nx = cx + dxs[d], ny = cy + dys[d];
+                if (nx < 0 || ny < 0 || nx >= cw || ny >= ch) continue;
+                int ni = ny * cw + nx;
+                if (done[ni]) continue;
+                int x = nx * HC + HC / 2, y = ny * HC + HC / 2;
+                int t = r.t(x, y);
+                float cost;
+                if (t == Tile.RAIL) cost = 0.4f;
+                else if (t == Tile.DEEP) cost = 70;
+                else if (t == Tile.WATER) cost = 25;
+                else if (t == Tile.ROCK) cost = 60;
+                else if (t == Tile.BUILDING || t == Tile.FENCE || t == Tile.WALL) cost = 200;
+                else if (Tile.roadish(t)) cost = 4;
+                else cost = 1.2f;
+                for (Region.Settlement s : r.settlements) {
+                    if (s == sa || s == sb) continue;
+                    float ddx = x - s.cx, ddy = y - s.cy, rr = s.radius + 4;
+                    if (ddx * ddx + ddy * ddy < rr * rr) cost += 40;
+                }
+                float ng = g[c] + cost * (d >= 4 ? 1.414f : 1f);
+                if (ng < g[ni]) {
+                    g[ni] = ng;
+                    prev[ni] = c;
+                    if (hn + 1 >= heap.length) continue;
+                    float hx = nx - ex, hy = ny - ey;
+                    heap[++hn] = ni;
+                    key[hn] = ng + (float) Math.sqrt(hx * hx + hy * hy) * 1.1f;
+                    for (int i = hn; i > 1 && key[i >> 1] > key[i]; i >>= 1) {
+                        int t2 = heap[i]; heap[i] = heap[i >> 1]; heap[i >> 1] = t2;
+                        float tk = key[i]; key[i] = key[i >> 1]; key[i >> 1] = tk;
+                    }
+                }
+            }
+        }
+        if (!done[goal]) return;
+        List<float[]> pts = new ArrayList<float[]>();
+        for (int c = goal; c >= 0; c = prev[c]) pts.add(0, new float[]{(c % cw) * HC + HC / 2f, (c / cw) * HC + HC / 2f});
+        pts.set(0, new float[]{fa.x / 16, fa.y / 16});
+        pts.set(pts.size() - 1, new float[]{fb.x / 16, fb.y / 16});
+        for (int it = 0; it < 2; it++) {
+            List<float[]> q = new ArrayList<float[]>();
+            q.add(pts.get(0));
+            for (int i = 0; i < pts.size() - 1; i++) {
+                float[] p0 = pts.get(i), p1 = pts.get(i + 1);
+                q.add(new float[]{p0[0] * 0.75f + p1[0] * 0.25f, p0[1] * 0.75f + p1[1] * 0.25f});
+                q.add(new float[]{p0[0] * 0.25f + p1[0] * 0.75f, p0[1] * 0.25f + p1[1] * 0.75f});
+            }
+            q.add(pts.get(pts.size() - 1));
+            pts = q;
+        }
+        int prevNode = fa.railNode;
+        float acc = 0;
+        for (int i = 1; i < pts.size(); i++) {
+            float[] p0 = pts.get(i - 1), p1 = pts.get(i);
+            float dx = p1[0] - p0[0], dy = p1[1] - p0[1], len = (float) Math.sqrt(dx * dx + dy * dy);
+            int steps = Math.max(1, (int) (len * 2));
+            for (int k = 0; k <= steps; k++) paveRail(p0[0] + dx * k / steps, p0[1] + dy * k / steps);
+            acc += len;
+            boolean last = i == pts.size() - 1;
+            if (acc >= 12 || last) {
+                int node = last ? fb.railNode : railNode(p1[0], p1[1]);
+                if (node != prevNode) {
+                    int e = r.rails.addEdge(prevNode, node, RoadGraph.HIGHWAY, 16);
+                    if (e >= 0) {
+                        boolean wet = false;
+                        for (int k = 0; k <= 8; k++) {
+                            float ax = r.rails.nx[prevNode] / 16, ay = r.rails.ny[prevNode] / 16, bx = r.rails.nx[node] / 16, by = r.rails.ny[node] / 16;
+                            if (r.t((int) (ax + (bx - ax) * k / 8), (int) (ay + (by - ay) * k / 8)) == Tile.BRIDGE) wet = true;
+                        }
+                        r.rails.ebridge[e] = wet;
+                    }
+                }
+                prevNode = node;
+                acc = 0;
+            }
+        }
+    }
+
+    private int railNode(float tx, float ty) {
+        int cx = (int) (tx / 8), cy = (int) (ty / 8);
+        for (int dy = -1; dy <= 1; dy++)
+            for (int dx = -1; dx <= 1; dx++) {
+                Integer id = railNodeAt.get(key(cx + dx, cy + dy));
+                if (id != null) {
+                    float ddx = r.rails.nx[id] / 16 - tx, ddy = r.rails.ny[id] / 16 - ty;
+                    if (ddx * ddx + ddy * ddy < 36) return id;
+                }
+            }
+        int id = r.rails.addNode(tx * 16, ty * 16, -1);
+        railNodeAt.put(key(cx, cy), id);
+        return id;
+    }
+
+    private void paveRail(float x, float y) {
+        int cx = (int) x, cy = (int) y;
+        for (int dy = 0; dy <= 1; dy++)
+            for (int dx = 0; dx <= 1; dx++) {
+                int tx = cx + dx, ty = cy + dy;
+                if (!r.in(tx, ty)) continue;
+                int t = r.tile[ty * W + tx];
+                if (t == Tile.BUILDING || t == Tile.FENCE || t == Tile.WALL || Tile.roadish(t) && t != Tile.BRIDGE) continue;
+                if (Tile.water(t) || t == Tile.BRIDGE) r.tile[ty * W + tx] = Tile.BRIDGE;
+                else r.tile[ty * W + tx] = Tile.RAIL;
+            }
+    }
+
+    // ------------------------------------------------------------------ states and people
+
+    private void states() {
+        for (Region.Settlement s : r.settlements) {
+            if (s.kind != Region.S_CITY) continue;
+            Region.State st = new Region.State();
+            st.id = r.states.size();
+            st.capitalCity = s.id;
+            st.name = Names.state(rng);
+            r.states.add(st);
+        }
+        for (Region.Settlement s : r.settlements) {
+            float bd = Float.MAX_VALUE;
+            for (Region.State st : r.states) {
+                Region.Settlement c = r.settlements.get(st.capitalCity);
+                float dx = c.cx - s.cx, dy = c.cy - s.cy, d = dx * dx + dy * dy;
+                if (d < bd) {
+                    bd = d;
+                    s.state = st.id;
+                }
+            }
+        }
+    }
+
+    /** Scales each place's homes to a believable population: a capital of about a million, cities of hundreds of thousands. */
+    private void populations() {
+        if (W <= 1024) {
+            for (Region.Settlement s : r.settlements) {
+                s.residents = 0;
+                for (int i = 0; i < r.bCount; i++) if (r.bset[i] == s.id) s.residents += r.bres[i];
+            }
+            return;
+        }
+        float k = W >= 2304 ? 1f : 0.6f;
+        long[] base = new long[r.settlements.size()];
+        for (int i = 0; i < r.bCount; i++) if (r.bset[i] >= 0) base[r.bset[i]] += r.bres[i];
+        float[] factor = new float[base.length];
+        for (Region.Settlement s : r.settlements) {
+            float target;
+            switch (s.kind) {
+                case Region.S_CITY: target = s.capital ? rng.range(900000f, 1300000f) * k : rng.range(150000f, 450000f) * k; break;
+                case Region.S_TOWN: target = 20000f * (s.radius / 50f) * (s.radius / 50f) * rng.range(0.7f, 1.3f); break;
+                case Region.S_VILLAGE: target = rng.range(400f, 2500f); break;
+                case Region.S_PRISON: target = rng.range(1500f, 2500f); break;
+                default: target = base[s.id];
+            }
+            factor[s.id] = base[s.id] > 0 ? target / base[s.id] : 1;
+        }
+        for (int i = 0; i < r.bCount; i++) {
+            int st = r.bset[i];
+            if (st >= 0) r.bres[i] = Math.round(r.bres[i] * factor[st]);
+            else r.bres[i] *= 6; // farms
+        }
+        for (Region.Settlement s : r.settlements) s.residents = 0;
+        for (int i = 0; i < r.bCount; i++) if (r.bset[i] >= 0) r.settlements.get(r.bset[i]).residents += r.bres[i];
+    }
+
     // ------------------------------------------------------------------ highways
 
-    private static final int HC = 4; // tiles per highway search cell
+    private final int HC; // tiles per highway search cell
 
     private void highways() {
         List<Region.Settlement> ss = r.settlements;
@@ -830,7 +1311,14 @@ public final class RegionGen {
                 for (int[] p : pairs) if ((p[0] == 0 && p[1] == b) || (p[1] == 0 && p[0] == b)) have = true;
                 if (!have && Math.sqrt(dist2(ss.get(0), ss.get(b))) < W * 0.55f) pairs.add(new int[]{0, b});
             }
-        // longer roads first, so short ones join them
+        // interstates: every city to every other city that's not too far
+        for (int a = 0; a < n; a++)
+            for (int b = a + 1; b < n; b++) {
+                if (ss.get(a).kind != Region.S_CITY || ss.get(b).kind != Region.S_CITY) continue;
+                boolean have = false;
+                for (int[] p : pairs) if ((p[0] == a && p[1] == b) || (p[0] == b && p[1] == a)) have = true;
+                if (!have && Math.sqrt(dist2(ss.get(a), ss.get(b))) < W * 0.6f) pairs.add(new int[]{a, b});
+            }
         for (int[] p : pairs) connect(ss.get(p[0]), ss.get(p[1]));
         // roads out of the region: where outside help comes from
         int exits = W >= 1536 ? 4 : 3;
@@ -1131,21 +1619,9 @@ public final class RegionGen {
     }
 
     private void powerGrids() {
-        List<Region.Facility> plants = new ArrayList<Region.Facility>();
-        for (Region.Facility f : r.facilities) if (f.kind == Region.F_POWER) plants.add(f);
-        r.gridCount = plants.size();
-        for (int i = 0; i < plants.size(); i++) plants.get(i).grid = i;
-        for (Region.Settlement s : r.settlements) {
-            if (s.kind == Region.S_BASE || s.kind == Region.S_PRISON) continue; // own generators
-            float bd = Float.MAX_VALUE;
-            for (Region.Facility p : plants) {
-                float dx = p.x / 16 - s.cx, dy = p.y / 16 - s.cy, d = dx * dx + dy * dy;
-                if (d < bd) {
-                    bd = d;
-                    s.grid = p.grid;
-                }
-            }
-        }
+        r.gridCount = network(Region.F_POWER, 0);
+        r.waterCount = network(Region.F_WATER, 1);
+        r.phoneCount = network(Region.F_PHONE, 2);
         for (Region.Facility f : r.facilities) {
             f.node = r.roads.nearestNode(f.x, f.y, 900);
             if (f.grid < 0 && f.settlement >= 0) {
@@ -1153,5 +1629,31 @@ public final class RegionGen {
                 if (f.kind != Region.F_POWER) f.grid = s.grid;
             }
         }
+    }
+
+    /** Each plant runs a network; every town joins the nearest one. Returns how many networks. */
+    private int network(int kind, int which) {
+        List<Region.Facility> plants = new ArrayList<Region.Facility>();
+        for (Region.Facility f : r.facilities) if (f.kind == kind) plants.add(f);
+        for (int i = 0; i < plants.size(); i++) {
+            plants.get(i).network = i;
+            if (which == 0) plants.get(i).grid = i;
+        }
+        for (Region.Settlement s : r.settlements) {
+            if (s.kind != Region.S_CITY && s.kind != Region.S_TOWN && s.kind != Region.S_VILLAGE) continue;
+            float bd = Float.MAX_VALUE;
+            int best = -1;
+            for (Region.Facility p : plants) {
+                float dx = p.x / 16 - s.cx, dy = p.y / 16 - s.cy, d = dx * dx + dy * dy;
+                if (d < bd) {
+                    bd = d;
+                    best = p.network;
+                }
+            }
+            if (which == 0) s.grid = best;
+            else if (which == 1) s.water = best;
+            else s.phone = best;
+        }
+        return plants.size();
     }
 }

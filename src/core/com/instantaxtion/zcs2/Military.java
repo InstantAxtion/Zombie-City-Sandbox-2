@@ -70,46 +70,64 @@ public final class Military {
         }
     }
 
-    void update() {
-        strikeT -= 1;
-        supplyT -= 1;
-        waveT -= 1;
-        guardT -= 1;
-        regularT -= 1;
-        bridgeT -= 1;
+    void update(float dt) {
+        strikeT -= dt;
+        supplyT -= dt;
+        waveT -= dt;
+        guardT -= dt;
+        regularT -= dt;
+        bridgeT -= dt;
         // the army goes to every town that asked
         for (int st = 0; st < armyCalled.length && st < w.r.settlements.size(); st++) {
             if (!armyCalled[st]) continue;
             if (!w.disp.perimeterMode(st)) armyCalled[st] = false;
         }
-        if (w.gov.level >= 3 && strikeT <= 0) autoStrike();
-        if (supplyT <= 0) {
+        if (w.gov.level >= 3 && strikeT <= 0 && !w.strategic) autoStrike();
+        if (supplyT <= 0 && !w.strategic) {
             supply();
             supplyT = 90;
         }
         // outside help, growing with the crisis
         int dead = w.totalZombies();
-        if (w.gov.level >= 2 && waveT <= 0 && dead > 40) {
-            outsideWave("trooper", "patrol_car", 3, "State Police", Ents.COP);
-            waveT = 150;
+        // outside help arrives as formations on the highways, growing with the crisis
+        if (w.gov.level >= 2 && waveT <= 0 && dead > 40 && wavesArrived < 6) {
+            arrive("police_reserve", "State Police");
+            waveT = 240;
         }
-        if (w.gov.level >= 3 && guardT <= 0 && guardsArrived < 16 && dead > 300) {
-            outsideWave("guard", "army_truck", 4, "National Guard", Ents.SOLDIER);
-            guardsArrived += 4;
-            guardT = 200;
+        if (w.gov.level >= 3 && guardT <= 0 && guardsArrived < 10 && dead > 300) {
+            arrive("guard_brigade", "National Guard");
+            guardsArrived++;
+            guardT = 300;
         }
-        if (w.gov.level >= 4 && regularT <= 0 && regularsArrived < 20 && dead > 1500) {
-            outsideWave("rifleman", "army_truck", 3, "Army", Ents.SOLDIER);
-            outsideWave("gunner", "apc", 2, "Army", Ents.SOLDIER);
-            armour();
-            regularsArrived += 5;
+        // national mobilisation: a new formation every four game hours for as long as it takes
+        if (w.gov.level >= 4 && regularT <= 0 && regularsArrived < 60 && dead > 1500) {
+            String[] kinds = {"infantry", "armour", "infantry", "artillery"};
+            arrive(kinds[regularsArrived % kinds.length], "Army");
+            regularsArrived++;
             regularT = 240;
         }
-        retaskArmour();
+        if (!w.strategic) retaskArmour();
         if (bridgeT <= 0) {
             bridgeT = 10;
             w.strat.considerBridges();
         }
+    }
+
+    /** A formation from outside arrives at a highway entry (or the naval base, for marines). */
+    public Forces.Formation arrive(String formationId, String agency) {
+        Content.FormationT t = w.c.formationT(formationId);
+        if (t == null || w.r.entryNodes.isEmpty()) return null;
+        int entry = w.r.entryNodes.get(w.rng.nextInt(w.r.entryNodes.size()));
+        Forces.Formation f = w.forces.createFormation(t, w.r.roads.nx[entry], w.r.roads.ny[entry], true);
+        if (t.faction.equals("police")) {
+            wavesArrived++;
+            w.stats.outsidePolice += f.strength();
+        } else w.stats.outsideSoldiers += f.strength();
+        w.news.radio(agency + ": the " + f.name + " (" + f.strength() + ") is entering the country", f.hq.x, f.hq.y, News.COMMAND);
+        // straight to the capital until command has a job for it
+        Region.Settlement c = w.r.city();
+        w.forces.order(f, c.cx * 16f, c.cy * 16f);
+        return f;
     }
 
     /** Air strikes on big masses of the dead where no one living is close. */
@@ -155,7 +173,7 @@ public final class Military {
         int sent = 0;
         for (Region.Facility f : w.r.facilities) {
             if (f.kind != Region.F_POLICE && f.kind != Region.F_ARMORY) continue;
-            if (!w.strat.online(f.id) || w.strat.ammo[f.id] > Strategic.AMMO_START * 0.5f) continue;
+            if (!w.strat.online(f.id) || f.ammo > Strategic.AMMO_START * 0.5f) continue;
             if (w.strat.supplyOnWay[f.id]) continue;
             Content.VType t = w.c.vtype("supply_truck");
             if (t == null) return;

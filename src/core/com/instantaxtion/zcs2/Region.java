@@ -13,24 +13,37 @@ public final class Region {
     public static final int B_HOUSE = 0, B_APARTMENT = 1, B_OFFICE = 2, B_TOWER = 3, B_SHOP = 4, B_WAREHOUSE = 5,
             B_FARMHOUSE = 6, B_BARN = 7, B_POLICE = 8, B_HOSPITAL = 9, B_POWER = 10, B_FUEL = 11, B_BARRACKS = 12,
             B_HANGAR = 13, B_PRISON = 14, B_LAB = 15, B_CHURCH = 16, B_SCHOOL = 17, B_MALL = 18, B_ARMORY = 19,
-            B_DEPOT = 20, B_CELLBLOCK = 21;
+            B_DEPOT = 20, B_CELLBLOCK = 21, B_WATER = 22, B_PHONE = 23, B_FOODW = 24, B_FIRE = 25, B_HALL = 26,
+            B_STATION = 27, B_TERMINAL = 28, B_DOCK = 29, B_GOV = 30, B_TENT = 31;
     public static final String[] BNAMES = {"House", "Apartments", "Offices", "Tower", "Shop", "Warehouse", "Farmhouse",
             "Barn", "Police station", "Hospital", "Power station", "Fuel depot", "Barracks", "Motor pool", "Prison",
-            "Research lab", "Church", "School", "Mall", "Guard armory", "Bus depot", "Cell block"};
+            "Research lab", "Church", "School", "Mall", "Guard armory", "Bus depot", "Cell block", "Water works",
+            "Telephone exchange", "Food warehouse", "Fire station", "City hall", "Railway station", "Terminal", "Dock warehouse",
+            "State house", "Tent"};
 
     // facility kinds
     public static final int F_POLICE = 0, F_HOSPITAL = 1, F_POWER = 2, F_FUEL = 3, F_BASE = 4, F_ARMORY = 5, F_PRISON = 6,
-            F_LAB = 7, F_DEPOT = 8, F_HELIPAD = 9, F_PARK = 10;
+            F_LAB = 7, F_DEPOT = 8, F_HELIPAD = 9, F_PARK = 10, F_WATER = 11, F_PHONE = 12, F_FOODW = 13, F_FIRE = 14,
+            F_HALL = 15, F_STATION = 16, F_AIRBASE = 17, F_PORT = 18, F_AIRPORT = 19, F_GOV = 20, F_CAMP = 21, F_FOB = 22, F_HQ = 23;
+    public static final int FKINDS = 24;
     public static final String[] FNAMES = {"Police station", "Hospital", "Power station", "Fuel depot", "Army base",
-            "Guard armory", "Prison", "Research lab", "Bus depot", "Helipad", "Park"};
+            "Guard armory", "Prison", "Research lab", "Bus depot", "Helipad", "Park", "Water works", "Telephone exchange",
+            "Food warehouse", "Fire station", "City hall", "Railway station", "Air base", "Naval base", "Airport",
+            "State house", "Refugee camp", "Forward operating base", "Headquarters"};
 
-    public static final int S_CITY = 0, S_TOWN = 1, S_VILLAGE = 2, S_BASE = 3, S_PRISON = 4;
+    public static final int S_CITY = 0, S_TOWN = 1, S_VILLAGE = 2, S_BASE = 3, S_PRISON = 4, S_AIRBASE = 5, S_NAVAL = 6,
+            S_AIRPORT = 7, S_CAMP = 8, S_HOLDOUT = 9;
+    public static final String[] SNAMES = {"City", "Town", "Village", "Army base", "Prison", "Air base", "Naval base",
+            "Airport", "Refugee camp", "Survivor settlement"};
 
     public static final class Settlement {
         public int id, kind, cx, cy, radius; // tiles
         public String name;
         public int residents;
         public int grid = -1; // power grid
+        public int water = -1, phone = -1; // water and telephone networks
+        public int state = -1; // the state it belongs to
+        public boolean capital;
         public int hubNode = -1; // a central junction
         public final List<Integer> edgeNodes = new ArrayList<Integer>();
     }
@@ -42,7 +55,30 @@ public final class Region {
         public int grid = -1; // power grid served (power stations)
         public String name;
         public int bx0, by0, bx1, by1; // block, tiles (inclusive)
+        public int network = -1; // water works / telephone exchange: the network it runs
+        public int railNode = -1; // railway stations: the junction on the rail graph
+        /** People and vehicles kept here when not deployed, by content index (police, soldiers, firefighters). */
+        public int[] pool, vpool;
+        /** Stocks: ammunition (rounds), fuel, food (person-days), medicine (doses). */
+        public float ammo, fuel, food, med;
+        public boolean runtime; // made during the game (camps, forward bases)
+
+        public int poolTotal() {
+            int n = 0;
+            if (pool != null) for (int v : pool) n += v;
+            return n;
+        }
     }
+
+    public static final class State {
+        public int id, capitalCity;
+        public String name;
+    }
+
+    public final List<State> states = new ArrayList<State>();
+    /** The railways, as a graph like the roads. */
+    public final RoadGraph rails = new RoadGraph();
+    public int waterCount, phoneCount;
 
     public final int W, H;
     public final long seed;
@@ -225,9 +261,24 @@ public final class Region {
         return null;
     }
 
+    /** The capital (the biggest city). */
     public Settlement city() {
+        for (Settlement s : settlements) if (s.capital) return s;
         for (Settlement s : settlements) if (s.kind == S_CITY) return s;
         return settlements.get(0);
+    }
+
+    public Facility addFacility(int kind, int settlement, float x, float y, String name) {
+        Facility f = new Facility();
+        f.id = facilities.size();
+        f.kind = kind;
+        f.settlement = settlement;
+        f.x = x;
+        f.y = y;
+        f.name = name;
+        f.runtime = true;
+        facilities.add(f);
+        return f;
     }
 
     /** A checksum of the map, for tests and saves. */

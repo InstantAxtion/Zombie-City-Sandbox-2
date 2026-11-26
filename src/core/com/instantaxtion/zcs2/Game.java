@@ -12,7 +12,9 @@ import java.util.List;
 public final class Game {
     static final int S_MENU = 0, S_NEW = 1, S_LOADING = 2, S_PLAY = 3, S_PAUSE = 4, S_SETTINGS = 5, S_REPORT = 6,
             S_RADIO = 7, S_HELP = 8, S_NOTES = 9, S_SLOTS = 10;
-    static final int[] SPEEDS = {1, 2, 4, 8, 16};
+    /** Game seconds per real second. From 60 up it's strategic fast-forward: an hour, six hours, a day a second. */
+    static final int[] SPEEDS = {1, 2, 4, 8, 16, 60, 360, 1440};
+    static final String[] SPEED_NAMES = {"1x", "2x", "4x", "8x", "16x", "1h/s", "6h/s", "1d/s"};
 
     final Platform pf;
     final Settings settings = new Settings();
@@ -65,6 +67,7 @@ public final class Game {
     // inspector
     int inspEnt = -1, inspVeh = -1, inspFac = -1, inspSettle = -1;
     Squads.Squad inspSquad;
+    Forces.Formation inspFormation;
     private float msgT;
     private String msg;
     private int soundsSeen;
@@ -256,10 +259,11 @@ public final class Game {
             Region pr = preview;
             if (pr != null && previewKey == key()) {
                 if (previewImg == null) {
-                    previewImg = pf.newImage(pr.W, pr.H);
-                    int[] pix = new int[pr.W * pr.H];
-                    for (int yy = 0; yy < pr.H; yy++) for (int xx = 0; xx < pr.W; xx++) pix[yy * pr.W + xx] = MapPainter.tileColor(pr, xx, yy, false);
-                    previewImg.setPixels(pix, pr.W, pr.H);
+                    int st = pr.W > 1024 ? 4 : 2, iw = pr.W / st;
+                    previewImg = pf.newImage(iw, iw);
+                    int[] pix = new int[iw * iw];
+                    for (int yy = 0; yy < iw; yy++) for (int xx = 0; xx < iw; xx++) pix[yy * iw + xx] = MapPainter.tileColor(pr, xx * st, yy * st, false);
+                    previewImg.setPixels(pix, iw, iw);
                 }
                 g.image(previewImg, pxx, y, ps, ps);
                 float k = ps / pr.W;
@@ -459,15 +463,25 @@ public final class Game {
         w.camY0 = cam.y0();
         w.camX1 = cam.x1();
         w.camY1 = cam.y1();
-        w.camDetail = cam.zoom >= 0.3f;
+        w.camDetail = cam.zoom >= 0.3f && !w.strategic;
+        // fast-forward speeds fold the simulation into numbers; normal speeds bring the detail back
+        boolean wantStrategic = SPEEDS[speedIdx] >= 60;
+        if (wantStrategic != w.strategic) {
+            w.setStrategic(wantStrategic);
+            if (wantStrategic && !w.strategic) {
+                speedIdx = 4;
+                toast("Can't fast-forward while you're playing a person");
+            }
+        }
         // step the simulation, within a time budget
         if (!paused && screen == S_PLAY && dt > 0) {
             acc += dt * SPEEDS[speedIdx];
+            float stepDt = w.strategic ? World.STRATEGIC_DT : World.DT;
             long t0 = System.nanoTime();
             int steps = 0;
-            while (acc >= World.DT) {
+            while (acc >= stepDt) {
                 w.step();
-                acc -= World.DT;
+                acc -= stepDt;
                 steps++;
                 if (System.nanoTime() - t0 > 28_000_000L) {
                     acc = 0;
@@ -487,6 +501,7 @@ public final class Game {
         }
         sounds();
         view.selected = inspSquad;
+        view.selectedFormation = inspFormation;
         view.inspectEnt = inspEnt;
         view.inspectVehicle = inspVeh;
         view.draw(g, cam, dt);
@@ -542,6 +557,8 @@ public final class Game {
         ui.button("pause", m, m, bh, bh, "≡", false, 18);
         g.color(Ui.TEXT);
         g.text(w.clock(), m + bh + ui.dp(10), m + ui.dp(16), ui.dp(15), Gfx.ALIGN_LEFT, true);
+        g.color(Ui.DIM);
+        g.text(w.weather.status(), m + bh + ui.dp(10) + g.textWidth(Gov.LEVELS[w.gov.level] + "  ", ui.dp(11), true), m + ui.dp(33), ui.dp(11), Gfx.ALIGN_LEFT, false);
         int lvl = w.gov.level;
         int lc = lvl <= 0 ? Ui.GOOD : lvl == 1 ? Ui.WARN : lvl == 2 ? 0xFFE07030 : 0xFFE0453A;
         g.color(lc);
@@ -550,11 +567,11 @@ public final class Game {
         float sw = ui.dp(44);
         float sx = W - m - sw * 2 - ui.dp(6);
         ui.button("playpause", sx, m, sw, bh, paused ? "▶" : "II", paused, 15);
-        ui.button("speed", sx + sw + ui.dp(6), m, sw, bh, SPEEDS[speedIdx] + "x", false, 14);
+        ui.button("speed", sx + sw + ui.dp(6), m, sw, bh, SPEED_NAMES[speedIdx], w.strategic, 13);
         // the numbers
         int people = w.livingCivilians();
-        String line = "People " + fmt(people) + "   Dead " + fmt(w.totalZombies()) + "   Police " + w.sq.count(Ents.COP)
-                + "   Army " + w.sq.count(Ents.SOLDIER);
+        String line = "People " + fmt(people) + "   Dead " + fmt(w.totalZombies()) + "   Police " + fmt(w.sq.count(Ents.COP) + w.forces.total(Ents.COP))
+                + "   Army " + fmt(w.sq.count(Ents.SOLDIER) + w.forces.total(Ents.SOLDIER));
         g.color(Ui.TEXT);
         float ts = ui.dp(12.5f);
         while (g.textWidth(line, ts, false) > W - m * 2 && ts > ui.dp(8)) ts *= 0.92f;
@@ -674,6 +691,8 @@ public final class Game {
             case "town":
                 return new String[][]{{"curfew", w.gov.curfew ? "Lift curfew" : "Curfew", "t:hint", "Tap a town to evacuate it"}};
             case "orders":
+                if (inspFormation != null && inspFormation.alive)
+                    return new String[][]{{"o:hint", Forces.shortName(inspFormation) + " (" + inspFormation.strength() + "): tap where to hold", "o:frelease", "Release", "o:fdone", "Done"}};
                 if (inspSquad != null && inspSquad.alive)
                     return new String[][]{{"o:hint", inspSquad.name + ": tap where to go", "o:release", "Release", "o:home", "Home"}};
                 return new String[][]{{"o:hint", "Tap a squad, then tap where it should go"}};
@@ -739,12 +758,15 @@ public final class Game {
     private float inspectorH;
 
     boolean inspectorOpen() {
-        return inspEnt >= 0 || inspVeh >= 0 || inspFac >= 0 || inspSettle >= 0 || (inspSquad != null && !tool.equals("orders"));
+        return inspEnt >= 0 || inspVeh >= 0 || inspFac >= 0 || inspSettle >= 0 || ((inspSquad != null || inspFormation != null) && !tool.equals("orders"));
     }
 
     void closeInspector() {
         inspEnt = inspVeh = inspFac = inspSettle = -1;
-        if (!tool.equals("orders")) inspSquad = null;
+        if (!tool.equals("orders")) {
+            inspSquad = null;
+            inspFormation = null;
+        }
     }
 
     private void inspector(Gfx g, float bottom) {
@@ -812,7 +834,8 @@ public final class Game {
             sub = on ? "Working" : "Overrun";
             if (f.kind == Region.F_POWER) body.append(on ? "Powering " : "Was powering ").append(w.strat.gridName(f.grid));
             if (f.kind == Region.F_POLICE || f.kind == Region.F_BASE || f.kind == Region.F_ARMORY)
-                body.append("Ammunition in store: ").append(w.strat.ammo[f.id]).append(" rounds");
+                body.append("Ammunition in store: ").append((int) f.ammo).append(" rounds. Waiting here: ")
+                        .append(w.forces.armedAt(f, Ents.COP) + w.forces.armedAt(f, Ents.SOLDIER));
             if (f.kind == Region.F_HOSPITAL) body.append(on ? "Taking in the bitten" : "The sick inside have turned");
             if (f.kind == Region.F_FUEL) body.append(on ? "Refuelling the town's vehicles" : "Vehicles here can't refuel");
             actions = new String[]{"i:close", "Close"};
@@ -827,6 +850,20 @@ public final class Game {
             boolean canEvac = (s.kind == Region.S_CITY || s.kind == Region.S_TOWN) && w.mode != World.MODE_SURVIVOR;
             actions = canEvac ? new String[]{"i:evac", w.gov.evacuating(s.id) ? "Stop evacuating" : "Evacuate", "i:zoom", "Go there", "i:close", "Close"}
                     : new String[]{"i:zoom", "Go there", "i:close", "Close"};
+        } else if (inspFormation != null) {
+            Forces.Formation f = inspFormation;
+            if (!f.alive) {
+                closeInspector();
+                return;
+            }
+            title = f.name;
+            sub = Forces.STATES[f.state] + (f.player ? ", under your command" : f.task >= 0 ? ", sent to " + w.r.settlements.get(f.task).name : "");
+            body.append(f.strength()).append(f.faction == Ents.COP ? " officers" : " soldiers").append(" (").append(f.deployed).append(" out in squads)");
+            Content.VType tank = w.c.vtype("tank");
+            if (tank != null && f.hq.vpool[tank.index] + f.tanksOut > 0) body.append(", ").append(f.hq.vpool[tank.index] + f.tanksOut).append(" tanks");
+            if (f.t.guns > 0) body.append(", ").append(f.t.guns).append(" guns");
+            body.append(". ").append(fmt(f.kills)).append(" of the dead destroyed, ").append(f.losses).append(" lost. Ammunition ").append((int) f.hq.ammo);
+            actions = new String[]{"i:fcommand", "Command it", "i:close", "Close"};
         } else {
             Squads.Squad s = inspSquad;
             if (s == null || !s.alive) {
@@ -1212,8 +1249,11 @@ public final class Game {
             }
             case "curfew": w.gov.setCurfew(!w.gov.curfew); return;
             case "o:release": Tools.releaseSquad(w, inspSquad); inspSquad = null; return;
+            case "o:frelease": if (inspFormation != null) { inspFormation.player = false; inspFormation.task = -1; } inspFormation = null; return;
+            case "o:fdone": inspFormation = null; return;
             case "o:home": if (inspSquad != null) { w.sq.goHome(inspSquad); inspSquad.player = true; } return;
-            case "i:close": closeInspector(); return;
+            case "i:close": closeInspector(); inspFormation = null; return;
+            case "i:fcommand": tool = "orders"; return;
             case "i:follow":
                 cam.follow = cam.follow == inspEnt ? -1 : inspEnt;
                 cam.followVehicle = -1;
@@ -1602,6 +1642,19 @@ public final class Game {
                 return;
             }
             case "orders": {
+                Forces.Formation fm = w.forces.formationAt(x, y, Math.max(60, ui.dp(24) / cam.zoom));
+                if (fm != null && fm != inspFormation && (cam.zoom < 0.6f)) {
+                    inspFormation = fm;
+                    inspSquad = null;
+                    return;
+                }
+                if (inspFormation != null && inspFormation.alive) {
+                    inspFormation.player = true;
+                    inspFormation.task = -1;
+                    if (w.forces.order(inspFormation, x, y)) toast(inspFormation.name + " moving");
+                    else toast("No road there");
+                    return;
+                }
                 Squads.Squad s = Tools.squadAt(w, x, y, Math.max(40, ui.dp(22) / cam.zoom));
                 if (s != null && s != inspSquad) {
                     inspSquad = s;
@@ -1669,6 +1722,13 @@ public final class Game {
             if (f.kind == Region.F_HELIPAD || f.kind == Region.F_PARK) continue;
             if (dist(cam.toScreenX(f.x), cam.toScreenY(f.y), sx, sy) < ui.dp(16)) {
                 inspFac = f.id;
+                return;
+            }
+        }
+        if (cam.zoom < 0.6f) {
+            Forces.Formation fm = w.forces.formationAt(x, y, ui.dp(18) / cam.zoom);
+            if (fm != null) {
+                inspFormation = fm;
                 return;
             }
         }

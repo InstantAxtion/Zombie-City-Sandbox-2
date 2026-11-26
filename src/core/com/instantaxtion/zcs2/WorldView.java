@@ -10,6 +10,7 @@ public final class WorldView {
     public final MapPainter map;
     public boolean lean3d = true, blood = true, healthBars = true, names = true;
     public Squads.Squad selected;
+    public Forces.Formation selectedFormation;
     public int inspectEnt = -1, inspectVehicle = -1;
     public float brushX = -1, brushY, brushR;
     public int brushColor;
@@ -40,6 +41,7 @@ public final class WorldView {
         else vehicleDots(g, cam);
         effects(g, cam, x0, y0, x1, y1);
         overlays(g, cam);
+        for (int i = 0; i < w.modules.size(); i++) w.modules.get(i).draw(g, cam, this);
         if (brushX >= 0) {
             g.color(brushColor);
             g.strokeCircle(cam.toScreenX(brushX), cam.toScreenY(brushY), brushR * z, 2);

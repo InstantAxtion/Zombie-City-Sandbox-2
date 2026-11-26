@@ -25,6 +25,8 @@ public final class Squads {
         public int kills, losses;
         public boolean alive = true, outside, player;
         public float hold = 40; // spread when holding
+        public int template = -1; // the content squad it was made from
+        public float idleT; // seconds idle at home (it stands down into the pool after a while)
 
         public int leader(Ents e) {
             for (int k = 0; k < n; k++) if (e.loc[mem[k]] == Ents.FREE) return mem[k];
@@ -46,7 +48,8 @@ public final class Squads {
 
     public Squad create(int faction, int home, String label) {
         Squad s = new Squad();
-        s.id = list.size();
+        int reuse = w.forces != null ? w.forces.reuseSquadSlot() : -1;
+        s.id = reuse >= 0 ? reuse : list.size();
         s.faction = faction;
         s.home = home;
         s.label = label;
@@ -56,7 +59,8 @@ public final class Squads {
             s.gx = f.x;
             s.gy = f.y;
         }
-        list.add(s);
+        if (reuse >= 0) list.set(reuse, s);
+        else list.add(s);
         return s;
     }
 
@@ -79,6 +83,7 @@ public final class Squads {
 
     private void disband(Squad s) {
         s.alive = false;
+        if (w.forces != null) w.forces.squadDied(s);
         if (s.vehicle >= 0) {
             w.veh.release(s.vehicle);
             s.vehicle = -1;

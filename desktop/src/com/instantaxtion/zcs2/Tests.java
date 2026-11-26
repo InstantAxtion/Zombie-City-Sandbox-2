@@ -328,6 +328,80 @@ public final class Tests {
                 w.shutdown();
             }
         });
+        test("country: a capital of a million, cities, rail, states", new T() {
+            public void run() {
+                Region r = RegionGen.generate(2304, RegionGen.COAST, 9);
+                long people = 0;
+                int cities = 0, bases = 0;
+                for (Region.Settlement s : r.settlements) {
+                    people += s.residents;
+                    if (s.kind == Region.S_CITY) cities++;
+                    if (s.kind == Region.S_BASE) bases++;
+                }
+                check(people > 1500000, "only " + people + " people");
+                check(r.city().capital && r.city().residents > 700000, "the capital has " + r.city().residents);
+                check(cities >= 3, "cities " + cities);
+                check(bases >= 2, "army bases " + bases);
+                check(r.states.size() >= 3, "states " + r.states.size());
+                check(r.rails.nodeCount > 50, "rail junctions " + r.rails.nodeCount);
+                int stations = 0;
+                for (Region.Facility f : r.facilities) if (f.kind == Region.F_STATION && f.railNode >= 0) stations++;
+                check(stations >= 3, "stations on the railway " + stations);
+                boolean[] kinds = new boolean[Region.FKINDS];
+                for (Region.Facility f : r.facilities) kinds[f.kind] = true;
+                for (int k : new int[]{Region.F_WATER, Region.F_PHONE, Region.F_FOODW, Region.F_FIRE, Region.F_HALL, Region.F_GOV, Region.F_AIRBASE})
+                    check(kinds[k], "no " + Region.FNAMES[k]);
+            }
+        });
+        test("forces: squads come out of the pools and go back in", new T() {
+            public void run() {
+                World w = game(6, 1024, "sandbox", 2);
+                Region.Facility st = null;
+                for (Region.Facility f : w.r.facilities) if (f.kind == Region.F_POLICE && f.pool != null) { st = f; break; }
+                check(st != null, "no police station with officers");
+                int before = st.poolTotal();
+                Squads.Squad s = w.forces.deploy(st, w.c.squadT("patrol"));
+                check(s != null && s.n == 4, "no squad of four");
+                check(st.poolTotal() == before - 4, "the pool didn't go down");
+                check(Audit.check(w).isEmpty(), Audit.check(w));
+                w.forces.standDown(s);
+                check(st.poolTotal() == before, "the pool didn't come back: " + st.poolTotal() + " vs " + before);
+                check(Audit.check(w).isEmpty(), Audit.check(w));
+                check(!w.forces.formations.isEmpty(), "no formations at the bases");
+                w.shutdown();
+            }
+        });
+        test("strategic: fast-forward folds everyone in, and saves", new T() {
+            public void run() throws Exception {
+                World w = game(10, 1024, "sandbox", 2);
+                Region.Settlement c = w.r.city();
+                camOver(w, c.cx * 16f, c.cy * 16f);
+                Tools.paintZombies(w, c.cx * 16f, c.cy * 16f, 3000, 700, -1);
+                play(w, 30, true);
+                w.camDetail = false;
+                w.setStrategic(true);
+                int ind = 0;
+                for (int i = 0; i < w.e.top; i++) if (w.e.loc[i] != Ents.NONE) ind++;
+                check(ind == 0, ind + " individuals left in fast-forward");
+                for (int k = 0; k < 6 * 144; k++) w.step(); // six game hours... and more
+                check(w.day() >= 1 && w.time > 3000, "time didn't pass: " + w.time);
+                check(Audit.check(w).isEmpty(), Audit.check(w));
+                ByteArrayOutputStream bo = new ByteArrayOutputStream();
+                SaveIO.save(w, bo);
+                World l = SaveIO.load(content, new ByteArrayInputStream(bo.toByteArray()), 2);
+                check(l.strategic, "not in fast-forward after loading");
+                for (int k = 0; k < 200; k++) {
+                    w.step();
+                    l.step();
+                }
+                check(Audit.hash(l) == Audit.hash(w), "diverged after loading in fast-forward");
+                check(l.forces.formations.size() == w.forces.formations.size(), "formations lost");
+                w.setStrategic(false);
+                play(w, 10, true);
+                w.shutdown();
+                l.shutdown();
+            }
+        });
         test("perf: 20,000 of the dead", new T() {
             public void run() {
                 World w = game(2, 1024, "sandbox", 4);

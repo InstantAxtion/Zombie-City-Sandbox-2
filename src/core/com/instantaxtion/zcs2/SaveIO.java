@@ -14,7 +14,7 @@ import java.util.zip.InflaterInputStream;
  * rebuilt from its seed, then the saved tiles (rubble, blown bridges) are laid over it.
  */
 public final class SaveIO {
-    public static final int VERSION = 1;
+    public static final int VERSION = 2;
     private static final int MAGIC = 0x5A435332; // "ZCS2"
 
     public static void save(World w, OutputStream os) throws IOException {
@@ -33,6 +33,7 @@ public final class SaveIO {
         o.write(w.r.tile);
         bytes(o, w.r.bfloors, w.r.bCount);
         bools(o, w.r.roads.ealive, w.r.roads.edgeCount);
+        facilities(o, w);
         // the clock and dice
         o.writeLong(w.tick);
         o.writeDouble(w.time);
@@ -45,6 +46,7 @@ public final class SaveIO {
         o.writeFloat(w.camX0); o.writeFloat(w.camY0); o.writeFloat(w.camX1); o.writeFloat(w.camY1);
         o.writeBoolean(w.camDetail);
         o.writeInt(w.maxIndividuals);
+        o.writeBoolean(w.strategic);
         ents(o, w.e);
         vehicles(o, w.veh);
         squads(o, w);
@@ -57,6 +59,7 @@ public final class SaveIO {
         stats(o, w.stats);
         effects(o, w.fx);
         flow(o, w.flow);
+        modules(o, w);
         o.writeInt(MAGIC);
         o.flush();
         z.finish();
@@ -87,6 +90,7 @@ public final class SaveIO {
         }
         boolean[] alive = readBools(in);
         System.arraycopy(alive, 0, r.roads.ealive, 0, Math.min(alive.length, r.roads.edgeCount));
+        readFacilities(in, w);
         r.rebuildNav(0, 0, r.W - 1, r.H - 1);
         w.sec.connectivity();
         w.tick = in.readLong();
@@ -100,6 +104,7 @@ public final class SaveIO {
         w.camX0 = in.readFloat(); w.camY0 = in.readFloat(); w.camX1 = in.readFloat(); w.camY1 = in.readFloat();
         w.camDetail = in.readBoolean();
         w.maxIndividuals = in.readInt();
+        w.strategic = in.readBoolean();
         readEnts(in, w.e);
         readVehicles(in, w.veh);
         readSquads(in, w);
@@ -112,10 +117,82 @@ public final class SaveIO {
         readStats(in, w.stats);
         readEffects(in, w.fx);
         readFlow(in, w.flow);
+        readModules(in, w);
         if (in.readInt() != MAGIC) throw new IOException("save is damaged");
         w.veh.rebuildGrid();
         if (rules != c.rulesHash) w.news.radio("(This save was made with different game rules; it may play a little differently.)", -1, -1, News.COMMAND);
         return w;
+    }
+
+    // ------------------------------------------------------------------ facilities and modules
+
+    private static void facilities(DataOutputStream o, World w) throws IOException {
+        java.util.List<Region.Facility> fs = w.r.facilities;
+        o.writeInt(fs.size());
+        for (Region.Facility f : fs) {
+            o.writeBoolean(f.runtime);
+            if (f.runtime) {
+                o.writeInt(f.kind);
+                o.writeInt(f.settlement);
+                o.writeUTF(f.name);
+            }
+            o.writeFloat(f.x);
+            o.writeFloat(f.y);
+            intArr(o, f.pool);
+            intArr(o, f.vpool);
+            o.writeFloat(f.ammo);
+            o.writeFloat(f.fuel);
+            o.writeFloat(f.food);
+            o.writeFloat(f.med);
+        }
+    }
+
+    private static void readFacilities(DataInputStream in, World w) throws IOException {
+        int n = in.readInt();
+        java.util.List<Region.Facility> fs = w.r.facilities;
+        for (int k = 0; k < n; k++) {
+            boolean runtime = in.readBoolean();
+            Region.Facility f;
+            if (runtime) {
+                int kind = in.readInt(), st = in.readInt();
+                String name = in.readUTF();
+                f = k < fs.size() ? fs.get(k) : w.r.addFacility(kind, st, 0, 0, name);
+            } else f = fs.get(k);
+            f.x = in.readFloat();
+            f.y = in.readFloat();
+            f.pool = readIntArr(in);
+            f.vpool = readIntArr(in);
+            f.ammo = in.readFloat();
+            f.fuel = in.readFloat();
+            f.food = in.readFloat();
+            f.med = in.readFloat();
+            if (runtime) f.node = w.r.roads.nearestNode(f.x, f.y, 900);
+        }
+        w.strat.extendFacilities();
+    }
+
+    private static void modules(DataOutputStream o, World w) throws IOException {
+        o.writeInt(w.modules.size());
+        for (Module m : w.modules) {
+            java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream();
+            DataOutputStream mo = new DataOutputStream(bo);
+            m.save(mo);
+            mo.flush();
+            o.writeUTF(m.id());
+            o.writeInt(bo.size());
+            o.write(bo.toByteArray());
+        }
+    }
+
+    private static void readModules(DataInputStream in, World w) throws IOException {
+        int n = in.readInt();
+        for (int k = 0; k < n; k++) {
+            String id = in.readUTF();
+            byte[] data = new byte[in.readInt()];
+            in.readFully(data);
+            for (Module m : w.modules)
+                if (m.id().equals(id)) m.load(new DataInputStream(new java.io.ByteArrayInputStream(data)));
+        }
     }
 
     // ------------------------------------------------------------------ entities
@@ -314,7 +391,6 @@ public final class SaveIO {
     private static void strategic(DataOutputStream o, Strategic s) throws IOException {
         bools(o, s.online, s.online.length);
         floats(o, s.overrunT, s.overrunT.length);
-        ints(o, s.ammo, s.ammo.length);
         bools(o, s.supplyOnWay, s.supplyOnWay.length);
         bools(o, s.gridOn, s.gridOn.length);
         o.writeInt(s.hordes.size());
@@ -337,9 +413,9 @@ public final class SaveIO {
     }
 
     private static void readStrategic(DataInputStream in, Strategic s) throws IOException {
+        s.extendFacilities();
         readBools(in, s.online);
         readFloats(in, s.overrunT);
-        readInts(in, s.ammo);
         readBools(in, s.supplyOnWay);
         readBools(in, s.gridOn);
         int n = in.readInt();

@@ -38,6 +38,13 @@ public final class World {
     public final News news;
     public final Effects fx;
     public final Stats stats;
+    public final Forces forces;
+    public final Weather weather;
+    /** Systems plugged in (updated, saved and drawn in this order). */
+    public final List<Module> modules = new ArrayList<Module>();
+    /** Strategic fast-forward: everything as numbers, ten game seconds a step. */
+    public boolean strategic;
+    public static final float STRATEGIC_DT = 10f;
     public final Rng rng;
     public Parallel par;
 
@@ -89,6 +96,10 @@ public final class World {
         gov = new Gov(this);
         news = new News(this);
         stats = new Stats(this);
+        forces = new Forces(this);
+        weather = new Weather(this);
+        modules.add(weather);
+        modules.add(forces);
         zai = new ZombieAI(this);
         cai = new CivAI(this);
         aai = new ArmedAI(this);
@@ -172,9 +183,13 @@ public final class World {
 
     public void step() {
         if (ended && mode != MODE_SANDBOX) return;
+        if (strategic) {
+            strategicStep();
+            return;
+        }
         tick++;
         time += DT;
-        if (tick % 20 == 0) secondly();
+        if (tick % 20 == 0) secondly(1f);
         sp.build(e);
         if (tick % 10 == 1) flow.build(this);
         sq.update();
@@ -183,17 +198,41 @@ public final class World {
         par.run(moveJob, e.top);
         veh.update();
         combat.bodies();
+        for (int i = 0; i < modules.size(); i++) modules.get(i).step();
         fx.update(DT);
     }
 
-    private void secondly() {
-        sec.update();
-        disp.update();
-        mil.update();
-        strat.update();
-        gov.update();
+    /** Ten game seconds at once, all as numbers (only in strategic fast-forward). */
+    private void strategicStep() {
+        float dt = STRATEGIC_DT;
+        tick += (long) (dt * 20);
+        time += dt;
+        secondly(dt);
+        fx.update(dt);
+    }
+
+    private void secondly(float dt) {
+        sec.update(dt);
+        if (!strategic) disp.update();
+        mil.update(dt);
+        strat.update(dt);
+        gov.update(dt);
+        for (int i = 0; i < modules.size(); i++) modules.get(i).update(dt);
         stats.update();
-        sq.secondly();
+        if (!strategic) sq.secondly();
+    }
+
+    /** Into (or out of) strategic fast-forward. Going in, every individual folds into the counts and pools. */
+    public void setStrategic(boolean on) {
+        if (on == strategic) return;
+        if (on) {
+            if (playerEnt >= 0) return; // someone you play as can't be fast-forwarded past
+            forces.enterStrategic();
+            sec.demoteAll();
+            sp.build(e);
+            // round the clock to a whole number of strategic steps
+        }
+        strategic = on;
     }
 
     private final Parallel.Job thinkJob = new Parallel.Job() {

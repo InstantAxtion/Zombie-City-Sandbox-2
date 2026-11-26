@@ -26,8 +26,25 @@ public final class Names {
             case Region.S_CITY: return (rng.chance(0.4f) ? "New " : rng.chance(0.3f) ? "Port " : "") + base;
             case Region.S_BASE: return "Fort " + PRE[rng.nextInt(PRE.length)] + (rng.chance(0.5f) ? "e" : "");
             case Region.S_PRISON: return PRE[rng.nextInt(PRE.length)] + " County Prison";
+            case Region.S_AIRBASE: return PRE[rng.nextInt(PRE.length)] + " Air Force Base";
+            case Region.S_NAVAL: return "Naval Station " + PRE[rng.nextInt(PRE.length)] + SUF[rng.nextInt(SUF.length)];
+            case Region.S_AIRPORT: return base + " International Airport";
+            case Region.S_CAMP: return base + " Camp";
+            case Region.S_HOLDOUT: return base + " Holdout";
             default: return base;
         }
+    }
+
+    private static final String[] STATE_SUF = {"ia", "ota", "ana", "ona", "ado", "ington", "land", "ware", "ina", "is"};
+
+    public static String state(Rng rng) {
+        String p = PRE[rng.nextInt(PRE.length)];
+        return p + STATE_SUF[rng.nextInt(STATE_SUF.length)];
+    }
+
+    public static String country(Rng rng) {
+        String[] f = {"The Republic of ", "The Union of ", "The Commonwealth of ", "The Federation of "};
+        return f[rng.nextInt(f.length)] + state(rng);
     }
 
     public static String person(long seed, int id) {

@@ -235,6 +235,28 @@ public final class Dispatch {
                 best = s;
             }
         }
+        // or a station, base or formation that can send a squad from its pool
+        Region.Facility from = null;
+        Content.SquadT tmpl = null;
+        for (Region.Facility f : w.r.facilities) {
+            if (f.pool == null) continue;
+            if (f.kind == Region.F_HQ) {
+                Forces.Formation fm = w.forces.formationOf(f);
+                if (fm == null || !fm.alive || fm.state == Forces.MOVING || fm.player) continue;
+            }
+            float dx = f.x - in.x, dy = f.y - in.y, d = dx * dx + dy * dy;
+            if (faction == Ents.COP && in.settlement >= 0 && f.settlement != in.settlement && f.kind != Region.F_HQ) d *= 4;
+            if (d >= bd) continue;
+            Content.SquadT t = w.forces.templateFor(f, faction, in.zombies);
+            if (t == null) continue;
+            bd = d;
+            from = f;
+            tmpl = t;
+        }
+        if (from != null) {
+            Squads.Squad s = w.forces.deploy(from, tmpl);
+            if (s != null) return s;
+        }
         return best;
     }
 

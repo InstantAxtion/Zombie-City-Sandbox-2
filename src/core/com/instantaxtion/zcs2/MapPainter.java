@@ -62,11 +62,17 @@ public final class MapPainter {
         return 0xFF000000 | ((int) (r1 + (r2 - r1) * t) << 16) | ((int) (g1 + (g2 - g1) * t) << 8) | (int) (b1 + (b2 - b1) * t);
     }
 
+    /** Tiles per pixel of the region picture (2 for very large maps, to keep it within a texture). */
+    public final int step() {
+        return r.W > 2048 ? 2 : 1;
+    }
+
     private void buildRegionImage() {
-        regionPixels = new int[r.W * r.H];
-        for (int y = 0; y < r.H; y++) for (int x = 0; x < r.W; x++) regionPixels[y * r.W + x] = tileColor(r, x, y, true);
-        regionImage = pf.newImage(r.W, r.H);
-        regionImage.setPixels(regionPixels, r.W, r.H);
+        int st = step(), iw = r.W / st, ih = r.H / st;
+        regionPixels = new int[iw * ih];
+        for (int y = 0; y < ih; y++) for (int x = 0; x < iw; x++) regionPixels[y * iw + x] = tileColor(r, x * st, y * st, true);
+        regionImage = pf.newImage(iw, ih);
+        regionImage.setPixels(regionPixels, iw, ih);
     }
 
     /** Redraws what changed on the map since last time (rubble, blown bridges). */
@@ -74,8 +80,9 @@ public final class MapPainter {
         if (r.changes == seenChanges) return;
         seenChanges = r.changes;
         for (int[] d : r.dirty) {
-            for (int y = Math.max(0, d[1]); y <= Math.min(r.H - 1, d[3]); y++)
-                for (int x = Math.max(0, d[0]); x <= Math.min(r.W - 1, d[2]); x++) regionPixels[y * r.W + x] = tileColor(r, x, y, true);
+            int st = step(), iw = r.W / st;
+            for (int y = Math.max(0, d[1]) / st; y <= Math.min(r.H - 1, d[3]) / st; y++)
+                for (int x = Math.max(0, d[0]) / st; x <= Math.min(r.W - 1, d[2]) / st; x++) regionPixels[y * iw + x] = tileColor(r, x * st, y * st, true);
             // drop the chunks it touched
             for (int cy = d[1] / CHUNK; cy <= d[3] / CHUNK; cy++)
                 for (int cx = d[0] / CHUNK; cx <= d[2] / CHUNK; cx++) {
@@ -86,7 +93,7 @@ public final class MapPainter {
                 }
         }
         r.dirty.clear();
-        regionImage.setPixels(regionPixels, r.W, r.H);
+        regionImage.setPixels(regionPixels, r.W / step(), r.H / step());
     }
 
     private static int key(int cx, int cy, int lvl) {
