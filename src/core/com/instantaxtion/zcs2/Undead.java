@@ -353,6 +353,7 @@ public final class Undead extends Module {
         w.fx.sound("cannon", cx, cy);
         w.fx.noise(cx, cy, 24, 3);
         String what = t == Tile.BARRICADE ? "a barricade" : t == Tile.WALL ? "a wall" : "a fence";
+        w.stats.rec.callout(t == Tile.BARRICADE ? "Barricade broken" : t == Tile.WALL ? "Wall broken" : "Fence broken", cx, cy, Records.C_BREACH);
         w.news.count("smash", "The dead have broken through " + what + "|The dead broke through %d more barricade{s}, fence{s} and wall{s}", 1, cx, cy);
     }
 

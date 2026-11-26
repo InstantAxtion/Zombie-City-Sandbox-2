@@ -46,8 +46,12 @@ public final class Stats {
     // timeline: every 10 s
     public static final int MAXT = 4000;
     public final float[] tTime = new float[MAXT];
-    public final int[] tZombies = new int[MAXT], tAlive = new int[MAXT], tPolice = new int[MAXT], tArmy = new int[MAXT];
+    /** tPolice and tArmy are those out in squads; tPoliceAll and tArmyAll everyone (waiting at stations and bases too; -1 unknown). */
+    public final int[] tZombies = new int[MAXT], tAlive = new int[MAXT], tPolice = new int[MAXT], tArmy = new int[MAXT],
+            tPoliceAll = new int[MAXT], tArmyAll = new int[MAXT];
     public int tN;
+    /** Why things happened: the tracer, towns, formations, moments, callouts (a module of its own, saved with the modules). */
+    public final Records rec;
 
     public static final class Event {
         public final String text;
@@ -75,6 +79,26 @@ public final class Stats {
         zBySettlement = new int[w.r.settlements.size()];
         popBySettlement = new int[w.r.settlements.size()];
         lostBySettlement = new int[w.r.settlements.size()];
+        java.util.Arrays.fill(tPoliceAll, -1);
+        java.util.Arrays.fill(tArmyAll, -1);
+        rec = new Records(w);
+    }
+
+    /** Police out in squads, and in all (out, and waiting at stations and in formations). The HUD, panel and report use these. */
+    public int policeOut() {
+        return w.sq.count(Ents.COP);
+    }
+
+    public int policeAll() {
+        return rec.policeAll();
+    }
+
+    public int soldiersOut() {
+        return w.sq.count(Ents.SOLDIER);
+    }
+
+    public int soldiersAll() {
+        return rec.soldiersAll();
     }
 
     public void event(String text, float x, float y) {
@@ -118,9 +142,11 @@ public final class Stats {
     }
 
     void noteFallen(int i, int cause) {
+        // why, from their last seconds (the tracer), and a callout where they fell
+        String why = rec.died(i, cause);
+        rec.callout(w.e.kind[i] == Ents.COP ? "Officer down" : "Man down", w.e.x[i], w.e.y[i], Records.C_LOSS);
         if (fallen.size() > 500) return;
-        String[] how = {"bitten", "shot", "in a blast", "in a crash", "turned", ""};
-        fallen.add(w.clock() + "  " + w.nameOf(i) + " (" + w.unitOf(i).name + ", " + w.e.kills[i] + " kills), " + how[Math.min(5, cause)]);
+        fallen.add(w.clock() + "  " + w.nameOf(i) + ": " + why + " (" + w.unitOf(i).name + ", " + w.e.kills[i] + " kills)");
     }
 
     /** The people and the dead in each settlement (also after loading a save, where they aren't stored). */
@@ -148,6 +174,8 @@ public final class Stats {
                 tAlive[k] = tAlive[i];
                 tPolice[k] = tPolice[i];
                 tArmy[k] = tArmy[i];
+                tPoliceAll[k] = tPoliceAll[i];
+                tArmyAll[k] = tArmyAll[i];
             }
             tN = k;
             tEvery *= 2;
@@ -158,6 +186,8 @@ public final class Stats {
             tAlive[tN] = w.livingCivilians();
             tPolice[tN] = w.sq.count(Ents.COP);
             tArmy[tN] = w.sq.count(Ents.SOLDIER);
+            tPoliceAll[tN] = policeAll();
+            tArmyAll[tN] = soldiersAll();
             tN++;
         }
     }

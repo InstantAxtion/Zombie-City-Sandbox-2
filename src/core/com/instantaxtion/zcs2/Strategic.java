@@ -1038,6 +1038,7 @@ public final class Strategic {
         w.stats.bridgesBlown++;
         float mx = (g.nx[g.ea[edge]] + g.nx[g.eb[edge]]) / 2, my = (g.ny[g.ea[edge]] + g.ny[g.eb[edge]]) / 2;
         w.news.headline((byPlayer ? "On your order, e" : "E") + "ngineers blow a bridge to stop the dead", mx, my);
+        w.stats.rec.callout("Bridge blown", mx, my, Records.C_BLAST);
         return true;
     }
 

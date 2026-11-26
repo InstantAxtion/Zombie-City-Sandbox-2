@@ -164,6 +164,7 @@ public final class World {
         cai = new CivAI(this);
         aai = new ArmedAI(this);
         modules.add(aai.module);
+        modules.add(stats.rec); // reads the world, changes nothing: last
         combat = new Combat(this);
         par = new Parallel(threads);
     }
