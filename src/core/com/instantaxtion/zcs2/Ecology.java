@@ -165,6 +165,7 @@ public final class Ecology extends Module {
         float starve = w.c.rule("starvePerDay", 0.02f) / 1440f;
         float nestDays = w.c.rule("nestDays", 2f) * 1440f;
         int nestMin = (int) w.c.rule("nestMin", 400);
+        float overrun = w.c.rule("overrunRatio", 20);
         float strainDays = w.c.rule("strainDays", 1.5f) * 1440f;
         for (int s = 0; s < sec.n; s++) {
             int z = sec.zIn[s] + w.sp.secZ[s];
@@ -176,7 +177,9 @@ public final class Ecology extends Module {
                 continue;
             }
             // nobody to eat: hunger grows; it ebbs where people are being found
-            if (sec.popIn[s] == 0 && w.sp.secCiv[s] == 0) hunger[s] = Math.min(1, hunger[s] + dt / hungerTime);
+            // (or too few for so many: streets the dead have overrun, a few holdouts left among thousands)
+            if (sec.popIn[s] + w.sp.secCiv[s] == 0 || sec.zIn[s] > (sec.popIn[s] + w.sp.secCiv[s]) * overrun)
+                hunger[s] = Math.min(1, hunger[s] + dt / hungerTime);
             // the starving fall apart over the weeks
             if (hunger[s] > 0.5f && sec.zIn[s] > 0) {
                 float rot = sec.zIn[s] * starve * dt * (hunger[s] - 0.5f) * 2;

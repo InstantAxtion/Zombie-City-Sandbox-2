@@ -83,6 +83,21 @@ public final class Command extends Module {
         return "command";
     }
 
+    /** An official's temper: cautious (acts early, evacuates and quarantines readily), steady, or reckless. */
+    public static final int CAUTIOUS = 0, STEADY = 1, RECKLESS = 2;
+    static final String[] STANCE = {"cautious: quick to lock down and evacuate", "steady", "reckless: slow to give up a town or ask for help"};
+
+    /** Each official's temper comes with the person (a replacement is a new person, maybe of another mind). */
+    public int trait(Official o) {
+        return Rng.hashInt(w.seed, o.nameId, o.replaced * 7L + o.role, 3);
+    }
+
+    /** How far the official lets things go before acting, against the rules' marks (cautious lower, reckless higher). */
+    float temper(Official o) {
+        int t = trait(o);
+        return t == CAUTIOUS ? 0.5f : t == RECKLESS ? 2.2f : 1;
+    }
+
     public String name(Official o) {
         return TITLES[o.role] + " " + Names.person(w.seed, o.nameId + o.replaced * 1000);
     }
@@ -114,6 +129,8 @@ public final class Command extends Module {
         if (st < 0 || st >= repZ.length) return;
         repZ[st] = 0;
         repSectors[st] = 0;
+        // a town taken back: its police return to it
+        abandoned[st] = false;
     }
 
     /** What the authorities believe is in each settlement (the general plans with this, not the truth). */
@@ -218,7 +235,8 @@ public final class Command extends Module {
         int st = s.id;
         float rz = repZ[st];
         float x = s.cx * 16f, y = s.cy * 16f;
-        if (!shelter[st] && rz > w.c.rule("shelterAt", 15)) {
+        float k = temper(o);
+        if (!shelter[st] && rz > w.c.rule("shelterAt", 15) * k) {
             shelter[st] = true;
             decide(o, "everyone in " + s.name + " is to shelter in place, lock their doors and stay off the streets.", x, y, false);
         } else if (shelter[st] && calmT[st] > w.c.rule("shelterLiftAfter", 360)) {
@@ -226,8 +244,8 @@ public final class Command extends Module {
             decide(o, "the shelter order in " + s.name + " is lifted. People can go out again.", x, y, false);
         }
         // evacuate a town that's being lost; not a big city over a few streets (the capital last of all)
-        float evacAt = Math.max(w.c.rule("evacuateAt", 400), s.residents * (s.capital ? 0.05f : s.kind == Region.S_CITY ? 0.02f : 0.01f));
-        boolean spiralling = rz > evacAt || repSectors[st] > (s.capital ? 0.45f : 0.3f);
+        float evacAt = Math.max(w.c.rule("evacuateAt", 400), s.residents * (s.capital ? 0.05f : s.kind == Region.S_CITY ? 0.02f : 0.01f)) * k;
+        boolean spiralling = rz > evacAt || repSectors[st] > Math.min(0.9f, (s.capital ? 0.45f : 0.3f) * k);
         if (!w.gov.evacuating(st) && !quarantine[st] && (w.gov.level >= 2 || w.roles.decidesNation()) && spiralling) {
             w.gov.setEvac(st, true);
             decide(o, "orders the evacuation of " + s.name + ".", x, y, false);
@@ -236,7 +254,7 @@ public final class Command extends Module {
             decide(o, "it is safe again. People may return to " + s.name + ".", x, y, true);
         }
         // calling for help: the state's Guard (again only if it gets much worse)
-        if (rz > Math.max(150, policeAt(st) * 0.5f) && (!helpAsked[st] || rz > o.asked * 2.5f)) {
+        if (rz > Math.max(150, policeAt(st) * 0.5f) * k && (!helpAsked[st] || rz > o.asked * 2.5f)) {
             helpAsked[st] = true;
             o.asked = rz;
             w.mil.guardT = Math.min(w.mil.guardT, 0);
@@ -261,15 +279,24 @@ public final class Command extends Module {
         int st = s.id;
         float rz = repZ[st];
         // the army is asked for once at each step the outbreak there gets worse (not every few seconds)
-        if (rz > 150) w.mil.requestArmy(st, (int) rz);
+        if (rz > 150 * temper(o)) w.mil.requestArmy(st, (int) rz);
         // the force is spent and the town is lost: pull out what's left
         int left = policeAt(st), start = Math.max(1, policeStart(st));
-        if (!abandoned[st] && !s.capital && left < start * 0.25f && rz > w.stats.popBySettlement[st] * 0.3f + 100) {
-            abandoned[st] = true;
-            Official m = official(MAYOR, st);
-            decide(o, s.name + " can't be held. The police are pulling out.", s.cx * 16f, s.cy * 16f, true);
-            if (m != null) m.approval -= 20;
-        }
+        if (!abandoned[st] && !s.capital && left < start * 0.25f && rz > w.stats.popBySettlement[st] * 0.3f + 100) abandon(o, st);
+    }
+
+    /** The police give a town up: its squads come home, its calls go unanswered by the police, the army is asked to take it. */
+    void abandon(Official o, int st) {
+        if (abandoned[st]) return;
+        Region.Settlement s = w.r.settlements.get(st);
+        abandoned[st] = true;
+        Official m = official(MAYOR, st);
+        if (o != null) decide(o, s.name + " can't be held. The police are pulling out; the army takes the town.", s.cx * 16f, s.cy * 16f, true);
+        if (m != null) m.approval -= 20;
+        w.disp.abandon(st);
+        w.mil.armyAsked[st] = 0;
+        w.mil.armyAskedT[st] = -1e9f;
+        w.mil.requestArmy(st, (int) Math.max(150, repZ[st]));
     }
 
     private void governor(Official o) {
@@ -283,7 +310,8 @@ public final class Command extends Module {
             // quarantine while it can still be contained; give up on it and evacuate once it can't (a governor's
             // own call, whoever is President; not a town whose incident commander is the player)
             if (w.roles.holds(Roles.INCIDENT, st)) continue;
-            float qAt = w.c.rule("quarantineAt", 250), giveUp = w.c.rule("quarantineGiveUp", 2500);
+            // (a cautious governor quarantines sooner and gives a failing quarantine up sooner; a reckless one later)
+            float qAt = w.c.rule("quarantineAt", 250) * temper(o), giveUp = w.c.rule("quarantineGiveUp", 2500) * temper(o);
             if (!quarantine[st] && !w.gov.evacuating(st) && !s.capital && rz > qAt && rz < giveUp && (w.gov.level >= 2 || w.gov.playerDecides)) setQuarantine(st, true);
             else if (quarantine[st] && (rz > giveUp || (rz < 10 && calmT[st] > 240))) {
                 setQuarantine(st, false);
@@ -409,7 +437,7 @@ public final class Command extends Module {
                 o.lowT = 0;
                 String where = o.where >= 0 && o.role <= CHIEF ? " of " + w.r.settlements.get(o.where).name
                         : o.role == GOVERNOR && o.where >= 0 ? " of " + w.r.states.get(o.where).name : "";
-                w.news.headline(old + where + " is out. " + name(o) + " takes over.", -1, -1);
+                w.news.headline(old + where + " is out. " + name(o) + " takes over, " + STANCE[trait(o)] + ".", -1, -1);
             }
         }
     }
@@ -451,7 +479,8 @@ public final class Command extends Module {
         StringBuilder sb = new StringBuilder();
         Official m = official(MAYOR, st), c = official(CHIEF, st);
         if (m != null) sb.append(". ").append(name(m)).append(", approval ").append((int) m.approval).append("%");
-        if (c != null) sb.append(". ").append(name(c));
+        if (m != null) sb.append(" (").append(STANCE[trait(m)].split(":")[0]).append(")");
+        if (c != null) sb.append(". ").append(name(c)).append(" (").append(STANCE[trait(c)].split(":")[0]).append(")");
         sb.append(". Reported dead: ").append((int) repZ[st]).append(phonesUp(st) ? "" : " (phones down)");
         if (shelter[st]) sb.append(". Shelter in place");
         if (quarantine[st]) sb.append(". QUARANTINED");

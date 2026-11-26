@@ -101,7 +101,8 @@ final class CivAI {
                             }
                         }
                     }
-                    if (e.timer[i] <= 0) {
+                    // (a curfew, or martial law's enforced one, sends everyone in the street home)
+                    if (e.timer[i] <= 0 || w.gov.streetsClosed()) {
                         e.state[i] = S_HOME;
                         pickShelter(i, s);
                     }

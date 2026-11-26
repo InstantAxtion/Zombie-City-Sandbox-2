@@ -46,11 +46,14 @@ one person.
   - *Military commander*: the formations, air strikes, artillery and bridges, with the same hand-over to the
     general; the civil government decides the rest.
   - *Incident commander*: one city's police and the soldiers sent there, its evacuation, and asking for the army (the army comes when you ask; on the coast your goal is your own city).
-  - *Precinct commander*: one police station; send its squads out and move them. In a campaign your goal is your
-    own district: the other stations leave its calls to you.
-  - *Squad leader*: one squad; tell it where to go (in a campaign: keep it alive and its streets clear).
-  - *Police officer*: one officer with a patrol following; move with the stick, you shoot by yourself.
-  - *Survivor*: one person; move with the stick, survive.
+  - *Precinct commander*: one police station; send its squads out and move them, cordon the district's edge,
+    evacuate it. In a campaign your goal is your own district and its station: the other stations leave its calls
+    to you.
+  - *Squad leader*: one squad; tell it where to go (in a campaign: put down sixty of the dead and keep it alive).
+  - *Police officer*: one officer with a patrol following; move with the stick, you shoot by yourself (in a
+    campaign: get to the scene of four 911 calls and live).
+  - *Survivor*: one person; move with the stick, survive (in a campaign: reach the army base, an evacuation point,
+    a survivor settlement or the boats on the shore).
 - **Scenarios and campaigns.** Sandbox starts: an open country, a lab leak, a crashed airliner, a prison riot, a
   summer festival, a ship in the port, somewhere random. Campaigns: hold the capital for 30 days, evacuate the
   coast, retake a fallen state, protect the capital from hordes of tens of thousands. A campaign's progress (and
@@ -121,11 +124,13 @@ to the general, the timelapse and replays).
 `tools/balance.sh 5000,50000,100000,250000 8 2304 30 4` plays each outbreak size on many seeds in fast-forward
 and prints the spread of outcomes (days to contain or fall, share of the country lost, losses); every run goes to
 `build/balance.csv` (a run counts as lost when a third of the country's people are gone). At the time of writing
-(6 seeds each, the default map, 30 days): 5,000 dead are put down in about half a day; 50,000 became wars of 11
-to 30 days (4 won, 1 lost, 1 still going after a month, about a fifth of the country bitten or killed); 250,000
-were all won in about 20 days with about a quarter of the country lost. The bigger outbreak is put down more
-reliably because the army's response scales with the dead that are reported; that is a known balance issue. The alert, curfews, shelter orders and evacuations then come down, outside units go
-home and people return to their towns.
+(6 seeds each, the default map, 30 days): 5,000 dead are put down in about a day; 20,000 in three to five days
+(2% of the country bitten or killed); 50,000 become wars of six to twelve days, all won, with 4-9% of the
+country lost; 100,000 take about three weeks (one in six lost, about a fifth of the country gone); 250,000 are
+still being fought after a month as often as they are won (2 won, 1 lost, 3 still going, a quarter of the country
+gone). The army answers every size with the same mix of formations, sized to what is reported, up to what the
+country can field, so a bigger outbreak is always longer, costlier and more often lost. Once it's over the alert,
+curfews, shelter orders and evacuations come down, outside units go home and people return to their towns.
 
 The game draws with Android's Canvas by default. Settings has "Renderer (next start)": choosing GPU (OpenGL ES
 2.0, experimental) takes effect when the app next starts. On its first frame the GPU renderer draws a test pattern

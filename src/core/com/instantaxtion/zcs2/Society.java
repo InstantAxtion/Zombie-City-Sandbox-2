@@ -253,7 +253,8 @@ public final class Society extends Module {
             if (s.kind != Region.S_CITY && s.kind != Region.S_TOWN) continue;
             boolean hungry = w.infra.shortage[st] > 0;
             if ((!hungry && (w.gov.trust > trustAt || w.media.fear(st) < fearAt)) || w.stats.popBySettlement[st] < 200) continue;
-            if (Rng.unit(w.seed, w.tick, st * 7L + 99) > 0.4f) continue;
+            // under martial law looters are shot on sight: few dare
+            if (Rng.unit(w.seed, w.tick, st * 7L + 99) > (w.gov.martialLaw() ? 0.1f : 0.4f)) continue;
             // a shop or warehouse in the town
             int b = -1;
             for (int k = 0; k < 30 && b < 0; k++) {

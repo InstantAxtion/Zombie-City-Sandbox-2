@@ -1029,13 +1029,20 @@ public final class Tests {
                         check(r.result == Balance.CONTAINED && r.days < 2, "a small outbreak should be put down within a day or two: " + Balance.RESULTS[r.result] + " after " + r.days);
                     if (r.zombies == 60000) {
                         check(r.result != Balance.CONTAINED || r.days > 2, "a medium outbreak should be a fight of days, not over in " + r.days + " days");
-                        check(r.lostShare < 0.6f, "a medium outbreak shouldn't usually take the country: lost " + r.lostShare);
+                        check(r.result != Balance.FALLEN && r.lostShare < 0.25f, "a medium outbreak should be won without losing a quarter of the country: lost " + r.lostShare);
                     }
                     if (r.zombies == 250000) {
-                        check(r.result != Balance.CONTAINED || r.days > 4, "a big outbreak should be a war, not over in " + r.days + " days");
-                        check(r.lostShare > 0.03f, "a big outbreak should cost a lot: lost " + r.lostShare);
+                        check(r.result != Balance.CONTAINED || r.days > 6, "a big outbreak should be a war, not over in " + r.days + " days");
+                        check(r.lostShare > 0.08f, "a big outbreak should cost a lot: lost " + r.lostShare);
                     }
                 }
+                // bigger is worse: on the same map and seed, the big outbreak costs more and lasts longer than the medium one
+                for (Balance.Run m : runs)
+                    for (Balance.Run b : runs)
+                        if (m.zombies == 60000 && b.zombies == 250000 && m.seed == b.seed) {
+                            check(b.lostShare > m.lostShare, "250,000 cost less than 60,000 (seed " + m.seed + "): " + b.lostShare + " vs " + m.lostShare);
+                            check(b.result != Balance.CONTAINED || m.result == Balance.CONTAINED && b.days > m.days, "250,000 was put down sooner than 60,000 (seed " + m.seed + ")");
+                        }
             }
         });
         test("country: a small outbreak is put down and everything stands down again", new T() {
@@ -1807,6 +1814,61 @@ public final class Tests {
                     }
                     c.shutdown();
                 }
+            }
+        });
+        test("gaps: a town numbered past 64 still gets a perimeter", new T() {
+            public void run() {
+                World w = Setup.newGame(content, 2304, RegionGen.COAST, 1000, content.scenario("sandbox"), 1);
+                check(w.r.settlements.size() > 64, "only " + w.r.settlements.size() + " settlements: the test needs more than 64");
+                Region.Settlement t = null;
+                for (Region.Settlement s : w.r.settlements)
+                    if (s.id >= 64 && (s.kind == Region.S_TOWN || s.kind == Region.S_VILLAGE || s.kind == Region.S_CITY)) t = s;
+                check(t != null, "no town numbered 64 or more");
+                if (t == null) return;
+                w.command.alerted[t.id] = true;
+                w.gov.reported = true;
+                Tools.paintZombies(w, t.cx * 16f, t.cy * 16f, 400, 150, -1);
+                camOver(w, t.cx * 16f, t.cy * 16f);
+                play(w, 3, false);
+                check(w.disp.perimeterMode(t.id), t.name + " (" + t.id + ") never went to a perimeter with 400 of the dead in it");
+                w.shutdown();
+            }
+        });
+        test("gaps: a town the police give up is the army's, and its calls go unanswered by the police", new T() {
+            public void run() {
+                World w = game(31, 1536, "sandbox", 2);
+                Region.Settlement t = null;
+                for (Region.Settlement s : w.r.settlements) {
+                    if (s.capital || s.kind != Region.S_TOWN) continue;
+                    boolean station = false;
+                    for (Region.Facility f : w.r.facilities) if (f.kind == Region.F_POLICE && f.settlement == s.id) station = true;
+                    if (station) {
+                        t = s;
+                        break;
+                    }
+                }
+                check(t != null, "no town with a police station");
+                if (t == null) return;
+                Tools.paintZombies(w, t.cx * 16f, t.cy * 16f, 60, 150, -1);
+                camOver(w, t.cx * 16f, t.cy * 16f);
+                play(w, 40, false);
+                int before = 0;
+                for (Squads.Squad s : w.sq.list)
+                    if (s.alive && s.faction == Ents.COP && s.incident >= 0 && w.disp.incidents.get(s.incident).settlement == t.id) before++;
+                check(before > 0, "no police answered the calls in " + t.name + " to begin with");
+                w.command.abandon(null, t.id);
+                check(w.command.isAbandoned(t.id), "not abandoned");
+                Tools.paintZombies(w, t.cx * 16f, t.cy * 16f, 60, 150, -1);
+                play(w, 40, false);
+                for (Squads.Squad s : w.sq.list) {
+                    if (!s.alive || s.faction != Ents.COP || s.player) continue;
+                    boolean there = s.incident >= 0 && w.disp.incidents.get(s.incident).settlement == t.id;
+                    check(!there, s.name + " still answers a call in " + t.name + " after the police pulled out");
+                }
+                boolean army = false;
+                for (Forces.Formation f : w.forces.formations) if (f.alive && f.task == t.id) army = true;
+                check(army || w.mil.armyCalled[t.id], "the army wasn't sent to " + t.name);
+                w.shutdown();
             }
         });
         test("campaigns: an idle player in the seat does worse than one who plays", new T() {

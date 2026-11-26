@@ -53,7 +53,7 @@ public final class Forces extends Module {
     private final List<Integer> freeSquads = new ArrayList<Integer>();
     private int nextFormationNo = 1;
     private float commandT;
-    public static final int JOB_NONE = 0, JOB_TOWN = 1, JOB_HORDE = 2, JOB_NEST = 3, JOB_HOME = 4;
+    public static final int JOB_NONE = 0, JOB_TOWN = 1, JOB_HORDE = 2, JOB_NEST = 3, JOB_HOME = 4, JOB_ROAD = 5;
     /**
      * Does the AI general command the army? Yes, unless the player is the President or the Military commander and
      * hasn't handed it over; then the general commands only the formations the player released.
@@ -589,6 +589,7 @@ public final class Forces extends Module {
         w.stats.lossBy[3] += lost;
         int st = w.sec.settlement[s];
         if (st >= 0) w.stats.lostBySettlement[st] += lost;
+        w.roles.lostAt(s, lost);
         w.gov.trust -= lost * 0.02f;
         w.news.count("shelled:" + st, "Shelling " + (st >= 0 ? "in " + w.r.settlements.get(st).name : "in the country") + " killed %d {people} sheltering in their homes", lost, w.sec.cx(s), w.sec.cy(s));
     }
@@ -596,7 +597,7 @@ public final class Forces extends Module {
     /** Fights nobody is watching: the people at each station and formation against the dead counted near it. */
     private void aggregate(float dt) {
         float kill = w.c.rule("aggregateKill", 0.02f), loss = w.c.rule("aggregateLoss", 0.0008f);
-        float rounds = w.c.rule("roundsPerKill", 4);
+        float rounds = w.c.rule("roundsPerKill", 4), findHalf = w.c.rule("findHalf", 0);
         Sectors sec = w.sec;
         for (Region.Facility f : w.r.facilities) {
             if (f.pool == null || !w.strat.online(f.id)) continue;
@@ -629,7 +630,9 @@ public final class Forces extends Module {
                     int z = sec.zIn[s];
                     if (z <= 0 || sec.hot[s] > 0) continue;
                     float dist = 1 + Math.max(Math.abs(dx), Math.abs(dy)) * 0.5f;
-                    int k = Math.min(z, stoch(share * kill * dt * ammoK / dist, s * 17L + f.id));
+                    // (the dead are harder to find where they're few: the last of them take the longest)
+                    float find = z / (z + findHalf);
+                    int k = Math.min(z, stoch(share * kill * dt * ammoK * find / dist, s * 17L + f.id));
                     sec.zIn[s] -= k;
                     sec.bodies[s] += k;
                     w.stats.killsBySide[faction == Ents.COP ? 1 : 2] += k;
@@ -730,7 +733,7 @@ public final class Forces extends Module {
         float per = w.c.rule("deadPerFormation", 2500);
         for (Region.Settlement s : w.r.settlements) {
             if (s.kind != Region.S_CITY && s.kind != Region.S_TOWN && s.kind != Region.S_VILLAGE) continue;
-            if (z[s.id] < 15 || w.command.isAbandoned(s.id) && !s.capital) continue;
+            if (z[s.id] < 15) continue;
             // a city whose incident commander is the player gets the army when the player asks for it
             if (w.roles.holds(Roles.INCIDENT, s.id) && !icAsked(s.id)) continue;
             Job j = new Job();
@@ -739,7 +742,8 @@ public final class Forces extends Module {
             j.want = Math.min(s.capital ? 10 : 6, 1 + (int) (z[s.id] / per));
             j.x = s.cx * 16f;
             j.y = s.cy * 16f;
-            j.score = z[s.id] + w.stats.popBySettlement[s.id] * 0.01f + (s.capital ? 20000 : 0);
+            // (a town its police have pulled out of is the army's to take: it comes first after the capital)
+            j.score = z[s.id] + w.stats.popBySettlement[s.id] * 0.01f + (s.capital ? 20000 : 0) + (w.command.isAbandoned(s.id) ? 5000 : 0);
             j.name = s.name;
             jobs.add(j);
         }
@@ -755,6 +759,23 @@ public final class Forces extends Module {
             j.y = h.y + (ty - h.y) * 0.35f;
             j.score = h.count * 1.2f;
             j.name = "a horde of " + News.num(h.count);
+            jobs.add(j);
+        }
+        // a town being evacuated whose road out the dead threaten: a formation holds it open
+        for (Region.Settlement s : w.r.settlements) {
+            if (!w.gov.evacuating(s.id) || w.stats.popBySettlement[s.id] < 500) continue;
+            float[] p = w.strat.evacPoint(s.id);
+            boolean threat = w.strat.corridorCut(s.id);
+            for (Formation f : formations) if (f.alive && f.job == JOB_ROAD && f.jobId == s.id) threat = true;
+            if (!threat) continue;
+            Job j = new Job();
+            j.kind = JOB_ROAD;
+            j.id = s.id;
+            j.want = 1;
+            j.x = p[0];
+            j.y = p[1];
+            j.score = 15000 + w.stats.popBySettlement[s.id] * 0.01f;
+            j.name = "the road out of " + s.name;
             jobs.add(j);
         }
         // nests: the dead massed in the country, outside any town (the biggest few, not next to each other)
@@ -798,6 +819,8 @@ public final class Forces extends Module {
             else if (f.job == JOB_HORDE) {
                 done = true;
                 for (Job j : jobs) if (j.kind == JOB_HORDE && j.id == f.jobId) done = false;
+            } else if (f.job == JOB_ROAD) {
+                done = !w.gov.evacuating(f.jobId);
             } else if (f.job == JOB_NEST) {
                 done = f.jobId < 0 || f.jobId >= sec.n || sec.zIn[f.jobId] < 20 && f.state == HOLDING;
             } else if (f.job == JOB_NONE && f.task >= 0) {
@@ -929,6 +952,16 @@ public final class Forces extends Module {
             f.job = JOB_NONE;
             f.jobId = -1;
         }
+    }
+
+    /** Is an army formation (not broken) within reach of (x, y), holding or on the road: an escort for a column? */
+    public boolean escortNear(float x, float y, float reach) {
+        for (Formation f : formations) {
+            if (!f.alive || f.faction != Ents.SOLDIER || f.state == BROKEN || f.state == AIRLIFT || f.state == RAIL) continue;
+            float dx = f.hq.x - x, dy = f.hq.y - y;
+            if (dx * dx + dy * dy < reach * reach) return true;
+        }
+        return false;
     }
 
     /** Where the k-th formation sent to a town takes its place: the worst streets first, one formation to each. */

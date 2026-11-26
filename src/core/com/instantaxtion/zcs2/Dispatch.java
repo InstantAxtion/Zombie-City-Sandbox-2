@@ -33,13 +33,26 @@ public final class Dispatch {
         this.w = w;
         secIncident = new int[w.sec.n];
         java.util.Arrays.fill(secIncident, -1);
-        perimeter = new boolean[64];
+        perimeter = new boolean[Math.max(64, w.r.settlements.size())];
     }
 
     public int openCount() {
         int n = 0;
         for (Incident i : incidents) if (i.open) n++;
         return n;
+    }
+
+    /** The police pull out of a town (Command abandons it): its squads, and any sent to its calls, go home. */
+    public void abandon(int st) {
+        for (Squads.Squad s : w.sq.list) {
+            if (!s.alive || s.player || s.faction != Ents.COP) continue;
+            boolean ours = s.home >= 0 && w.r.facilities.get(s.home).settlement == st;
+            boolean there = s.incident >= 0 && s.incident < incidents.size() && incidents.get(s.incident).settlement == st;
+            if (!ours && !there) continue;
+            if (there) incidents.get(s.incident).squads.remove(Integer.valueOf(s.id));
+            s.incident = -1;
+            w.sq.goHome(s);
+        }
     }
 
     /** True when a town's police have switched to holding a perimeter. */
@@ -190,14 +203,16 @@ public final class Dispatch {
                 }
             }
             in.assigned = have;
-            boolean big = perimeterMode(in.settlement) && in.zombies >= 4;
+            // a town the police have pulled out of (Command.abandoned) is the army's: no police answer its calls
+            boolean lost = w.command.isAbandoned(in.settlement);
+            boolean big = perimeterMode(in.settlement) && in.zombies >= 4 || lost;
             in.army = big;
             in.needed = big ? 0 : Math.min(48, 2 + in.zombies / 2);
             if (in.zombies >= 8 && !big) w.mil.considerCall(in);
             if (big) {
                 w.mil.considerCall(in);
                 // inside the perimeter: police come away once the army is there to take over
-                if (armyClose || w.sp.secSol[in.sector] >= 4)
+                if (armyClose || w.sp.secSol[in.sector] >= 4 || lost)
                     for (int k = in.squads.size() - 1; k >= 0; k--) {
                         Squads.Squad s = w.sq.get(in.squads.get(k));
                         if (s.faction == Ents.COP) {

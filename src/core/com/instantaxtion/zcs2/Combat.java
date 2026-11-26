@@ -60,6 +60,7 @@ final class Combat {
             if (e.kind[v] == Ents.CIV && w.stats.resident(v)) {
                 int st = w.sec.settlement[w.r.sectorOfPx(e.x[v], e.y[v])];
                 if (st >= 0) w.stats.lostBySettlement[st]++;
+                w.roles.lostAt(w.r.sectorOfPx(e.x[v], e.y[v]), 1);
             }
             e.infT[v] = w.rng.range(25f, 70f);
             w.stats.infectedTotal++;

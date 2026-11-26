@@ -317,6 +317,8 @@ public final class Strategic {
 
     private void hordes() {
         Sectors sec = w.sec;
+        // (a horde passes through streets already overrun, a few holdouts among thousands of the dead)
+        float overrun = w.c.rule("overrunRatio", 20);
         for (int k = 0; k < hordes.size(); k++) {
             Horde h = hordes.get(k);
             if (!h.alive) continue;
@@ -341,7 +343,7 @@ public final class Strategic {
                 w.stats.infectedTotal += bitten;
                 if (stl >= 0) w.stats.lostBySettlement[stl] += bitten;
                 w.stats.lossBy[2] += bitten;
-            } else if (sec.popIn[s] > 0 || sec.hot[s] > 0 || sec.cam[s] || w.sp.secCiv[s] + w.sp.secCop[s] + w.sp.secSol[s] > 0) {
+            } else if (sec.popIn[s] > 0 && sec.zIn[s] < sec.popIn[s] * overrun || sec.hot[s] > 0 || sec.cam[s] || w.sp.secCiv[s] + w.sp.secCop[s] + w.sp.secSol[s] > 0) {
                 // reached people, a fight, or a watched place: break up into the sector
                 w.ecology.hordeArrived(h, s, sec.zIn[s]);
                 // (watched: its front comes on as individuals, the rest is the mass behind them)
@@ -365,6 +367,8 @@ public final class Strategic {
                     float d = (float) Math.sqrt(dx * dx + dy * dy);
                     if (d > 24) continue;
                     float a = (sec.popIn[t] + 50 + (w.night() && lit(t) ? 200 : 0)) / (1 + d * d);
+                    // (streets the dead already crowd draw them less: they go where the people are still many)
+                    a /= 1 + sec.zIn[t] / (sec.popIn[t] + 50f);
                     if (a > best) {
                         best = a;
                         h.target = t;
@@ -547,6 +551,30 @@ public final class Strategic {
         return best;
     }
 
+    /**
+     * Is a town's road out cut: a real number of the dead (in the streets round its evacuation point, or a horde
+     * close by) and no army formation near enough to hold the road open?
+     */
+    public boolean corridorCut(int st) {
+        float[] p = evacPoint(st);
+        Sectors sec = w.sec;
+        int s0 = w.r.sectorOfPx(p[0], p[1]), sx = s0 % sec.sw, sy = s0 / sec.sw, z = 0;
+        for (int dy = -1; dy <= 1; dy++)
+            for (int dx = -1; dx <= 1; dx++) {
+                int x = sx + dx, y = sy + dy;
+                if (x < 0 || y < 0 || x >= sec.sw || y >= sec.sh) continue;
+                z += sec.zIn[y * sec.sw + x] + w.sp.secZ[y * sec.sw + x];
+            }
+        for (Horde h : hordes) if (h.alive && dist(h.x, h.y, p[0], p[1]) < 2000) z += h.count;
+        if (z < w.c.rule("corridorCutAt", 150)) return false;
+        return !w.forces.escortNear(p[0], p[1], w.c.rule("escortReach", 2000));
+    }
+
+    /** People sent out of a town by road (a precinct evacuating its district): they leave in its next column. */
+    public void sendOut(int st, int n) {
+        if (st >= 0 && st < pending.length && n > 0) pending[st] += n;
+    }
+
     /** One person reached the evacuation point. */
     void evacuee(int i) {
         int st = w.sec.settlement[w.r.sectorOfPx(w.e.x[i], w.e.y[i])];
@@ -593,6 +621,8 @@ public final class Strategic {
             if (!w.gov.evacuating(st)) continue;
             Region.Settlement set = w.r.settlements.get(st);
             float cap = roadsOut(set) / 60f * dt;
+            // the dead on the road out, and no soldiers holding it: only a trickle gets through
+            if (corridorCut(st)) cap *= 0.15f;
             float left = Math.max(0, Math.min(cap, roadsOut(set) - leftThisHour[st]));
             if (left <= 0) continue;
             int popNow = Math.max(1, w.stats.popBySettlement[st]);
@@ -604,6 +634,8 @@ public final class Strategic {
                 int m = Math.min(sec.popIn[s], (int) want + (Rng.unit(w.seed, w.tick, s) < want % 1f ? 1 : 0));
                 sec.popIn[s] -= m;
                 moved += m;
+                // (a precinct's district counts its people who got out as safe)
+                if (m > 0 && w.roles.inDistrict(s)) w.roles.districtOut += m;
             }
             pending[st] += moved;
             leftThisHour[st] += moved;
@@ -855,11 +887,26 @@ public final class Strategic {
                 }
             }
             int s = w.r.sectorOfPx(c.x, c.y);
+            // soldiers holding the road nearby (or riding with it) keep most of the dead off it
+            boolean escorted = w.forces.escortNear(c.x, c.y, w.c.rule("escortReach", 2000));
             // the dead on the road
             int z = w.sp.secZ[s] + w.sec.zIn[s];
+            // a horde across its road falls on it (the column can't outrun the dead on a jammed road)
+            for (Horde h : hordes) {
+                if (!h.alive || dist(h.x, h.y, c.x, c.y) > 600 + (float) Math.sqrt(h.count) * 3) continue;
+                z += h.count;
+            }
+            if (escorted && z > 0) {
+                // the escort fights them off
+                int kd = Math.min(w.sec.zIn[s], (int) (Math.min(z, 400) * 0.01f * dt) + 1);
+                w.sec.zIn[s] -= kd;
+                w.sec.bodies[s] += kd;
+                w.stats.killsBySide[2] += kd;
+                w.stats.zombieKills += kd;
+            }
             if (z >= 20) {
                 // the dead on the road catch some of them (a column keeps moving: only those at its edges)
-                float want = Math.min(z, c.count) * 0.002f * dt;
+                float want = Math.min(z, c.count) * 0.002f * dt * (escorted ? 0.1f : 1);
                 int lost = Math.min(c.count, (int) want + (Rng.unit(w.seed, w.tick, k * 3L + 2) < want % 1f ? 1 : 0));
                 c.count -= lost;
                 int hadInf = Math.min(lost, c.infected);
@@ -1045,12 +1092,51 @@ public final class Strategic {
             else if (late) end(true, c.name + " stands", "The capital held for " + sc.days + " days.");
         } else if (g.equals("survive")) {
             if (w.playerEnt >= 0 && w.e.loc[w.playerEnt] == Ents.FREE) {
-                Region.Facility b = w.mil.base();
-                if (b != null && dist(w.e.x[w.playerEnt], w.e.y[w.playerEnt], b.x, b.y) < 300)
-                    end(true, "You reached safety", "You made it to " + b.name + " after " + timeSince() + ".");
+                float[] safe = safeAt(w.e.x[w.playerEnt], w.e.y[w.playerEnt]);
+                if (safe != null)
+                    end(true, "You reached safety", "You made it to " + SAFE_NAMES[(int) safe[2]] + " after " + timeSince() + ".");
                 else if (late) end(true, "You survived", "You lived through " + sc.days + " days of it.");
             }
         }
+    }
+
+    /** Kinds of a place where one person is safe (the survivor's goal, and marks on the map). */
+    public static final int SAFE_BASE = 0, SAFE_EVAC = 1, SAFE_COLONY = 2, SAFE_BOAT = 3;
+    public static final String[] SAFE_NAMES = {"the army base", "an evacuation point", "a survivor settlement", "the boats on the shore"};
+
+    /**
+     * Where one person on foot is safe right now: the army base while it's ours, the evacuation point of every
+     * town being evacuated, the survivor settlements still standing, and the waterfront where the coast guard
+     * takes people off (one point a town). Each is {x, y, kind}.
+     */
+    public java.util.List<float[]> safePoints() {
+        java.util.List<float[]> out = new java.util.ArrayList<float[]>();
+        for (Region.Facility f : w.r.facilities)
+            if (f.kind == Region.F_BASE && online(f.id)) out.add(new float[]{f.x, f.y, SAFE_BASE});
+        for (Region.Settlement s : w.r.settlements) {
+            if (!w.gov.evacuating(s.id)) continue;
+            float[] p = evacPoint(s.id);
+            out.add(new float[]{p[0], p[1], SAFE_EVAC});
+            int best = -1;
+            float bd = Float.MAX_VALUE;
+            for (int q = 0; q < w.sec.n; q++) {
+                if (w.sec.settlement[q] != s.id || !w.navy.pickup(q)) continue;
+                float d = dist(w.sec.cx(q), w.sec.cy(q), s.cx * 16f, s.cy * 16f);
+                if (d < bd) {
+                    bd = d;
+                    best = q;
+                }
+            }
+            if (best >= 0) out.add(new float[]{w.sec.cx(best), w.sec.cy(best), SAFE_BOAT});
+        }
+        for (Society.Colony c : w.society.colonies) if (!c.fallen) out.add(new float[]{c.x, c.y, SAFE_COLONY});
+        return out;
+    }
+
+    /** The safe place within reach of (x, y) (300 px; the army base's gates, 700 px from its middle), or null. */
+    public float[] safeAt(float x, float y) {
+        for (float[] p : safePoints()) if (dist(p[0], p[1], x, y) < (p[2] == SAFE_BASE ? 700 : 300)) return p;
+        return null;
     }
 
     public int cityAlive() {

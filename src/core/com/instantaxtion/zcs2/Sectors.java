@@ -210,6 +210,7 @@ public final class Sectors {
                 w.stats.civDeaths += killed;
                 w.stats.infectedTotal += b - killed;
                 if (settlement[s] >= 0) w.stats.lostBySettlement[settlement[s]] += b;
+                w.roles.lostAt(s, b);
                 w.stats.lossBy[0] += b;
                 panic[s] = Math.min(1, panic[s] + 0.1f * Math.min(1, dt));
             }
@@ -255,11 +256,22 @@ public final class Sectors {
             if (panic[s] > 0) panic[s] = Math.max(0, panic[s] - 0.01f * dt);
             // the unwatched dead wander towards people and lights
             if (zIn[s] > 0 && popIn[s] == 0 && hot[s] <= 0) migrate(s, dt);
+            else if (hot[s] <= 0 && overrun(s) && Rng.unit(w.seed, w.tick, s * 37L + 9) < dt / 240f)
+                w.strat.formHorde(s, (zIn[s] - (int) (popIn[s] * w.c.rule("overrunRatio", 20))) / 2);
             else if (zIn[s] > spillAt && hot[s] <= 0) spill(s, dt, spillAt);
             if (hot[s] > 0) hot[s] -= dt;
         }
         drift();
         if (!w.strategic) demote();
+    }
+
+    /**
+     * Streets the dead have overrun and gone hungry in (a few holdouts left among thousands): the starving mass
+     * sets off as a horde for somewhere with more people, before it settles into a nest.
+     */
+    private boolean overrun(int s) {
+        return zIn[s] >= w.ecology.hordeThreshold(s) && w.ecology.hunger[s] > 0.5f && !w.ecology.nest[s]
+                && zIn[s] > popIn[s] * w.c.rule("overrunRatio", 20) * 2;
     }
 
     /** A holdout: people who've held their streets for days barricade themselves in (set by the society systems). */
@@ -319,7 +331,7 @@ public final class Sectors {
             }
         }
         // ordinary life on the streets, where the camera is
-        if (cam[s] && zHere == 0 && popIn[s] > 0 && room && !w.gov.curfew && !w.command.sheltering(settlement[s]) && w.daylight() > 0.3f) {
+        if (cam[s] && zHere == 0 && popIn[s] > 0 && room && !w.gov.streetsClosed() && !w.command.sheltering(settlement[s]) && w.daylight() > 0.3f) {
             int want = Math.min(28, popIn[s] / 25 + 2);
             if (ambient[s] < want) {
                 int m = Math.min(want - ambient[s], 3);
@@ -390,6 +402,9 @@ public final class Sectors {
             w.strat.formHorde(s, zIn[s] / 2);
             return;
         }
+        // a precinct's cordon on its district's edge turns most of them back
+        if (w.roles.blocks(s, t)) m /= 5;
+        if (m <= 0) return;
         w.ecology.carry(s, t, m, zIn[t]);
         zIn[s] -= m;
         zIn[t] += m;
@@ -413,6 +428,7 @@ public final class Sectors {
         }
         if (bd < 0) return;
         int m = Math.min(zIn[s] - (int) at, stoch((zIn[s] - at) * 0.02f * dt, s * 29L));
+        if (w.roles.blocks(s, bd)) m /= 5;
         if (m <= 0) return;
         zIn[s] -= m;
         zIn[bd] += m;

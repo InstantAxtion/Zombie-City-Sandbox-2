@@ -81,14 +81,21 @@ public final class Gov {
 
     void raise(int to) {
         if (to <= level) return;
+        int was = level;
         level = to;
         String[] say = {"", "Officials urge calm and ask people to stay indoors after reports of attacks.",
                 "State police and Guard units are being called in.",
                 "The National Guard takes command; air strikes are authorised on masses of the dead.",
                 "Regular army divisions are moving into the region."};
+        if (was < 3 && level >= 3) {
+            // what martial law means for everyone
+            trust -= 6;
+            w.news.radio("Under martial law: soldiers and police enforce the curfew, looters will be shot, and fuel is rationed.", -1, -1, News.COMMAND);
+        }
         w.news.headline(LEVELS[level].toUpperCase() + " declared. " + say[level], -1, -1);
         w.stats.event("Alert: " + LEVELS[level], -1, -1);
     }
+
 
     /** The alert comes down a step (or more): the worst is over. */
     void lower(int to) {
@@ -132,9 +139,20 @@ public final class Gov {
      * trust the government stay in and barricade when there's a curfew or a shelter order.
      */
     public float compliance(int settlement) {
-        boolean told = curfew || w.command.sheltering(settlement);
+        boolean told = curfew || w.command.sheltering(settlement) || martialLaw();
         if (!told) return 1;
-        return 1 - 0.45f * trust / 100f;
+        // under martial law the curfew is enforced (patrols clear the streets), whatever people think of it
+        return Math.min(1 - 0.45f * trust / 100f, martialLaw() ? 0.6f : 1);
+    }
+
+    /** Martial law (or more): an enforced curfew, looters shot or arrested, fuel rationed, and a cost in trust. */
+    public boolean martialLaw() {
+        return level >= 3;
+    }
+
+    /** The streets are closed to ordinary life: a curfew, or martial law's enforced one. */
+    public boolean streetsClosed() {
+        return curfew || martialLaw();
     }
 
     /** Trust; the alert level, curfews and evacuations are decided by the officials (Command), rumours by Media. */
@@ -167,8 +185,9 @@ public final class Gov {
             trust += (65 - trust) * 0.0002f * dt;
         }
         for (boolean g : w.strat.gridOn) if (!g) trust -= 0.003f * dt;
-        // a curfew that goes on for days wears people down
+        // a curfew that goes on for days wears people down; martial law more so, every day it lasts
         if (curfewT > 1440 * 3) trust -= 0.0015f * dt;
+        if (martialLaw()) trust -= 0.0008f * dt;
         if (trust < 5) trust = 5;
         if (trust > 95) trust = 95;
     }
