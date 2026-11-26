@@ -485,6 +485,7 @@ public final class Tests {
                 // recorded before the sectors learned to sleep (docs/SCALE_PLAN.md, P3): skipping quiet sectors
                 // and districts must not change a single outcome on today's maps
                 StringBuilder bad = new StringBuilder();
+                SectorIndex.paranoid = true;
                 for (int k = 0; k < GOLDEN.length; k++) {
                     long[] got = golden(k);
                     StringBuilder sb = new StringBuilder();
@@ -492,6 +493,7 @@ public final class Tests {
                     if (System.getenv("GOLDEN_PRINT") != null) System.out.println("golden " + k + ": {" + sb + "}");
                     if (!java.util.Arrays.equals(got, GOLDEN[k])) bad.append("\n  scenario ").append(k).append(" now {").append(sb).append('}');
                 }
+                SectorIndex.paranoid = false;
                 check(bad.length() == 0, "outcomes changed:" + bad);
             }
         });

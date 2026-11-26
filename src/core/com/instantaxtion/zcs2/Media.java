@@ -171,7 +171,7 @@ public final class Media extends Module {
                     if (hs < 0 || hs == s) continue;
                     float m = (int) (w.sec.inf[s] * 0.3f * stick);
                     w.sec.inf[s] -= m;
-                    w.sec.inf[hs] += m;
+                    w.sec.inf[w.sec.touch(hs)] += m;
                 }
         }
         w.gov.trust -= 4 * stick;

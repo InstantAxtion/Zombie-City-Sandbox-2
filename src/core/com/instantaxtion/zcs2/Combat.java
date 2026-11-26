@@ -72,7 +72,7 @@ final class Combat {
             w.fx.sound(civ ? "scream" : "hurt", e.x[v], e.y[v]);
             w.fx.noise(e.x[v], e.y[v], civ ? 26 : 20, 4);
         } else w.fx.noise(e.x[v], e.y[v], 14, 3);
-        w.sec.hot[w.r.sectorOfPx(e.x[v], e.y[v])] = 25;
+        w.sec.hot[w.sec.touch(w.r.sectorOfPx(e.x[v], e.y[v]))] = 25;
         if (e.hp[v] <= 0) kill(v, CAUSE_BITE, z);
         return true;
     }

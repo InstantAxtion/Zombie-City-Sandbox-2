@@ -153,11 +153,11 @@ public final class Society extends Module {
             if (t < 0 || sec.settlement[t] != st || sec.home[t] == 0) continue;
             int m = Math.min(sec.popIn[s], stoch(sec.popIn[s] * rate * dt, s * 29L + 1));
             sec.popIn[s] -= m;
-            sec.popIn[t] += m;
+            sec.popIn[sec.touch(t)] += m;
             float carry = sec.inf[s] * rate * dt * 2;
             int c = Math.min((int) sec.inf[s], stoch(carry, s * 29L + 2));
             sec.inf[s] -= c;
-            sec.inf[t] += c;
+            sec.inf[sec.touch(t)] += c;
         }
     }
 
@@ -239,7 +239,7 @@ public final class Society extends Module {
                 int dead = Math.min(lost, sec.popIn[s]);
                 sec.popIn[s] -= dead;
                 w.stats.civDeaths += dead;
-                sec.zIn[s] += stoch(dead * 0.6f, s * 41L + 3);
+                sec.zIn[sec.touch(s)] += stoch(dead * 0.6f, s * 41L + 3);
             }
         }
     }
@@ -331,7 +331,7 @@ public final class Society extends Module {
                 sec.popIn[k] -= m;
                 moved += m;
             }
-            sec.popIn[c.sector] += moved;
+            sec.popIn[sec.touch(c.sector)] += moved;
             c.people += moved;
             // the bitten among them come too
             int inf = arrivalsInf[st];
@@ -339,7 +339,7 @@ public final class Society extends Module {
                 if (sec.settlement[k] != st || sec.inf[k] < 1) continue;
                 int m = Math.min(inf, (int) sec.inf[k]);
                 sec.inf[k] -= m;
-                sec.inf[c.sector] += m;
+                sec.inf[sec.touch(c.sector)] += m;
                 inf -= m;
             }
             arrivals[st] = 0;
@@ -415,7 +415,7 @@ public final class Society extends Module {
                 got += m;
             }
             if (got == 0) continue;
-            sec.popIn[best] += got;
+            sec.popIn[sec.touch(best)] += got;
             sec.holdout[best] = true;
             Colony c = new Colony();
             c.sector = best;

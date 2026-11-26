@@ -706,6 +706,7 @@ public final class SaveIO {
         readFloats(in, s.inf); readFloats(in, s.hot); readFloats(in, s.panic); readFloats(in, s.firstZ);
         readFloats(in, s.driftX); readFloats(in, s.driftY);
         readBools(in, s.alerted); readBools(in, s.cam);
+        s.idx.reset();
     }
 
     private static void dispatch(DataOutputStream o, Dispatch d) throws IOException {

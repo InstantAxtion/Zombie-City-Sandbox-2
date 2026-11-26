@@ -195,7 +195,7 @@ public final class Infrastructure extends Module {
                     int m = Math.min(w.sec.popIn[k], (int) want + (Rng.unit(w.seed, w.tick, k * 5L + 3) < want % 1f ? 1 : 0));
                     w.sec.popIn[k] -= m;
                     w.strat.pending[st] += m;
-                    w.sec.panic[k] = Math.min(1, w.sec.panic[k] + 0.01f * dt);
+                    w.sec.panic[w.sec.touch(k)] = Math.min(1, w.sec.panic[k] + 0.01f * dt);
                 }
                 looting[st] += dt;
                 w.gov.trust = Math.max(5, w.gov.trust - 0.0005f * dt);

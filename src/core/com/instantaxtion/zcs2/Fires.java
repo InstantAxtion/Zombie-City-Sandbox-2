@@ -154,7 +154,7 @@ public final class Fires extends Module {
                         int lost = Math.min(crews[b], 1 + crews[b] / 4);
                         crews[b] -= lost;
                         w.stats.crewDeaths += lost;
-                        sec.zIn[s] += lost / 2;
+                        sec.zIn[sec.touch(s)] += lost / 2;
                         recall(b);
                     } else {
                         // no water in the mains: the crews have only what the engines carry

@@ -125,7 +125,7 @@ public final class Ecology extends Module {
     /** Somewhere new infections were brought in (a camp, a hospital, a column): seed them. */
     public void seedInfection(int sector, int n) {
         if (sector < 0 || n <= 0) return;
-        w.sec.inf[sector] += n;
+        w.sec.inf[w.sec.touch(sector)] += n;
         w.stats.infectedTotal += n;
     }
 
@@ -259,7 +259,7 @@ public final class Ecology extends Module {
             }
             if (turned > 0) {
                 int s = w.r.sectorOfPx(f.hq.x, f.hq.y);
-                w.sec.zIn[s] += turned;
+                w.sec.zIn[w.sec.touch(s)] += turned;
                 w.stats.armedDeaths[f.faction] += turned;
                 f.losses += turned;
                 fmLosses[i] += turned;

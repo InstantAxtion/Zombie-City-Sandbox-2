@@ -682,7 +682,7 @@ public final class Forces extends Module {
             f.pool[u.index]--;
             w.stats.armedDeaths[faction]++;
             // most of the fallen get up again
-            if (Rng.unit(w.seed, w.tick, sector * 13L + u.index) < 0.6f) w.sec.zIn[sector]++;
+            if (Rng.unit(w.seed, w.tick, sector * 13L + u.index) < 0.6f) w.sec.zIn[w.sec.touch(sector)]++;
             return;
         }
     }

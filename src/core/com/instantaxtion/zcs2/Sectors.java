@@ -17,13 +17,16 @@ public final class Sectors {
     public final short[] settlement;
     public final byte[] grid, connect;
     public final boolean[] cam, alerted;
-    private final float cs = Tile.SIZE * Region.SECT;
+    final float cs;
+    /** Per-settlement lists, districts and which of them are awake (docs/SCALE_PLAN.md, P3). */
+    public final SectorIndex idx;
 
     public Sectors(World w) {
         this.w = w;
         Region r = w.r;
         sw = r.secW;
         sh = r.secH;
+        cs = Tile.SIZE * r.sect;
         n = sw * sh;
         popIn = new int[n];
         zIn = new int[n];
@@ -75,6 +78,18 @@ public final class Sectors {
             grid[s] = (byte) (settlement[s] < 0 ? -1 : r.settlements.get(settlement[s]).grid);
         }
         connectivity();
+        idx = new SectorIndex(w, this);
+    }
+
+    /** Something in sector s rose (counts, hot, panic): see SectorIndex.poke. */
+    public void wake(int s) {
+        idx.poke(s);
+    }
+
+    /** Wakes sector s (as wake) and returns it: for writes that raise a count, as in zIn[sec.touch(s)] += n. */
+    public int touch(int s) {
+        idx.poke(s);
+        return s;
     }
 
     /** Which neighbouring sectors can be walked to (bit d for direction d of the eight). Water and walls cut it. */
@@ -82,7 +97,7 @@ public final class Sectors {
         for (int s = 0; s < n; s++) connect[s] = 0;
         int[] dx = {1, -1, 0, 0, 1, 1, -1, -1}, dy = {0, 0, 1, -1, 1, -1, 1, -1};
         Region r = w.r;
-        int per = Region.SECT / Region.NAV;
+        int per = r.sect / Region.NAV;
         for (int s = 0; s < n; s++) {
             int sx = s % sw, sy = s / sw;
             for (int d = 0; d < 4; d++) {
@@ -137,15 +152,11 @@ public final class Sectors {
     }
 
     public int totalZIn() {
-        int t = 0;
-        for (int s = 0; s < n; s++) t += zIn[s];
-        return t;
+        return idx.totalZIn();
     }
 
     public int totalPop() {
-        int t = 0;
-        for (int s = 0; s < n; s++) t += popIn[s] + (int) inf[s];
-        return t;
+        return idx.totalPop();
     }
 
     /** Attraction of a sector to the wandering dead: people, light at night, noise. */
@@ -169,12 +180,11 @@ public final class Sectors {
         Spatial sp = w.sp;
         int individuals = e.live;
         boolean roomForMore = individuals < w.maxIndividuals;
-        float x0 = w.camX0 - cs * 0.5f, y0 = w.camY0 - cs * 0.5f, x1 = w.camX1 + cs * 0.5f, y1 = w.camY1 + cs * 0.5f;
-        for (int s = 0; s < n; s++) {
-            float sx0 = (s % sw) * cs, sy0 = (s / sw) * cs;
-            cam[s] = w.camDetail && sx0 + cs > x0 && sx0 < x1 && sy0 + cs > y0 && sy0 < y1;
-        }
-        for (int s = 0; s < n; s++) {
+        // (only the awake sectors: every other one is quiet, and this loop would leave it as it is)
+        idx.begin(dt);
+        float dt0 = dt;
+        for (int s = idx.firstDue(); s >= 0; s = idx.nextDue(s)) {
+            dt = dt0 * idx.scale(s);
             int zO = sp.secZ[s], cO = sp.secCiv[s], arm = sp.secCop[s] + sp.secSol[s];
             int zHere = zO + zIn[s];
             if (zHere > 0 && firstZ[s] < 0) firstZ[s] = (float) w.time;
@@ -231,6 +241,7 @@ public final class Sectors {
                     int m = Math.min((int) inf[s], stoch(inf[s] * 0.02f * dt * (1 - w.media.hidden()), s * 7L + 4));
                     inf[s] -= m;
                     inf[hs] += m;
+                    idx.poke(hs);
                 }
             }
             // people fight back: a few of the dead where there are many of the living are put down by residents
@@ -261,7 +272,8 @@ public final class Sectors {
             else if (zIn[s] > spillAt && hot[s] <= 0) spill(s, dt, spillAt);
             if (hot[s] > 0) hot[s] -= dt;
         }
-        drift();
+        // (only the dead out on the streets read the drift, and there are none in fast-forward)
+        if (!w.strategic) drift();
         if (!w.strategic) demote();
     }
 
@@ -286,12 +298,17 @@ public final class Sectors {
         Ents e = w.e;
         for (int i = 0; i < e.top; i++) {
             if (e.loc[i] == Ents.BODY) {
-                if ((e.flags[i] & Ents.F_RISES) != 0) zIn[w.r.sectorOfPx(e.x[i], e.y[i])]++;
+                if ((e.flags[i] & Ents.F_RISES) != 0) {
+                    int s = w.r.sectorOfPx(e.x[i], e.y[i]);
+                    zIn[s]++;
+                    idx.poke(s);
+                }
                 e.remove(i);
                 continue;
             }
             if (e.loc[i] != Ents.FREE || e.armed(i) || i == w.playerEnt) continue;
             int s = w.r.sectorOfPx(e.x[i], e.y[i]);
+            idx.poke(s);
             if (e.kind[i] == Ents.ZOMBIE) zIn[s]++;
             else if ((e.flags[i] & Ents.F_INFECTED) != 0) inf[s] += 1;
             else popIn[s]++;
@@ -435,7 +452,7 @@ public final class Sectors {
     }
 
     private void drift() {
-        for (int s = 0; s < n; s++) {
+        for (int s = idx.first(); s >= 0; s = idx.next(s)) {
             float bx = 0, by = 0, best = attraction(s);
             for (int d = 0; d < 8; d++) {
                 if ((connect[s] & (1 << d)) == 0) continue;
@@ -450,7 +467,7 @@ public final class Sectors {
             float len = (float) Math.sqrt(bx * bx + by * by);
             if (len == 0 && settlement[s] < 0) {
                 // out in the fields with nothing near: towards the nearest town's streets and lights
-                float[] d = townDir();
+                float[] d = townDir(s);
                 bx = d[s * 2];
                 by = d[s * 2 + 1];
                 len = (float) Math.sqrt(bx * bx + by * by) * 1.6f;
@@ -461,30 +478,41 @@ public final class Sectors {
     }
 
     private float[] townDir;
+    private boolean[] townDone;
 
-    /** For each sector outside a town: the direction to the nearest street where people live (within 6 km), or 0. */
-    private float[] townDir() {
-        if (townDir != null) return townDir;
-        townDir = new float[n * 2];
+    /**
+     * For a sector outside a town: the direction to the nearest street where people live (within 12 sectors), or 0;
+     * the nearest by straight-line distance, the lowest-numbered of equals. Worked out the first time a sector asks
+     * (only awake sectors do), searching outwards ring by ring until no nearer one can be found.
+     */
+    private float[] townDir(int s) {
+        if (townDir == null) {
+            townDir = new float[n * 2];
+            townDone = new boolean[n];
+        }
+        if (townDone[s]) return townDir;
+        townDone[s] = true;
         int R = 12;
-        for (int s = 0; s < n; s++) {
-            if (settlement[s] >= 0) continue;
-            int sx = s % sw, sy = s / sw, best = -1, bd = Integer.MAX_VALUE;
-            for (int dy = -R; dy <= R; dy++)
-                for (int dx = -R; dx <= R; dx++) {
-                    int x = sx + dx, y = sy + dy;
-                    if (x < 0 || y < 0 || x >= sw || y >= sh) continue;
+        int sx = s % sw, sy = s / sw, best = -1, bd = Integer.MAX_VALUE;
+        for (int r = 0; r <= R && r * r <= bd; r++)
+            for (int dy = -r; dy <= r; dy++) {
+                int y = sy + dy;
+                if (y < 0 || y >= sh) continue;
+                int step = (dy == -r || dy == r) ? 1 : 2 * r;
+                for (int dx = -r; dx <= r; dx += Math.max(1, step)) {
+                    int x = sx + dx;
+                    if (x < 0 || x >= sw) continue;
                     int t = y * sw + x, d = dx * dx + dy * dy;
-                    if (home[t] > 0 && settlement[t] >= 0 && d < bd) {
+                    if (home[t] > 0 && settlement[t] >= 0 && (d < bd || d == bd && t < best)) {
                         bd = d;
                         best = t;
                     }
                 }
-            if (best < 0) continue;
-            float dx = (best % sw) - sx, dy = (best / sw) - sy, l = (float) Math.sqrt(dx * dx + dy * dy);
-            townDir[s * 2] = dx / l;
-            townDir[s * 2 + 1] = dy / l;
-        }
+            }
+        if (best < 0) return townDir;
+        float dx = (best % sw) - sx, dy = (best / sw) - sy, l = (float) Math.sqrt(dx * dx + dy * dy);
+        townDir[s * 2] = dx / l;
+        townDir[s * 2 + 1] = dy / l;
         return townDir;
     }
 
@@ -499,8 +527,10 @@ public final class Sectors {
             if ((e.flags[i] & Ents.F_PLACED) != 0 && cam[s]) continue;
             if (e.kind[i] == Ents.ZOMBIE) {
                 if (w.ztypeOf(i).placedOnly) continue;
+                idx.poke(s);
                 zIn[s]++;
             } else {
+                idx.poke(s);
                 if ((e.flags[i] & Ents.F_INFECTED) != 0) inf[s] += 1;
                 else popIn[s]++;
                 if ((e.flags[i] & Ents.F_AMBIENT) != 0 && e.home[i] >= 0 && ambient[e.home[i]] > 0) ambient[e.home[i]]--;
@@ -512,6 +542,7 @@ public final class Sectors {
     /** People who reached shelter go indoors (counted in their sector again). */
     public void shelter(int i) {
         int s = w.r.sectorOfPx(w.e.x[i], w.e.y[i]);
+        idx.poke(s);
         if ((w.e.flags[i] & Ents.F_INFECTED) != 0) inf[s] += 1;
         else popIn[s]++;
         if ((w.e.flags[i] & Ents.F_AMBIENT) != 0 && w.e.home[i] >= 0 && ambient[w.e.home[i]] > 0) ambient[w.e.home[i]]--;
@@ -521,6 +552,7 @@ public final class Sectors {
     /** A zombie gets inside a building. */
     public void breakIn(int i) {
         int s = w.r.sectorOfPx(w.e.x[i], w.e.y[i]);
+        idx.poke(s);
         zIn[s]++;
         w.retire(i);
     }

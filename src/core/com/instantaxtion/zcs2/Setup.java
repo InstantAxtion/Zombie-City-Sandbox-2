@@ -273,12 +273,12 @@ public final class Setup {
             int inTowns = towns.isEmpty() ? 0 : left * 2 / 3, placed = 0;
             for (int s : towns) {
                 int m = (int) ((long) inTowns * w.sec.home[s] / Math.max(1, townHomes));
-                w.sec.zIn[s] += m;
+                w.sec.zIn[w.sec.touch(s)] += m;
                 placed += m;
             }
             left -= placed;
-            if (secs.isEmpty()) w.sec.zIn[r.sectorOfPx(r.city().cx * 16f, r.city().cy * 16f)] += left;
-            else for (int k = 0; k < left; k += 50) w.sec.zIn[secs.get(Rng.hashInt(w.seed, k, 34, secs.size()))] += Math.min(50, left - k);
+            if (secs.isEmpty()) w.sec.zIn[w.sec.touch(r.sectorOfPx(r.city().cx * 16f, r.city().cy * 16f))] += left;
+            else for (int k = 0; k < left; k += 50) w.sec.zIn[w.sec.touch(secs.get(Rng.hashInt(w.seed, k, 34, secs.size())))] += Math.min(50, left - k);
             // its people mostly got away before it fell: they're refugees in the capital now
             Region.Settlement cap = r.city();
             List<Integer> capSecs = new ArrayList<Integer>();
@@ -289,7 +289,7 @@ public final class Setup {
                 int fled = w.sec.popIn[s] * 4 / 5;
                 if (fled <= 0) continue;
                 w.sec.popIn[s] -= fled;
-                w.sec.popIn[capSecs.get(s % capSecs.size())] += fled;
+                w.sec.popIn[w.sec.touch(capSecs.get(s % capSecs.size()))] += fled;
                 if (set >= 0) w.strat.refuge[set][cap.id] += fled;
             }
             if (st >= 0) {
@@ -309,7 +309,7 @@ public final class Setup {
             originY = q[1];
             int ind = Math.min(n, 400);
             pack(w, q[0], q[1], ind, 8, 9);
-            if (n > ind) w.sec.zIn[r.sectorOfPx(q[0], q[1])] += n - ind;
+            if (n > ind) w.sec.zIn[w.sec.touch(r.sectorOfPx(q[0], q[1]))] += n - ind;
             o = "done";
         }
         if (o.equals("lab")) at = facility(w, Region.F_LAB);
@@ -324,8 +324,8 @@ public final class Setup {
             int out = Math.min(n, Math.max(1, n / 3));
             float[] gate = landNear(w, at.x, at.y + 120, 60, 13);
             pack(w, gate[0], gate[1], out, 8, 13);
-            w.sec.zIn[s] += n - out;
-            w.sec.hot[s] = 30;
+            w.sec.zIn[w.sec.touch(s)] += n - out;
+            w.sec.hot[w.sec.touch(s)] = 30;
             Region.Settlement town = nearestTown(w, r.settlements.get(Math.max(0, at.settlement)));
             if (town != null) {
                 hiddenBitten(w, town.id, r.sectorOfPx(town.cx * 16f, town.cy * 16f), 5, 6, 14, 47);
@@ -427,8 +427,8 @@ public final class Setup {
                     w.strat.addHorde(w.sec.cx(s), w.sec.cy(s), n / 8);
                     left -= n / 8;
                 }
-                if (open.isEmpty()) w.sec.zIn[r.sectorOfPx(p[0], p[1])] += left;
-                else for (int k = 0; k < left; k += 10) w.sec.zIn[open.get(Rng.hashInt(w.seed, k, 78, open.size()))] += Math.min(10, left - k);
+                if (open.isEmpty()) w.sec.zIn[w.sec.touch(r.sectorOfPx(p[0], p[1]))] += left;
+                else for (int k = 0; k < left; k += 10) w.sec.zIn[w.sec.touch(open.get(Rng.hashInt(w.seed, k, 78, open.size())))] += Math.min(10, left - k);
                 // the villages' people have mostly fled to the towns (counted as refugees there)
                 for (int s = 0; s < w.sec.n; s++) {
                     int st = w.sec.settlement[s];
@@ -438,7 +438,7 @@ public final class Setup {
                     int fled = w.sec.popIn[s] * 2 / 3;
                     int ts = r.sectorOfPx(to.cx * 16f, to.cy * 16f);
                     w.sec.popIn[s] -= fled;
-                    w.sec.popIn[ts] += fled;
+                    w.sec.popIn[w.sec.touch(ts)] += fled;
                     w.strat.refuge[st][to.id] += fled;
                 }
                 w.gov.level = 3;
@@ -490,7 +490,7 @@ public final class Setup {
             float ang = k * 2.39f, rad = 6 + (float) Math.sqrt(k) * spacing;
             float zx = x + (float) Math.cos(ang) * rad, zy = y + (float) Math.sin(ang) * rad;
             if (r.walkablePx(zx, zy) && r.tileAtPx(zx, zy) != Tile.BRIDGE) w.spawnZombie(zx, zy, w.pickZType(-1, k + salt * 1000));
-            else w.sec.zIn[r.sectorOfPx(x, y)]++;
+            else w.sec.zIn[w.sec.touch(r.sectorOfPx(x, y))]++;
         }
     }
 
@@ -512,17 +512,17 @@ public final class Setup {
                 }
             }
         if (near.isEmpty()) {
-            w.sec.zIn[s0] += n;
+            w.sec.zIn[w.sec.touch(s0)] += n;
             return;
         }
         int put = 0;
         for (int s : near) {
             int ring2 = Math.max(Math.abs(s % w.sec.sw - s0 % w.sec.sw), Math.abs(s / w.sec.sw - s0 / w.sec.sw));
             int m = (int) ((long) n * weight(w, s, ring2) / Math.max(1, homes));
-            w.sec.zIn[s] += m;
+            w.sec.zIn[w.sec.touch(s)] += m;
             put += m;
         }
-        w.sec.zIn[near.get(0)] += n - put;
+        w.sec.zIn[w.sec.touch(near.get(0))] += n - put;
     }
 
     private static long weight(World w, int s, int ring) {
@@ -540,7 +540,7 @@ public final class Setup {
             int s = cand.remove(Rng.hashInt(w.seed, k, salt, cand.size()));
             int m = Math.min(w.sec.popIn[s], lo + Rng.hashInt(w.seed, k, salt + 1, hi - lo + 1));
             w.sec.popIn[s] -= m;
-            w.sec.inf[s] += m;
+            w.sec.inf[w.sec.touch(s)] += m;
         }
     }
 

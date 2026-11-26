@@ -65,7 +65,7 @@ public final class Strategic {
             int s = (int) l[0];
             int m = Math.min(w.sec.popIn[s], (int) l[1]);
             w.sec.popIn[s] -= m;
-            w.sec.inf[s] += m;
+            w.sec.inf[w.sec.touch(s)] += m;
             w.stats.infectedTotal += m;
         }
     }
@@ -339,7 +339,7 @@ public final class Strategic {
             if (marching && !town && sec.popIn[s] > 0 && sec.hot[s] <= 0 && !sec.cam[s]) {
                 int bitten = Math.min(sec.popIn[s], (int) (sec.popIn[s] * 0.02f * dt));
                 sec.popIn[s] -= bitten;
-                sec.inf[s] += bitten;
+                sec.inf[sec.touch(s)] += bitten;
                 w.stats.infectedTotal += bitten;
                 if (stl >= 0) w.stats.lostBySettlement[stl] += bitten;
                 w.stats.lossBy[2] += bitten;
@@ -347,8 +347,8 @@ public final class Strategic {
                 // reached people, a fight, or a watched place: break up into the sector
                 w.ecology.hordeArrived(h, s, sec.zIn[s]);
                 // (watched: its front comes on as individuals, the rest is the mass behind them)
-                sec.zIn[s] += h.count - w.undead.watchedHorde(h, s);
-                sec.hot[s] = Math.max(sec.hot[s], 10);
+                sec.zIn[sec.touch(s)] += h.count - w.undead.watchedHorde(h, s);
+                sec.hot[sec.touch(s)] = Math.max(sec.hot[s], 10);
                 h.alive = false;
                 continue;
             }
@@ -653,8 +653,8 @@ public final class Strategic {
                 int back = qs.hubNode >= 0 ? w.r.sectorOfPx(w.r.roads.nx[qs.hubNode], w.r.roads.ny[qs.hubNode]) : w.r.sectorOfPx(qs.cx * 16f, qs.cy * 16f);
                 int inf = Math.min(pending[st], infPending[st]);
                 infPending[st] -= inf;
-                sec.popIn[back] += pending[st] - inf;
-                sec.inf[back] += inf;
+                sec.popIn[sec.touch(back)] += pending[st] - inf;
+                sec.inf[sec.touch(back)] += inf;
                 w.stats.turnedBack += pending[st];
                 pending[st] = 0;
                 continue;
@@ -666,8 +666,8 @@ public final class Strategic {
                 infPending[st] -= inf;
                 int hs = home(st);
                 if (hs >= 0) {
-                    sec.popIn[hs] += pending[st] - inf;
-                    sec.inf[hs] += inf;
+                    sec.popIn[sec.touch(hs)] += pending[st] - inf;
+                    sec.inf[sec.touch(hs)] += inf;
                     pending[st] = 0;
                     continue;
                 }
@@ -692,8 +692,8 @@ public final class Strategic {
             if (c.route == null) {
                 // nowhere to go: they go back indoors
                 int s = w.r.sectorOfPx(p[0], p[1]);
-                sec.popIn[s] += c.count - c.infected;
-                sec.inf[s] += c.infected;
+                sec.popIn[sec.touch(s)] += c.count - c.infected;
+                sec.inf[sec.touch(s)] += c.infected;
                 continue;
             }
             c.x = w.r.roads.nx[c.route[0]];
@@ -828,18 +828,18 @@ public final class Strategic {
                 leftCountry(st, count);
                 return;
             }
-            sec.popIn[any.get(0)] += count;
+            sec.popIn[sec.touch(any.get(0))] += count;
         } else {
             int put = 0;
             int last = -1;
             for (int s = 0; s < sec.n; s++) {
                 if (sec.settlement[s] != st || sec.zIn[s] > 0) continue;
                 int m = (int) ((long) count * Math.max(1, sec.home[s] - sec.popIn[s]) / room);
-                sec.popIn[s] += m;
+                sec.popIn[sec.touch(s)] += m;
                 put += m;
                 last = s;
             }
-            if (last >= 0) sec.popIn[last] += count - put;
+            if (last >= 0) sec.popIn[sec.touch(last)] += count - put;
         }
         w.stats.returnedHome += count;
     }
@@ -911,7 +911,7 @@ public final class Strategic {
                 c.count -= lost;
                 int hadInf = Math.min(lost, c.infected);
                 c.infected -= hadInf;
-                w.sec.inf[s] += lost;
+                w.sec.inf[w.sec.touch(s)] += lost;
                 w.stats.infectedTotal += lost - hadInf;
                 if (c.from >= 0) w.stats.lostBySettlement[c.from] += lost;
                 w.stats.lossBy[1] += lost;
@@ -923,7 +923,7 @@ public final class Strategic {
                 int turned = Math.min(c.infected, (int) t + (Rng.unit(w.seed, w.tick, k * 3L + 1) < t % 1f ? 1 : 0));
                 c.count -= turned;
                 c.infected -= turned;
-                w.sec.zIn[s] += turned;
+                w.sec.zIn[w.sec.touch(s)] += turned;
                 w.stats.zombiesMade += turned;
                 w.stats.civTurned += turned;
             }
@@ -935,7 +935,7 @@ public final class Strategic {
                 c.alive = false;
                 if (c.home && c.route != null) {
                     settleHome(c.to, c.count - c.infected);
-                    if (c.infected > 0) w.sec.inf[s] += c.infected;
+                    if (c.infected > 0) w.sec.inf[w.sec.touch(s)] += c.infected;
                 } else if (c.to >= 0 && c.route != null) {
                     settle(c.to, c.count, c.infected, c.from);
                     arrivedFrom(c.from, c.to, c.count - c.infected, c.infected);
@@ -945,8 +945,8 @@ public final class Strategic {
                     leftCountry(c.from, c.count);
                     if (c.count >= 100) w.news.tally("border", News.num(c.count) + " refugees from " + w.r.settlements.get(c.from).name + " cross the border|Refugees over the border: {n} more column{s}, {m} {mpeople}", 1, c.count, c.x, c.y, News.CALL);
                 } else {
-                    w.sec.popIn[s] += c.count - c.infected;
-                    w.sec.inf[s] += c.infected;
+                    w.sec.popIn[w.sec.touch(s)] += c.count - c.infected;
+                    w.sec.inf[w.sec.touch(s)] += c.infected;
                 }
             }
         }
@@ -963,8 +963,8 @@ public final class Strategic {
             return;
         }
         int per = healthy / homes.size(), extra = healthy % homes.size();
-        for (int k = 0; k < homes.size(); k++) sec.popIn[homes.get(k)] += per + (k < extra ? 1 : 0);
-        if (infected > 0) sec.inf[homes.get(0)] += infected;
+        for (int k = 0; k < homes.size(); k++) sec.popIn[sec.touch(homes.get(k))] += per + (k < extra ? 1 : 0);
+        if (infected > 0) sec.inf[sec.touch(homes.get(0))] += infected;
         w.society.arrived(st, count, infected);
     }
 

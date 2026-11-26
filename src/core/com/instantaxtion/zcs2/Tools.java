@@ -24,10 +24,10 @@ public final class Tools {
         int rest = count - made;
         if (rest > 0) {
             int s = w.r.sectorOfPx(x, y);
-            w.sec.zIn[s] += rest;
+            w.sec.zIn[w.sec.touch(s)] += rest;
             made += rest;
         }
-        w.sec.hot[w.r.sectorOfPx(x, y)] = 25;
+        w.sec.hot[w.sec.touch(w.r.sectorOfPx(x, y))] = 25;
         return made;
     }
 

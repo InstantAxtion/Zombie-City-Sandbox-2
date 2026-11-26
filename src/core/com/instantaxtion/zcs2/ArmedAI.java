@@ -1005,7 +1005,7 @@ final class ArmedAI {
                             e.flags[o] |= F_SPOTTED;
                             spotted++;
                             w.news.radio(w.nameOf(i) + ": the dog has found someone bitten", x, y, News.UNIT);
-                            w.sec.hot[w.r.sectorOfPx(x, y)] = Math.max(w.sec.hot[w.r.sectorOfPx(x, y)], 10);
+                            w.sec.hot[w.sec.touch(w.r.sectorOfPx(x, y))] = Math.max(w.sec.hot[w.r.sectorOfPx(x, y)], 10);
                         }
                         // isolated: escorted indoors at the hospital (or the nearest door), away from the crowd
                         if (quiet && e.state[o] != CivAI.S_SHELTER && e.state[o] != CivAI.S_MILITIA) {

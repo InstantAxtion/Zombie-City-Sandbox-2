@@ -552,8 +552,8 @@ public final class Logistics extends Module {
             return;
         }
         int per = healthy / homes.size(), extra = healthy % homes.size();
-        for (int k = 0; k < homes.size(); k++) sec.popIn[homes.get(k)] += per + (k < extra ? 1 : 0);
-        if (infected > 0) sec.inf[homes.get(0)] += infected;
+        for (int k = 0; k < homes.size(); k++) sec.popIn[sec.touch(homes.get(k))] += per + (k < extra ? 1 : 0);
+        if (infected > 0) sec.inf[sec.touch(homes.get(0))] += infected;
     }
 
     // ------------------------------------------------------------------ queries
