@@ -49,7 +49,13 @@ public final class NationPainter {
     }
 
     /** The zoom from which district pictures take over from the country picture, and street chunks from them. */
-    public static final float Z_DISTRICT = 0.012f, Z_STREET = 0.2f;
+    public static final float Z_DISTRICT = 0.012f, Z_STREET = 0.16f;
+    /**
+     * Town zoom: from FINE_FROM the district pictures are joined by fine pictures (a tile a pixel) of FINE-tile
+     * squares round the camera, so the streets don't blur while the chunks' own pictures aren't in yet.
+     */
+    public static final int FINE = 128;
+    public static final float FINE_FROM = 0.075f;
     /** District pictures' side in tiles, and their levels: tiles per pixel, and the zoom from which each is used. */
     public static final int DISTRICT = 512;
     public static final int[] DTPP = {8, 4, 2};
@@ -75,7 +81,7 @@ public final class NationPainter {
     final int[] AVG = new int[11];
     private final LinkedHashMap<Integer, GImage> cache = new LinkedHashMap<Integer, GImage>(128, 0.75f, true);
     private long cacheBytes;
-    private final GImage[] spare = new GImage[DTPP.length];
+    private final GImage[] spare = new GImage[DTPP.length + 1];
     /** District pictures painted, and the time spent painting them (ns), for probes. */
     public int painted;
     public long paintNs;
@@ -578,8 +584,43 @@ public final class NationPainter {
     }
 
     private static long bytes(int lvl) {
-        long s = DISTRICT / DTPP[lvl];
+        long s = lvl == DTPP.length ? FINE : DISTRICT / DTPP[lvl];
         return s * s * 4;
+    }
+
+    public boolean hasFine(int fx, int fy) {
+        return cache.containsKey(key(fx, fy, DTPP.length));
+    }
+
+    /** A FINE-tile square's picture at a tile a pixel (town zoom), painting it now if allowed (else null when not cached). */
+    public GImage fine(int fx, int fy, boolean mayPaint) {
+        int lvl = DTPP.length, k = key(fx, fy, lvl);
+        GImage img = cache.get(k);
+        if (img != null || !mayPaint) return img;
+        long t0 = System.nanoTime();
+        int[] px = paint(fx * FINE, fy * FINE, 1, FINE);
+        img = spare[lvl];
+        spare[lvl] = null;
+        if (img == null) img = pf.newImage(FINE, FINE);
+        img.setPixels(px, FINE, FINE);
+        paintNs += System.nanoTime() - t0;
+        painted++;
+        store(k, lvl, img);
+        return img;
+    }
+
+    private void store(int k, int lvl, GImage img) {
+        cache.put(k, img);
+        cacheBytes += bytes(lvl);
+        while (cacheBytes > BUDGET_BYTES && cache.size() > 1) {
+            Integer oldest = cache.keySet().iterator().next();
+            GImage o = cache.remove(oldest);
+            int ol = oldest >>> 28;
+            cacheBytes -= bytes(ol);
+            if (o == null) continue;
+            if (spare[ol] == null) spare[ol] = o;
+            else o.recycle();
+        }
     }
 
     /** The level of district picture for a zoom. */
@@ -607,17 +648,7 @@ public final class NationPainter {
         img.setPixels(px, side, side);
         paintNs += System.nanoTime() - t0;
         painted++;
-        cache.put(k, img);
-        cacheBytes += bytes(lvl);
-        while (cacheBytes > BUDGET_BYTES && cache.size() > 1) {
-            Integer oldest = cache.keySet().iterator().next();
-            GImage o = cache.remove(oldest);
-            int ol = oldest >>> 28;
-            cacheBytes -= bytes(ol);
-            if (o == null) continue;
-            if (spare[ol] == null) spare[ol] = o;
-            else o.recycle();
-        }
+        store(k, lvl, img);
         return img;
     }
 

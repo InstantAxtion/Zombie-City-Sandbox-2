@@ -61,8 +61,12 @@ public final class NationView {
                 {0.035f, capX, capY},
                 {0.11f, town.cx * 16f, town.cy * 16f},
                 {0.5f, capX + 300, capY + 200},
+                {0.05f, capX + 300, capY + 200},
+                {0.1f, capX + 300, capY + 200},
+                {0.15f, capX + 300, capY + 200},
+                {0.2f, capX + 300, capY + 200},
         };
-        String[] names = {"1_country", "2_region", "3_district", "4_town", "5_street"};
+        String[] names = {"1_country", "2_region", "3_district", "4_town", "5_street", "6_town_0.05", "6_town_0.10", "6_town_0.15", "6_town_0.20"};
         System.out.println("zoom          frame ms (median of 20, everything painted)   pictures painted on the way");
         for (int i = 0; i < zooms.length; i++) {
             place(zooms[i][0], zooms[i][1], zooms[i][2]);
@@ -71,6 +75,10 @@ public final class NationView {
             System.out.printf("%-10s %.4f  %6.1f ms, %5.1f ms without the full-screen vignette   (district %d, street %d, chunks made %d)%n", names[i], cam.zoom, ms,
                     ms - vignetteMs(), painted[0], painted[1], painted[2]);
             save(out, names[i], frame(0));
+        }
+        if (System.getenv("QUICK") != null) {
+            cache.shutdown();
+            return;
         }
         // the smooth zoom: the whole country down to a street corner of the capital, every frame fully painted
         float z0 = cam.minZoom, z1 = 0.6f;

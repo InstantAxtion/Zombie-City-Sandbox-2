@@ -1838,6 +1838,18 @@ public final class WorldView {
         return clamp01((z / NationPainter.Z_STREET - 1) / 0.25f);
     }
 
+    /** Whether every street picture of a fine square is painted (at any level). */
+    private boolean streetsAt(int fx, int fy) {
+        int per = NationPainter.FINE / MapPainter.CHUNK;
+        for (int cy = fy * per; cy < (fy + 1) * per; cy++)
+            for (int cx = fx * per; cx < (fx + 1) * per; cx++) {
+                boolean any = false;
+                for (int l = 0; l < MapPainter.PPT.length && !any; l++) any = map.has(cx, cy, l);
+                if (!any) return false;
+            }
+        return true;
+    }
+
     /** A real-scale map with no world on it: the ground, the lines, the buildings and the names. */
     private void drawNation(Gfx g, Camera cam, float dt) {
         time += dt;
@@ -1924,8 +1936,31 @@ public final class WorldView {
                         else g.image(img, sx, sy, side, side, da);
                     }
         }
+        // town zoom: a tile a pixel over the district pictures, nearest the middle first, till the streets cover
+        float fa = clamp01((z / NationPainter.FINE_FROM - 1) / 0.25f);
+        if (fa > 0 && !streetsCover) {
+            float fpx = NationPainter.FINE * Tile.SIZE;
+            int fn = nat.size / NationPainter.FINE;
+            int fx0 = Math.max(0, (int) (cam.x0() / fpx)), fy0 = Math.max(0, (int) (cam.y0() / fpx));
+            int fx1 = Math.min(fn - 1, (int) (cam.x1() / fpx)), fy1 = Math.min(fn - 1, (int) (cam.y1() / fpx));
+            float mx = (fx0 + fx1) / 2f, my = (fy0 + fy1) / 2f;
+            int rings = Math.max(fx1 - fx0, fy1 - fy0);
+            for (int ring = 0; ring <= rings; ring++)
+                for (int fy = fy0; fy <= fy1; fy++)
+                    for (int fx = fx0; fx <= fx1; fx++) {
+                        if ((int) Math.max(Math.abs(fx - mx), Math.abs(fy - my)) != ring) continue;
+                        // under the streets that are already in, nothing to paint
+                        if (sa >= 1 && streetsAt(fx, fy)) continue;
+                        boolean may = (np.paintNs + map.paintNs - p0) < budget;
+                        GImage img = np.fine(fx, fy, may);
+                        if (img == null) continue;
+                        float sx = cam.toScreenX(fx * fpx), sy = cam.toScreenY(fy * fpx), side = fpx * z;
+                        if (fa >= 1) g.image(img, sx, sy, side + 0.75f, side + 0.75f);
+                        else g.image(img, sx, sy, side, side, fa);
+                    }
+        }
         float chunkPx = Chunk.SIZE * Tile.SIZE;
-        if (z >= NationPainter.Z_STREET * 0.6f) {
+        if (z >= NationPainter.Z_STREET * 0.8f) {
             // close to the streets: the chunks in view are made in the background, the nearest first
             int cx0 = Math.max(0, (int) (cam.x0() / chunkPx)), cy0 = Math.max(0, (int) (cam.y0() / chunkPx));
             int cx1 = Math.min(nat.sw - 1, (int) (cam.x1() / chunkPx)), cy1 = Math.min(nat.sw - 1, (int) (cam.y1() / chunkPx));
@@ -2415,6 +2450,9 @@ public final class WorldView {
     /**
      * Something per sector as a small picture (two pixels a sector, blurred), scaled up over the map with smoothing:
      * the infection's bleed, the dark of places without power, heatmaps. Rebuilt twice a second.
+     * On a national map (200,000 sectors) the whole map at two pixels a sector would be 3 MB a picture plus its
+     * working arrays; instead it is a window of WIN x WIN sectors round the camera at two pixels a sector while the
+     * view is that close, and the whole map at a pixel per 4x4 sectors (the strongest of them) from further out.
      */
     private final class SecMap {
         int kind; // 0 infection, 1 unlit, 2+ heatmap of an overlay
@@ -2425,6 +2463,10 @@ public final class WorldView {
         int iw, ih;
         float builtAt = -100;
         float max;
+        /** National: the picture's first sector, and sectors a pixel (0.5 = two pixels a sector). */
+        int sx0, sy0;
+        float spp = 0.5f;
+        static final int WIN = 160, COARSE = 4;
 
         SecMap(int kind) {
             this.kind = kind;
@@ -2437,18 +2479,77 @@ public final class WorldView {
             }
         }
 
-        void build() {
+        /** The picture's layout for the camera: whole map (today's maps), or a window or the coarse map (national). */
+        private void layoutFor(Camera cam) {
             Sectors sec = w.sec;
-            if (img == null) {
-                iw = sec.sw * 2;
-                ih = sec.sh * 2;
+            int niw, nih;
+            if (!w.national) {
+                sx0 = sy0 = 0;
+                spp = 0.5f;
+                niw = sec.sw * 2;
+                nih = sec.sh * 2;
+            } else {
+                float secPx = w.r.sect * Tile.SIZE;
+                float span = Math.max(cam.sw, cam.sh) / cam.zoom / secPx;
+                if (span <= WIN * 0.7f) {
+                    spp = 0.5f;
+                    sx0 = Math.max(0, Math.min(sec.sw - WIN, (int) (cam.cx / secPx) - WIN / 2));
+                    sy0 = Math.max(0, Math.min(sec.sh - WIN, (int) (cam.cy / secPx) - WIN / 2));
+                    niw = nih = WIN * 2;
+                } else {
+                    spp = COARSE;
+                    sx0 = sy0 = 0;
+                    niw = (sec.sw + COARSE - 1) / COARSE;
+                    nih = (sec.sh + COARSE - 1) / COARSE;
+                }
+            }
+            if (img == null || niw != iw || nih != ih) {
+                if (img != null) img.recycle();
+                iw = niw;
+                ih = nih;
                 px = new int[iw * ih];
                 v = new float[iw * ih];
                 tmp = new float[iw * ih];
                 img = pf.newImage(iw, ih);
             }
+        }
+
+        /** Whether the camera has left the window the picture was built for. */
+        private boolean stale(Camera cam) {
+            if (!w.national) return false;
+            float secPx = w.r.sect * Tile.SIZE;
+            float span = Math.max(cam.sw, cam.sh) / cam.zoom / secPx;
+            boolean wantWin = span <= WIN * 0.7f;
+            if (wantWin != (spp < 1)) return true;
+            if (!wantWin) return false;
+            float cx = cam.cx / secPx - sx0, cy = cam.cy / secPx - sy0, half = span / 2;
+            return cx - half < 0 && sx0 > 0 || cy - half < 0 && sy0 > 0 || cx + half > WIN && sx0 + WIN < w.sec.sw || cy + half > WIN && sy0 + WIN < w.sec.sh;
+        }
+
+        void build(Camera cam) {
+            Sectors sec = w.sec;
+            layoutFor(cam);
             max = 0;
-            for (int s = 0; s < sec.n; s++) {
+            if (spp >= 1) java.util.Arrays.fill(v, 0);
+            int s0 = 0, s1 = sec.n;
+            for (int s = s0; s < s1; s++) {
+                int ssx = s % sec.sw, ssy = s / sec.sw;
+                if (spp < 1) {
+                    // a window: only its sectors
+                    if (ssy < sy0) {
+                        s = sy0 * sec.sw + sx0 - 1;
+                        continue;
+                    }
+                    if (ssy >= sy0 + iw / 2) break;
+                    if (ssx < sx0) {
+                        s = ssy * sec.sw + sx0 - 1;
+                        continue;
+                    }
+                    if (ssx >= sx0 + iw / 2) {
+                        s = (ssy + 1) * sec.sw + sx0 - 1;
+                        continue;
+                    }
+                } else if (sec.home[s] <= 0 && sec.zIn[s] <= 0 && w.sp.secZ[s] <= 0 && kind < 2) continue;
                 float val = 0;
                 switch (kind) {
                     case 0: {
@@ -2471,7 +2572,13 @@ public final class WorldView {
                             val = p <= 0 ? 0 : Math.min(1, 0.15f + (float) Math.log10(1 + p) * 0.2f);
                         } else if (heatOf == OV_UTIL) val = sec.home[s] > 0 && !w.strat.lit(s) ? 0.8f : 0;
                 }
-                int x = (s % sec.sw) * 2, y = (s / sec.sw) * 2;
+                if (spp >= 1) {
+                    // the coarse map: the strongest of each 4x4 sectors
+                    int q = (ssy / COARSE) * iw + ssx / COARSE;
+                    if (val > v[q]) v[q] = val;
+                    continue;
+                }
+                int x = (ssx - sx0) * 2, y = (ssy - sy0) * 2;
                 v[y * iw + x] = v[y * iw + x + 1] = v[(y + 1) * iw + x] = v[(y + 1) * iw + x + 1] = val;
             }
             blur();
@@ -2523,9 +2630,9 @@ public final class WorldView {
         }
 
         void draw(Gfx g, Camera cam, float alpha) {
-            if (time - builtAt > 0.5f || time < builtAt) build();
-            float cs = w.r.sect * Tile.SIZE;
-            g.image(img, cam.toScreenX(0), cam.toScreenY(0), w.sec.sw * cs * cam.zoom, w.sec.sh * cs * cam.zoom, alpha);
+            if (time - builtAt > 0.5f || time < builtAt || stale(cam)) build(cam);
+            float cs = w.r.sect * Tile.SIZE, pxW = cs * spp;
+            g.image(img, cam.toScreenX(sx0 * cs), cam.toScreenY(sy0 * cs), iw * pxW * cam.zoom, ih * pxW * cam.zoom, alpha);
         }
     }
 
