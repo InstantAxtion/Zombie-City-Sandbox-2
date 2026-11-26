@@ -76,8 +76,15 @@ public final class Infrastructure extends Module {
         Sectors sec = w.sec;
         for (int k = 0; k < sec.n; k++) {
             int x0 = (k % sec.sw) * w.r.sect, y0 = (k / sec.sw) * w.r.sect, farm = 0;
-            for (int y = y0; y < y0 + w.r.sect; y += 2)
-                for (int x = x0; x < x0 + w.r.sect; x += 2) if (r.t(x, y) == Tile.FARM) farm++;
+            if (r.nation != null) {
+                // a national map: the farmland share of the sector's coarse cells (sampled every other tile, as below)
+                farm = r.nation.sum(Nation.SUM_FARM, k) * (w.r.sect / 2) * (w.r.sect / 2) / 255;
+                if (farm == 0) continue;
+                x0 += w.r.sect / 2 - 16; // (the sector's middle, below)
+                y0 += w.r.sect / 2 - 16;
+            } else
+                for (int y = y0; y < y0 + w.r.sect; y += 2)
+                    for (int x = x0; x < x0 + w.r.sect; x += 2) if (r.t(x, y) == Tile.FARM) farm++;
             if (farm == 0) continue;
             int best = -1;
             float bd = Float.MAX_VALUE;

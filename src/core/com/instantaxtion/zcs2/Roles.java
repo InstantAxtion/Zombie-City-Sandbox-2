@@ -832,7 +832,9 @@ public final class Roles extends Module {
         for (int a = 0; a < 24; a++) {
             double ang = a * Math.PI / 12;
             all++;
-            if (Tile.water(w.r.t(s.cx + (int) (Math.cos(ang) * rad), s.cy + (int) (Math.sin(ang) * rad)))) water++;
+            int tx = s.cx + (int) (Math.cos(ang) * rad), ty = s.cy + (int) (Math.sin(ang) * rad);
+            // (a national map reads the coarse cover, not tiles: no chunk is made for this)
+            if (w.r.nation != null ? Nation.wet(w.r.nation.coverAt(tx, ty)) : Tile.water(w.r.t(tx, ty))) water++;
         }
         return water * 6 >= all;
     }

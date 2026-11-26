@@ -936,18 +936,18 @@ public final class Tests {
                 int near = -1;
                 float bd = Float.MAX_VALUE;
                 for (int i = 0; i < r.bCount; i++) {
-                    if (r.bfloors[i] <= 0 || w.fires.heat[i] > 0 || w.doorX[i] < 0) continue;
+                    if (r.bfloors[i] <= 0 || w.fires.heat(i) > 0 || w.doorX[i] < 0) continue;
                     float dx = w.doorX[i] - st.x, dy = w.doorY[i] - st.y, d = dx * dx + dy * dy;
                     if (d < bd && d > 300 * 300) { bd = d; near = i; }
                 }
                 int before = w.fires.putOut;
                 w.fires.ignite(near, 0.2f);
-                for (int k = 0; k < 200 && w.fires.heat[near] > 0; k++) {
+                for (int k = 0; k < 200 && w.fires.heat(near) > 0; k++) {
                     w.weather.state = Weather.CLEAR;
                     w.step();
                 }
                 check(w.fires.putOut > before || r.bfloors[near] == 0, "the crew never got there");
-                check(w.fires.heat[near] == 0 && r.bfloors[near] > 0, "the crew didn't save it");
+                check(w.fires.heat(near) == 0 && r.bfloors[near] > 0, "the crew didn't save it");
                 w.shutdown();
             }
         });

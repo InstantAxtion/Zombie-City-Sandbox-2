@@ -438,7 +438,7 @@ public final class WorldView {
             n = visN = visible(x0, y0, x1, y1);
             for (int k = 0; k < n; k++) {
                 int b = vis[k];
-                if (w.fires.heat[b] > 0) scorched[b] = true;
+                if (w.fires.heat(b) > 0) scorched[b] = true;
             }
             growDrawn(n);
             for (int k = 0; k < n; k++) {

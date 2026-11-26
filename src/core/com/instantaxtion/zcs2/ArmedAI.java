@@ -1038,11 +1038,11 @@ final class ArmedAI {
             float bdd = Float.MAX_VALUE;
             out = new float[]{x, y};
             for (int b : w.secBuildings[s]) {
-                float dx = w.doorX[b] - x, dy = w.doorY[b] - y, d = dx * dx + dy * dy;
+                float ddx = w.r.doorX(b), ddy = w.r.doorY(b), dx = ddx - x, dy = ddy - y, d = dx * dx + dy * dy;
                 if (d < bdd) {
                     bdd = d;
-                    out[0] = w.doorX[b];
-                    out[1] = w.doorY[b];
+                    out[0] = ddx;
+                    out[1] = ddy;
                 }
             }
             return out;

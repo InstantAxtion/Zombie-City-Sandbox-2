@@ -52,6 +52,20 @@ public final class Ecology extends Module {
     private void terrain() {
         Region r = w.r;
         int sw = w.sec.sw;
+        if (r.nation != null) {
+            // a national map: from the nation's sector summaries (shares of the sector's coarse cells), not tiles
+            Nation na = r.nation;
+            for (int s = 0; s < w.sec.n; s++) {
+                float water = na.sum(Nation.SUM_WATER, s) / 255f, rock = na.sum(Nation.SUM_ROCK, s) / 255f;
+                float forest = na.sum(Nation.SUM_FOREST, s) / 255f, built = na.sum(Nation.SUM_BUILT, s) / 255f;
+                float road = na.sum(Nation.SUM_ROAD, s) / 255f;
+                float rest = Math.max(0, 1 - water - rock - forest - built);
+                float avg = water * 3f + rock * 4f + forest * 1.5f + built * 1.3f + rest;
+                if (road > 0.25f) avg *= 0.75f;
+                cost[s] = Math.max(0.5f, avg);
+            }
+            return;
+        }
         for (int s = 0; s < w.sec.n; s++) {
             int x0 = (s % sw) * w.r.sect, y0 = (s / sw) * w.r.sect;
             float sum = 0;

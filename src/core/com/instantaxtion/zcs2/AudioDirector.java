@@ -637,17 +637,18 @@ final class AudioDirector {
             int a0x = Math.max(0, (int) ((lx - halfW - 600) / cs)), a1x = Math.min(sec.sw - 1, (int) ((lx + halfW + 600) / cs));
             int a0y = Math.max(0, (int) ((ly - halfH - 600) / cs)), a1y = Math.min(sec.sh - 1, (int) ((ly + halfH + 600) / cs));
             if ((a1x - a0x + 1) * (a1y - a0y + 1) <= 400) {
-                float[] heat = w.fires.heat;
+                Fires fires = w.fires;
                 Region r = w.r;
                 for (int syi = a0y; syi <= a1y; syi++)
                     for (int sxi = a0x; sxi <= a1x; sxi++) {
                         int[] bs = w.secBuildings[syi * sec.sw + sxi];
                         if (bs == null) continue;
                         for (int b : bs) {
-                            if (b < 0 || b >= heat.length || heat[b] <= 0) continue;
+                            float hb = fires.heat(b);
+                            if (hb <= 0) continue;
                             float g = gainAt((r.bx(b) + r.bw(b) * 0.5f) * Tile.SIZE, (r.by(b) + r.bh(b) * 0.5f) * Tile.SIZE, 1900);
-                            fireLevel += heat[b] * g;
-                            fpan += panOut * heat[b] * g;
+                            fireLevel += hb * g;
+                            fpan += panOut * hb * g;
                         }
                     }
             }

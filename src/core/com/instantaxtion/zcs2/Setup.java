@@ -32,7 +32,7 @@ public final class Setup {
     /** As above, on a region already generated from the same size, preset and seed (the New Game preview's), or null. */
     public static World newGame(Content c, int size, int preset, long seed, Content.Scenario sc, int threads, int role, int maxInd, Region pre) {
         if (role < 0) role = defaultRole(sc);
-        Region r = pre != null && pre.W == size && pre.preset == preset && pre.seed == seed ? pre : RegionGen.generate(size, preset, seed);
+        Region r = pre != null && pre.W == size && pre.preset == preset && pre.seed == seed ? pre : region(size, preset, seed, threads);
         World w = new World(c, r, seed, threads);
         w.maxIndividuals = maxInd;
         w.scenario = sc;
@@ -64,6 +64,20 @@ public final class Setup {
         w.stats.startPeople = Audit.people(w);
         w.stats.event("The day begins in " + r.name, -1, -1);
         return w;
+    }
+
+    /** Map sides from this up are real-scale (national) maps, made by NationGen; today's sizes by RegionGen. */
+    public static final int NATIONAL_FROM = 4096;
+
+    public static boolean national(int size) {
+        return size >= NATIONAL_FROM;
+    }
+
+    /** The map for a game: a nation (real scale) for the national sizes, else today's RegionGen map. */
+    public static Region region(int size, int preset, long seed, int threads) {
+        if (!national(size)) return RegionGen.generate(size, preset, seed);
+        Nation n = NationGen.generate(size, preset, seed, Math.max(1, Math.min(4, threads)));
+        return Region.national(n, null);
     }
 
     /** Parking places in a facility's lot (or round its yard). */
