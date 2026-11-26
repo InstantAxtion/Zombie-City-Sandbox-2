@@ -589,11 +589,39 @@ public final class ChunkGen {
     /** Downtown: towers and office blocks on paved plazas, taller with density, tallest in the capital. */
     private void core(int x0, int y0, int x1, int y1, Rng r, float dn) {
         fill(x0, y0, x1, y1, Tile.PLAZA);
-        if (r.chance(0.04f)) { // a square with trees
+        int bw = x1 - x0 + 1, bh = y1 - y0 + 1;
+        if (r.chance(bw * bh > 400 ? 0.03f : 0.06f)) { // a square with trees
             for (int y = y0 + 1; y < y1; y++) for (int x = x0 + 1; x < x1; x++) if (treeAt(X0 + x, Y0 + y, 0.12f)) ground(x, y, Tile.TREE);
             return;
         }
         int top = capital ? 30 : city() ? 18 : 6;
+        if (bw >= 20 && bh >= 20 && r.chance(0.45f)) {
+            // a big block: towers at the corners, slabs between them, and a public plaza in the middle
+            int m = r.range(5, 7);
+            for (int cyc = 0; cyc < 2; cyc++)
+                for (int cxc = 0; cxc < 2; cxc++) {
+                    int tx = cxc == 0 ? x0 : x1 - m + 1, ty = cyc == 0 ? y0 : y1 - m + 1;
+                    boolean tall = r.chance(0.6f + 0.3f * dn);
+                    int kind = tall ? Region.B_TOWER : Region.B_OFFICE;
+                    int floors = tall ? 14 + r.nextInt(1 + (int) (top * (0.5f + dn * 0.6f))) : r.range(6, 10 + (int) (dn * 6));
+                    build(tx, ty, m, m, kind, floors, roof(kind, r));
+                }
+            int dep = Math.max(3, m - 2), gap = 2;
+            if (r.chance(0.7f)) {
+                build(x0 + m + gap, y0, bw - 2 * (m + gap), dep, Region.B_OFFICE, r.range(5, 9 + (int) (dn * 6)), roof(Region.B_OFFICE, r));
+                build(x0 + m + gap, y1 - dep + 1, bw - 2 * (m + gap), dep, Region.B_OFFICE, r.range(5, 9 + (int) (dn * 6)), roof(Region.B_OFFICE, r));
+            }
+            if (r.chance(0.5f)) {
+                build(x0, y0 + m + gap, dep, bh - 2 * (m + gap), Region.B_SHOP, r.range(2, 4), roof(Region.B_SHOP, r));
+                build(x1 - dep + 1, y0 + m + gap, dep, bh - 2 * (m + gap), Region.B_SHOP, r.range(2, 4), roof(Region.B_SHOP, r));
+            }
+            // the plaza: a ring of trees round its middle
+            int px0 = x0 + m + 2, py0 = y0 + m + 2, px1 = x1 - m - 2, py1 = y1 - m - 2;
+            for (int y = py0; y <= py1; y++)
+                for (int x = px0; x <= px1; x++)
+                    if ((x == px0 || x == px1 || y == py0 || y == py1) && (x + y) % 3 == 0) ground(x, y, Tile.TREE);
+            return;
+        }
         float mode = r.nextFloat();
         if (mode < 0.12f + 0.12f * dn) { // one big building on the whole block, set back behind a plaza
             int in = r.chance(0.5f) ? 1 : 0;

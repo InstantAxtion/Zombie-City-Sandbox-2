@@ -2043,6 +2043,7 @@ public final class WorldView {
             }
         }
         RoadGraph rg = nat.roads;
+        interchanges(g, cam, x0, y0, x1, y1);
         for (int pass = 0; pass < 2; pass++) {
             g.color(pass == 0 ? 0xFF2A2C30 : MapPainter.GROUND[Tile.HIGHWAY]);
             for (int e : np.highways) {
@@ -2057,6 +2058,69 @@ public final class WorldView {
 
     private int[] natStamp;
     private int natStampN;
+    /** Interchanges: {x, y, highway dir x, dir y} where a highway meets a city street (national maps), worked out once. */
+    private float[][] ichg;
+
+    /**
+     * Where a highway meets the streets of a city it passes over them: a cloverleaf of ramps in the four corners
+     * and the carriageway's shadow on the road below, drawn with the highways (vectors, below street zoom).
+     */
+    private void interchanges(Gfx g, Camera cam, float x0, float y0, float x1, float y1) {
+        RoadGraph rg = nat.roads;
+        if (ichg == null) {
+            java.util.List<float[]> l = new java.util.ArrayList<float[]>();
+            java.util.HashSet<Integer> seen = new java.util.HashSet<Integer>();
+            for (int e : np.highways)
+                for (int end = 0; end < 2; end++) {
+                    int n = end == 0 ? rg.ea[e] : rg.eb[e];
+                    if (!seen.add(n)) continue;
+                    int st = nat.secSettlement[nat.sector((int) (rg.nx[n] / 16), (int) (rg.ny[n] / 16))];
+                    if (st < 0 || nat.settlements.get(st).kind != Region.S_CITY) continue;
+                    boolean street = false;
+                    for (int k = rg.adjStart[n]; k < rg.adjStart[n + 1]; k++) if (rg.ekind[rg.adjEdge[k]] != RoadGraph.HIGHWAY) street = true;
+                    if (!street) continue;
+                    float dx = rg.nx[rg.eb[e]] - rg.nx[rg.ea[e]], dy = rg.ny[rg.eb[e]] - rg.ny[rg.ea[e]], d = (float) Math.sqrt(dx * dx + dy * dy) + 1e-3f;
+                    // not two within a kilometre: one interchange each
+                    boolean near = false;
+                    for (float[] q : l) if (Math.abs(q[0] - rg.nx[n]) + Math.abs(q[1] - rg.ny[n]) < 4000) near = true;
+                    if (!near) l.add(new float[]{rg.nx[n], rg.ny[n], dx / d, dy / d});
+                }
+            ichg = l.toArray(new float[0][]);
+        }
+        float z = cam.zoom;
+        if (z < 0.004f) return;
+        float r = 220; // a ramp's radius, px (75 m)
+        float lw = Math.max(1.1f * dp, 22 * z);
+        for (int pass = 0; pass < 2; pass++) {
+            g.color(pass == 0 ? 0xFF2A2C30 : MapPainter.GROUND[Tile.HIGHWAY]);
+            for (float[] q : ichg) {
+                if (q[0] + 3 * r < x0 || q[0] - 3 * r > x1 || q[1] + 3 * r < y0 || q[1] - 3 * r > y1) continue;
+                float hx = q[2], hy = q[3], px = -hy, py = hx;
+                for (int a = -1; a <= 1; a += 2)
+                    for (int b = -1; b <= 1; b += 2) {
+                        float cx = q[0] + (hx * a + px * b) * r * 1.05f, cy = q[1] + (hy * a + py * b) * r * 1.05f;
+                        float prevX = 0, prevY = 0;
+                        // a loop of three quarters, open towards the crossing (where it joins the roads)
+                        double toNode = Math.atan2(q[1] - cy, q[0] - cx);
+                        for (int k = 0; k <= 18; k++) {
+                            double ang = toNode + Math.PI / 4 + k * Math.PI * 1.5 / 18;
+                            float sx = cam.toScreenX(cx + (float) Math.cos(ang) * r), sy = cam.toScreenY(cy + (float) Math.sin(ang) * r);
+                            if (k > 0) g.line(prevX, prevY, sx, sy, pass == 0 ? lw + 1.2f * dp : lw);
+                            prevX = sx;
+                            prevY = sy;
+                        }
+                    }
+                if (pass == 0) {
+                    // the carriageway's shadow where it passes over the street
+                    g.color(0x50000000);
+                    float sx = cam.toScreenX(q[0] - hx * r * 1.6f) + 3 * dp, sy = cam.toScreenY(q[1] - hy * r * 1.6f) + 4 * dp;
+                    float ex = cam.toScreenX(q[0] + hx * r * 1.6f) + 3 * dp, ey = cam.toScreenY(q[1] + hy * r * 1.6f) + 4 * dp;
+                    g.line(sx, sy, ex, ey, Math.max(2 * dp, 90 * z));
+                    g.color(0xFF2A2C30);
+                }
+            }
+        }
+    }
 
     /** The buildings of the cached chunks near the view (and the national buildings in them) into the drawn arrays. */
     private int nationBuildings(float x0, float y0, float x1, float y1) {

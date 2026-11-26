@@ -1043,8 +1043,9 @@ public final class NationGen {
             if (!n.built(c)) continue;
             float pv, ph;
             switch (n.district[c]) {
-                case Nation.D_CORE: pv = ph = 1f; break;
-                case Nation.D_DENSE: pv = ph = 0.88f; break;
+                // downtown keeps most streets, but not all: blocks of one, two and four lattice cells
+                case Nation.D_CORE: pv = ph = 0.8f; break;
+                case Nation.D_DENSE: pv = ph = 0.82f; break;
                 case Nation.D_MIXED: pv = ph = 0.72f; break;
                 case Nation.D_SUBURB: {
                     boolean ns = Rng.unit(seed, c / SW / 3, 0x61) < 0.5f;

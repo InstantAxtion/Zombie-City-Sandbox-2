@@ -321,6 +321,7 @@ public final class MapPainter {
         if (pix == null || pix.length < side * side) pix = new int[side * side];
         paintGround(pix, cx * CHUNK, cy * CHUNK, ppt, lvl);
         paintDetails(pix, cx * CHUNK, cy * CHUNK, ppt, lvl);
+        if (nat != null) smoothDiagonals(pix, cx * CHUNK, cy * CHUNK, ppt, side);
         img.setPixels(pix, side, side);
         if (hasLanes(cx * CHUNK, cy * CHUNK, lvl)) paintLanes(img.gfx(), cx * CHUNK, cy * CHUNK, ppt, lvl);
         cache.put(k, img);
@@ -337,6 +338,64 @@ public final class MapPainter {
             else o.recycle();
         }
         return img;
+    }
+
+    // ------------------------------------------------------------------ diagonal roads, anti-aliased
+
+    private int[] diagSrc;
+
+    /**
+     * National maps: roads that don't run along the grid (highways, roads between towns, the capital's diagonal
+     * avenues) are marked on whole tiles, so their edges are staircases. Along each such road the pixels within
+     * about a tile of its true edge are blended between the road (sampled towards its middle) and what lies beside
+     * it (sampled outwards), by how much of the pixel the road covers: a straight, anti-aliased edge.
+     */
+    private void smoothDiagonals(int[] pix, int X0, int Y0, int ppt, int side) {
+        RoadGraph g = nat.roads;
+        if (g.chunkEdgeStart == null || g.chunkW != nat.sw) return;
+        int c = (Y0 / Chunk.SIZE) * g.chunkW + X0 / Chunk.SIZE;
+        float pxw = Tile.SIZE / (float) ppt; // world px a pixel
+        float wx0 = X0 * Tile.SIZE, wy0 = Y0 * Tile.SIZE, wspan = side * pxw;
+        boolean copied = false;
+        for (int k = g.chunkEdgeStart[c]; k < g.chunkEdgeStart[c + 1]; k++) {
+            int e = g.chunkEdge[k];
+            float ax = g.nx[g.ea[e]], ay = g.ny[g.ea[e]], bx = g.nx[g.eb[e]], by = g.ny[g.eb[e]];
+            if (ax == bx || ay == by) continue; // along the grid: already straight
+            float dx = bx - ax, dy = by - ay, len = (float) Math.sqrt(dx * dx + dy * dy);
+            if (len < 1) continue;
+            float ux = dx / len, uy = dy / len;
+            // ChunkGen marks tile centres within this of the line
+            float R = Math.max(g.ehalf[e] - 4, 24), band = Tile.SIZE * 0.9f;
+            float minx = Math.min(ax, bx) - R - band, maxx = Math.max(ax, bx) + R + band;
+            float miny = Math.min(ay, by) - R - band, maxy = Math.max(ay, by) + R + band;
+            int px0 = Math.max(0, (int) ((minx - wx0) / pxw)), px1 = Math.min(side - 1, (int) ((maxx - wx0) / pxw));
+            int py0 = Math.max(0, (int) ((miny - wy0) / pxw)), py1 = Math.min(side - 1, (int) ((maxy - wy0) / pxw));
+            if (px0 > px1 || py0 > py1) continue;
+            if (!copied) {
+                if (diagSrc == null || diagSrc.length < side * side) diagSrc = new int[side * side];
+                System.arraycopy(pix, 0, diagSrc, 0, side * side);
+                copied = true;
+            }
+            for (int py = py0; py <= py1; py++)
+                for (int px = px0; px <= px1; px++) {
+                    float wx = wx0 + (px + 0.5f) * pxw, wy = wy0 + (py + 0.5f) * pxw;
+                    float rx = wx - ax, ry = wy - ay;
+                    float along = rx * ux + ry * uy;
+                    if (along < 0 || along > len) continue; // the ends meet other roads at junctions: leave them
+                    float across = -rx * uy + ry * ux, d = Math.abs(across);
+                    if (Math.abs(d - R) > band) continue;
+                    float sgn = across < 0 ? -1 : 1;
+                    // the road's own colour a little inside the edge, the ground's a little outside
+                    float inD = Math.max(0, R - band - 2), outD = R + band + 2;
+                    int ix = (int) ((ax + ux * along - uy * sgn * inD - wx0) / pxw), iy = (int) ((ay + uy * along + ux * sgn * inD - wy0) / pxw);
+                    int ox = (int) ((ax + ux * along - uy * sgn * outD - wx0) / pxw), oy = (int) ((ay + uy * along + ux * sgn * outD - wy0) / pxw);
+                    int self = diagSrc[py * side + px];
+                    int in = ix >= 0 && iy >= 0 && ix < side && iy < side ? diagSrc[iy * side + ix] : self;
+                    int out = ox >= 0 && oy >= 0 && ox < side && oy < side ? diagSrc[oy * side + ox] : self;
+                    float cov = Math.max(0, Math.min(1, (R - d) / pxw + 0.5f));
+                    pix[py * side + px] = mix(out, in, cov);
+                }
+        }
     }
 
     // ------------------------------------------------------------------ the ground, pixel by pixel
