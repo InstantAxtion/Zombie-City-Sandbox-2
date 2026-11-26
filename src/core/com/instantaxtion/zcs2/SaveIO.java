@@ -15,7 +15,14 @@ import java.util.zip.InflaterInputStream;
  * rebuilt from its seed, then the saved tiles (rubble, blown bridges) are laid over it.
  */
 public final class SaveIO {
-    public static final int VERSION = 6;
+    /**
+     * The newest format this game reads and writes. Version 7 is a game with a sparse active set (ActiveSet): it holds
+     * the set after the header and the scent field only on active pages. A game whose every chunk is active (today's
+     * maps) still writes version 6, byte for byte as before the set existed.
+     */
+    public static final int VERSION = 7;
+    /** The version a game with every chunk active writes. */
+    public static final int DENSE_VERSION = 6;
     /** The oldest save this version still reads (3: the game's 1.2; the fields added since get their defaults). */
     public static final int OLDEST = 3;
     private static final int MAGIC = 0x5A435332; // "ZCS2"
@@ -198,7 +205,7 @@ public final class SaveIO {
 
     private static void write(World w, DataOutputStream o) throws IOException {
         o.writeInt(MAGIC);
-        o.writeInt(VERSION);
+        o.writeInt(w.act.sparse ? VERSION : DENSE_VERSION);
         o.writeLong(w.c.rulesHash);
         // the content by id, so a later game with more or reordered content reads this save by name
         writeIds(o, unitIds(w.c));
@@ -213,6 +220,7 @@ public final class SaveIO {
         o.writeLong(w.seed);
         o.writeUTF(w.scenario == null ? "" : w.scenario.id);
         o.writeInt(w.mode);
+        if (w.act.sparse) w.act.write(o);
         w.r.store.writeTiles(o);
         bytes(o, w.r.bfloors, w.r.bCount);
         bools(o, w.r.roads.ealive, w.r.roads.edgeCount);
@@ -241,7 +249,7 @@ public final class SaveIO {
         news(o, w.news);
         stats(o, w.stats);
         effects(o, w.fx);
-        flow(o, w.flow);
+        flow(o, w);
         modules(o, w);
         extras(o, w);
         extras5(o, w);
@@ -261,7 +269,10 @@ public final class SaveIO {
         String scen = in.readUTF();
         int mode = in.readInt();
         Region r = RegionGen.generate(size, preset, rseed);
-        World w = new World(c, r, seed, threads);
+        // version 7: a sparse active set, restored before anything else so the world goes on with exactly that set
+        boolean sparse = ver >= 7;
+        World w = new World(c, r, seed, threads, sparse);
+        if (sparse) w.act.read(in);
         w.scenario = scen.length() == 0 ? null : c.scenario(scen);
         w.mode = mode;
         r.store.readTiles(in);
@@ -301,7 +312,7 @@ public final class SaveIO {
         readNews(in, w.news);
         readStats(in, w.stats);
         readEffects(in, w.fx);
-        readFlow(in, w.flow);
+        readFlow(in, w);
         w.loadRemap = map;
         try {
             readModules(in, w, ver);
@@ -905,22 +916,49 @@ public final class SaveIO {
         readFloats(in, f.noiseX); readFloats(in, f.noiseY); readFloats(in, f.noiseLoud); readFloats(in, f.noiseT);
     }
 
-    private static void flow(DataOutputStream o, Flow f) throws IOException {
-        int n = f.dist.length;
-        short[] d = new short[n];
-        for (int i = 0; i < n; i++) d[i] = f.stamp[i] == f.cur ? f.dist[i] : Flow.INF;
-        shorts(o, d, n);
+    /**
+     * The scent field: with every chunk active the whole grid row by row (INF where no scent reaches), as it always
+     * was; with a sparse set each active page's 32x32 cells, in page order (the set is saved before).
+     */
+    private static void flow(DataOutputStream o, World w) throws IOException {
+        Flow f = w.flow;
+        int nw = w.r.navW, nh = w.r.navH;
+        if (!w.act.sparse) {
+            short[] d = new short[nw * nh];
+            for (int cy = 0; cy < nh; cy++)
+                for (int cx = 0; cx < nw; cx++) d[cy * nw + cx] = f.atCell(cx, cy);
+            shorts(o, d, d.length);
+            return;
+        }
+        ActiveSet a = w.act;
+        short[] d = new short[ChunkStore.NAV_AREA];
+        for (int p = 0; p < a.pages; p++) {
+            if (!a.active(p)) continue;
+            int x0 = (p % a.pw) * ChunkStore.NAVS, y0 = (p / a.pw) * ChunkStore.NAVS;
+            for (int k = 0; k < d.length; k++) d[k] = f.atCell(x0 + (k & (ChunkStore.NAVS - 1)), y0 + (k >> ChunkStore.NAV_SHIFT));
+            shorts(o, d, d.length);
+        }
     }
 
-    private static void readFlow(DataInputStream in, Flow f) throws IOException {
-        short[] d = new short[f.dist.length];
-        readShorts(in, d);
+    private static void readFlow(DataInputStream in, World w) throws IOException {
+        Flow f = w.flow;
+        int nw = w.r.navW, nh = w.r.navH;
         f.nextStamp();
-        for (int i = 0; i < d.length; i++)
-            if (d[i] != Flow.INF) {
-                f.dist[i] = d[i];
-                f.stamp[i] = (short) f.cur;
-            }
+        if (!w.act.sparse) {
+            short[] d = new short[nw * nh];
+            readShorts(in, d);
+            for (int i = 0; i < d.length; i++) if (d[i] != Flow.INF) f.setCell(i % nw, i / nw, d[i]);
+            return;
+        }
+        ActiveSet a = w.act;
+        short[] d = new short[ChunkStore.NAV_AREA];
+        for (int p = 0; p < a.pages; p++) {
+            if (!a.active(p)) continue;
+            readShorts(in, d);
+            int x0 = (p % a.pw) * ChunkStore.NAVS, y0 = (p / a.pw) * ChunkStore.NAVS;
+            for (int k = 0; k < d.length; k++)
+                if (d[k] != Flow.INF) f.setCell(x0 + (k & (ChunkStore.NAVS - 1)), y0 + (k >> ChunkStore.NAV_SHIFT), d[k]);
+        }
     }
 
     // ------------------------------------------------------------------ arrays

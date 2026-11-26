@@ -1778,7 +1778,7 @@ public final class WorldView {
                     int cx = ox + x, cy = oy + y;
                     int c = 0;
                     if (cx >= 0 && cy >= 0 && cx < sp.cw && cy < sp.ch) {
-                        int cell = cy * sp.cw + cx;
+                        int cell = sp.cell(cx, cy);
                         int nz = sp.zEnd[cell] - sp.zStart[cell], nl = sp.lEnd[cell] - sp.lStart[cell];
                         int n = nz + nl;
                         if (n > 1) {

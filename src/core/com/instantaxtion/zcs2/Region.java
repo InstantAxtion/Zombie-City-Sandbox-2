@@ -128,9 +128,11 @@ public final class Region {
     public short[] bset = new short[512];
     public int[] bres = new int[512], broof = new int[512];
 
-    // navigation grid (NAV x NAV tiles per cell): 0 blocked, 1 open, 2 road
+    // navigation grid (NAV x NAV tiles per cell): 0 blocked, 1 open, 2 road. Kept in the ChunkStore's pages
+    // (32x32 cells each, ChunkStore.nav), so a page that isn't resident has none; navAt reads it.
     public final int navW, navH;
-    public final byte[] nav;
+    /** store's page table of navigation cells (one load away, as tp). */
+    private final byte[][] np;
     public final int secW, secH;
     public int gridCount; // power grids
     /** Edge entry points: junctions on the region border where outside help arrives. */
@@ -150,11 +152,10 @@ public final class Region {
         store = new ChunkStore(w, h);
         if (allPages) store.allocateAll();
         tp = store.tile;
+        np = store.nav;
         pw = store.pw;
         navW = w / NAV;
         navH = h / NAV;
-        // a map without every page resident (national, P7) gets its navigation grid paged in P2: none until then
-        nav = new byte[allPages ? navW * navH : 0];
         secW = (w + sect - 1) / sect;
         secH = (h + sect - 1) / sect;
     }
@@ -403,12 +404,33 @@ public final class Region {
                         if (Tile.walkable(k)) open++;
                         if (Tile.roadish(k)) road++;
                     }
-                nav[cy * navW + cx] = (byte) (open < 2 ? 0 : road >= 2 ? 2 : 1);
+                byte[] pg = np[(cy >> 5) * pw + (cx >> 5)];
+                if (pg != null) pg[(cy & 31) << 5 | (cx & 31)] = (byte) (open < 2 ? 0 : road >= 2 ? 2 : 1);
             }
     }
 
+    /** Navigation cell (cx, cy): 0 blocked (also off the map, or on a page that isn't resident), 1 open, 2 road. */
+    public int navAt(int cx, int cy) {
+        if (cx < 0 || cy < 0 || cx >= navW || cy >= navH) return 0;
+        byte[] pg = np[(cy >> 5) * pw + (cx >> 5)];
+        return pg == null ? 0 : pg[(cy & 31) << 5 | (cx & 31)];
+    }
+
+    /** The navigation cells of page p (32x32, row-major), or null where it isn't resident. */
+    byte[] navPage(int p) {
+        return np[p];
+    }
+
     public boolean navOpen(int cx, int cy) {
-        return cx >= 0 && cy >= 0 && cx < navW && cy < navH && nav[cy * navW + cx] != 0;
+        return navAt(cx, cy) != 0;
+    }
+
+    /** The whole navigation grid as one row-major array (navW x navH; tests and tools). */
+    public byte[] navCopy() {
+        byte[] out = new byte[navW * navH];
+        for (int cy = 0; cy < navH; cy++)
+            for (int cx = 0; cx < navW; cx++) out[cy * navW + cx] = (byte) navAt(cx, cy);
+        return out;
     }
 
     /** True if nothing blocks a straight look from a to b (checked on the navigation grid). */
@@ -429,7 +451,10 @@ public final class Region {
             }
             if (x == x1 && y == y1) break;
             if (x < 0 || y < 0 || x >= navW || y >= navH) return false;
-            if (nav[y * navW + x] == 0) {
+            byte[] pg = np[(y >> 5) * pw + (x >> 5)];
+            // a page that isn't resident can't be seen across (the simulation reads only what it has)
+            if (pg == null) return false;
+            if (pg[(y & 31) << 5 | (x & 31)] == 0) {
                 // water doesn't block a look, buildings do
                 int t = t(x * NAV, y * NAV), t2 = t(x * NAV + 1, y * NAV + 1);
                 if (Tile.blocksSight(t) || Tile.blocksSight(t2)) return false;

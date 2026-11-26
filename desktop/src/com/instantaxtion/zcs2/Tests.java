@@ -214,6 +214,113 @@ public final class Tests {
         return n == 0 ? 0 : sx / n;
     }
 
+    static void simThreads(int size) {
+        World a = game(21, size, "sandbox", 1), b = game(21, size, "sandbox", 4);
+        for (World w : new World[]{a, b}) {
+            camOver(w, Setup.originX, Setup.originY);
+            Tools.paintZombies(w, Setup.originX, Setup.originY, 900, 500, -1);
+        }
+        for (int k = 0; k < 60 * 20; k++) {
+            a.step();
+            b.step();
+            if (k % 200 == 0) check(Audit.hash(a) == Audit.hash(b), "diverged at step " + k);
+            if (k % 200 == 0) check(Audit.check(a).isEmpty(), Audit.check(a));
+        }
+        check(a.act.activeCount() == b.act.activeCount(), "active sets differ");
+        check(Audit.hash(a) == Audit.hash(b), "different after a minute");
+        a.shutdown();
+        b.shutdown();
+    }
+
+    static void simAccounted(int size) {
+        World w = game(5, size, "sandbox", 2);
+        long before = Audit.people(w);
+        Region.Settlement c = w.r.city();
+        // pan the camera across the city: people come out on the streets and go back in
+        for (int k = 0; k < 6; k++) {
+            camOver(w, c.cx * 16f + (k - 3) * 600, c.cy * 16f);
+            play(w, 25, true);
+            check(Audit.people(w) == before, "people " + Audit.people(w) + " vs " + before + " after pan " + k);
+        }
+        check(w.sp.civCount > 0 || true, "");
+        w.camDetail = false;
+        play(w, 60, true);
+        check(Audit.people(w) == before, "people after the camera left: " + Audit.people(w) + " vs " + before);
+        check(w.sp.civCount < 10, "the streets empty when nobody watches: " + w.sp.civCount);
+        w.shutdown();
+    }
+
+    static void saveExact(int size) throws Exception {
+        World w = game(31, size, "lab_leak", 2);
+        camOver(w, Setup.originX, Setup.originY);
+        Tools.paintZombies(w, Setup.originX, Setup.originY, 300, 300, -1);
+        play(w, 50, false);
+        ByteArrayOutputStream bo = new ByteArrayOutputStream();
+        SaveIO.save(w, bo);
+        World l = SaveIO.load(content, new ByteArrayInputStream(bo.toByteArray()), 2);
+        check(Audit.hash(l) == Audit.hash(w), "different straight after loading");
+        check(l.act.sparse == w.act.sparse && l.act.activeCount() == w.act.activeCount(), "the active set didn't come back");
+        for (int p = 0; p < w.act.pages; p++) check(l.act.active(p) == w.act.active(p), "chunk " + p + " active in one, not the other");
+        check(Audit.check(l).isEmpty(), "loaded game fails the audit: " + Audit.check(l));
+        for (int k = 0; k < 40 * 20; k++) {
+            w.step();
+            l.step();
+            if (k % 100 == 0) check(Audit.hash(l) == Audit.hash(w), "diverged " + k + " steps after loading");
+        }
+        check(l.news.log.size() == w.news.log.size(), "radio logs differ");
+        check(bo.size() < 4 << 20, "save is " + bo.size() / 1024 + " KB");
+        w.shutdown();
+        l.shutdown();
+    }
+
+    static void replayExact(int size) throws Exception {
+        World w = Setup.newGame(content, size, RegionGen.COAST, 77, content.scenario("lab_leak"), 2, Roles.GOD, 60000);
+        camOver(w, Setup.originX, Setup.originY);
+        // a session: paint, place, strike, pan, fast-forward and back
+        for (int k = 0; k < 20 * 20; k++) w.step();
+        Actions.paint(w, Setup.originX + 200, Setup.originY, 300, 200, -1);
+        Squads.Squad s = Actions.squad(w, "swat", 8, Setup.originX - 150, Setup.originY);
+        for (int k = 0; k < 15 * 20; k++) w.step();
+        if (s != null) Actions.order(w, s, Setup.originX + 120, Setup.originY);
+        camOver(w, Setup.originX + 500, Setup.originY + 300);
+        Actions.strike(w, Setup.originX + 900, Setup.originY + 600);
+        Actions.curfew(w, true);
+        for (int k = 0; k < 20 * 20; k++) w.step();
+        w.camDetail = false;
+        Actions.strategic(w, true);
+        for (int k = 0; k < 60; k++) w.step();
+        Actions.strategic(w, false);
+        camOver(w, Setup.originX, Setup.originY);
+        for (int k = 0; k < 10 * 20; k++) w.step();
+        check(w.director.events.size() > 5, "only " + w.director.events.size() + " inputs recorded");
+        Replay r = Replay.of(content, w, 2);
+        r.runTo(w.tick);
+        check(r.w.tick == w.tick, "ticks differ");
+        check(Audit.hash(r.w) == Audit.hash(w), "the replay came out different");
+        // and through a file
+        ByteArrayOutputStream bo = new ByteArrayOutputStream();
+        Replay.save(w, bo);
+        Replay r2 = Replay.load(content, new ByteArrayInputStream(bo.toByteArray()), 1);
+        r2.runTo(w.tick);
+        check(Audit.hash(r2.w) == Audit.hash(w), "the replay from a file came out different");
+        check(bo.size() < 200000, "replay is " + bo.size() / 1024 + " KB");
+        check(!w.director.lapseTime.isEmpty(), "no timelapse frames");
+        w.shutdown();
+        r.w.shutdown();
+        r2.w.shutdown();
+    }
+
+    /** Runs a test with every new world in sparse mode (ActiveSet: only the chunks the simulation needs are active). */
+    static void sparse(T t) throws Exception {
+        boolean was = ActiveSet.sparseDefault;
+        ActiveSet.sparseDefault = true;
+        try {
+            t.run();
+        } finally {
+            ActiveSet.sparseDefault = was;
+        }
+    }
+
     public static void main(String[] args) throws Exception {
         content = Content.load(new FileInputStream("assets/content.ini"));
         define();
@@ -305,38 +412,12 @@ public final class Tests {
         });
         test("sim: the same game on 1 and 4 threads", new T() {
             public void run() {
-                World a = game(21, 768, "sandbox", 1), b = game(21, 768, "sandbox", 4);
-                for (World w : new World[]{a, b}) {
-                    camOver(w, Setup.originX, Setup.originY);
-                    Tools.paintZombies(w, Setup.originX, Setup.originY, 900, 500, -1);
-                }
-                for (int k = 0; k < 60 * 20; k++) {
-                    a.step();
-                    b.step();
-                    if (k % 200 == 0) check(Audit.hash(a) == Audit.hash(b), "diverged at step " + k);
-                }
-                check(Audit.hash(a) == Audit.hash(b), "different after a minute");
-                a.shutdown();
-                b.shutdown();
+                simThreads(768);
             }
         });
         test("sim: everyone accounted for with no dead about", new T() {
             public void run() {
-                World w = game(5, 768, "sandbox", 2);
-                long before = Audit.people(w);
-                Region.Settlement c = w.r.city();
-                // pan the camera across the city: people come out on the streets and go back in
-                for (int k = 0; k < 6; k++) {
-                    camOver(w, c.cx * 16f + (k - 3) * 600, c.cy * 16f);
-                    play(w, 25, true);
-                    check(Audit.people(w) == before, "people " + Audit.people(w) + " vs " + before + " after pan " + k);
-                }
-                check(w.sp.civCount > 0 || true, "");
-                w.camDetail = false;
-                play(w, 60, true);
-                check(Audit.people(w) == before, "people after the camera left: " + Audit.people(w) + " vs " + before);
-                check(w.sp.civCount < 10, "the streets empty when nobody watches: " + w.sp.civCount);
-                w.shutdown();
+                simAccounted(768);
             }
         });
         test("police: a small outbreak is answered and put down", new T() {
@@ -377,24 +458,7 @@ public final class Tests {
         });
         test("save: a loaded game plays on exactly the same", new T() {
             public void run() throws Exception {
-                World w = game(31, 768, "lab_leak", 2);
-                camOver(w, Setup.originX, Setup.originY);
-                Tools.paintZombies(w, Setup.originX, Setup.originY, 300, 300, -1);
-                play(w, 50, false);
-                ByteArrayOutputStream bo = new ByteArrayOutputStream();
-                SaveIO.save(w, bo);
-                World l = SaveIO.load(content, new ByteArrayInputStream(bo.toByteArray()), 2);
-                check(Audit.hash(l) == Audit.hash(w), "different straight after loading");
-                check(Audit.check(l).isEmpty(), "loaded game fails the audit: " + Audit.check(l));
-                for (int k = 0; k < 40 * 20; k++) {
-                    w.step();
-                    l.step();
-                    if (k % 100 == 0) check(Audit.hash(l) == Audit.hash(w), "diverged " + k + " steps after loading");
-                }
-                check(l.news.log.size() == w.news.log.size(), "radio logs differ");
-                check(bo.size() < 4 << 20, "save is " + bo.size() / 1024 + " KB");
-                w.shutdown();
-                l.shutdown();
+                saveExact(768);
             }
         });
         test("strategic: a blown bridge cuts the road and stops the dead", new T() {
@@ -872,40 +936,7 @@ public final class Tests {
         });
         test("director: a replay rebuilds the same outbreak", new T() {
             public void run() throws Exception {
-                World w = Setup.newGame(content, 768, RegionGen.COAST, 77, content.scenario("lab_leak"), 2, Roles.GOD, 60000);
-                camOver(w, Setup.originX, Setup.originY);
-                // a session: paint, place, strike, pan, fast-forward and back
-                for (int k = 0; k < 20 * 20; k++) w.step();
-                Actions.paint(w, Setup.originX + 200, Setup.originY, 300, 200, -1);
-                Squads.Squad s = Actions.squad(w, "swat", 8, Setup.originX - 150, Setup.originY);
-                for (int k = 0; k < 15 * 20; k++) w.step();
-                if (s != null) Actions.order(w, s, Setup.originX + 120, Setup.originY);
-                camOver(w, Setup.originX + 500, Setup.originY + 300);
-                Actions.strike(w, Setup.originX + 900, Setup.originY + 600);
-                Actions.curfew(w, true);
-                for (int k = 0; k < 20 * 20; k++) w.step();
-                w.camDetail = false;
-                Actions.strategic(w, true);
-                for (int k = 0; k < 60; k++) w.step();
-                Actions.strategic(w, false);
-                camOver(w, Setup.originX, Setup.originY);
-                for (int k = 0; k < 10 * 20; k++) w.step();
-                check(w.director.events.size() > 5, "only " + w.director.events.size() + " inputs recorded");
-                Replay r = Replay.of(content, w, 2);
-                r.runTo(w.tick);
-                check(r.w.tick == w.tick, "ticks differ");
-                check(Audit.hash(r.w) == Audit.hash(w), "the replay came out different");
-                // and through a file
-                ByteArrayOutputStream bo = new ByteArrayOutputStream();
-                Replay.save(w, bo);
-                Replay r2 = Replay.load(content, new ByteArrayInputStream(bo.toByteArray()), 1);
-                r2.runTo(w.tick);
-                check(Audit.hash(r2.w) == Audit.hash(w), "the replay from a file came out different");
-                check(bo.size() < 200000, "replay is " + bo.size() / 1024 + " KB");
-                check(!w.director.lapseTime.isEmpty(), "no timelapse frames");
-                w.shutdown();
-                r.w.shutdown();
-                r2.w.shutdown();
+                replayExact(768);
             }
         });
         test("roles: each role gets its own piece", new T() {
@@ -2180,9 +2211,9 @@ public final class Tests {
                 check(u.broken >= 2, "broken count " + u.broken);
                 check(Audit.hash(ws[0]) == Audit.hash(ws[1]), "1 and 2 threads differ");
                 // the paths caught up: the navigation grid matches one built from scratch
-                byte[] nav = w.r.nav.clone();
+                byte[] nav = w.r.navCopy();
                 w.r.rebuildNav(0, 0, w.r.W - 1, w.r.H - 1);
-                check(java.util.Arrays.equals(nav, w.r.nav), "navigation grid not updated after the break");
+                check(java.util.Arrays.equals(nav, w.r.navCopy()), "navigation grid not updated after the break");
                 // and the dead come through to them
                 boolean through = false;
                 for (int k = 0; k < 20 * 30 && !through; k++) {
@@ -2327,7 +2358,7 @@ public final class Tests {
                     if (s % 100 == 0) check(Audit.hash(l) == Audit.hash(w), "diverged " + s + " steps after loading");
                 }
                 check(l.undead.damage.equals(w.undead.damage) && l.undead.broken == w.undead.broken, "barricade damage diverged");
-                check(l.r.checksum() == w.r.checksum() && java.util.Arrays.equals(l.r.nav, w.r.nav), "the map diverged");
+                check(l.r.checksum() == w.r.checksum() && java.util.Arrays.equals(l.r.navCopy(), w.r.navCopy()), "the map diverged");
                 check(Audit.check(l).isEmpty(), Audit.check(l));
                 w.shutdown();
                 l.shutdown();
@@ -2402,6 +2433,82 @@ public final class Tests {
             }
         });
         scaleTests();
+        sparseTests();
+    }
+
+    // ------------------------------------------------------------------ active-area paging (docs/SCALE_PLAN.md P2)
+
+    private static void sparseTests() {
+        test("sim: the same game on 1 and 4 threads (sparse, 1024)", new T() {
+            public void run() throws Exception {
+                sparse(new T() {
+                    public void run() {
+                        simThreads(1024);
+                    }
+                });
+            }
+        });
+        test("sim: everyone accounted for with no dead about (sparse, 1024)", new T() {
+            public void run() throws Exception {
+                sparse(new T() {
+                    public void run() {
+                        simAccounted(1024);
+                    }
+                });
+            }
+        });
+        test("save: a loaded game plays on exactly the same (sparse, 1024)", new T() {
+            public void run() throws Exception {
+                sparse(new T() {
+                    public void run() throws Exception {
+                        saveExact(1024);
+                    }
+                });
+            }
+        });
+        test("director: a replay rebuilds the same outbreak (sparse, 1024)", new T() {
+            public void run() throws Exception {
+                sparse(new T() {
+                    public void run() throws Exception {
+                        replayExact(1024);
+                    }
+                });
+            }
+        });
+        test("sparse: chunks follow everyone, leave when quiet, and cars cross the rest in transit", new T() {
+            public void run() throws Exception {
+                sparse(new T() {
+                    public void run() {
+                        World w = game(9, 1024, "sandbox", 2);
+                        check(w.act.sparse, "not sparse");
+                        Region.Settlement c = w.r.city();
+                        float x = c.cx * 16f, y = c.cy * 16f;
+                        camOver(w, x, y);
+                        long before = Audit.people(w);
+                        play(w, 30, true);
+                        // a small outbreak away from the stations: the police drive out to it
+                        Tools.paintZombies(w, x + 300, y + 200, 30, 120, w.c.ztype("walker").index);
+                        int most = 0;
+                        for (int s = 0; s < 90; s++) {
+                            play(w, 1, false);
+                            most = Math.max(most, w.act.activeCount());
+                            check(Audit.check(w).isEmpty(), "audit at t=" + (int) w.time + ": " + Audit.check(w));
+                        }
+                        check(most < w.act.pages / 2, "most of the map active: " + most + " of " + w.act.pages);
+                        check(w.act.left > 0, "no chunk ever left the set");
+                        check(w.veh.transitSteps > 0, "no vehicle went into transit");
+                        check(Audit.people(w) == before, "people " + Audit.people(w) + " vs " + before);
+                        // the scent and the foot paths stop at the active chunks
+                        for (int p = 0; p < w.act.pages; p++) {
+                            if (w.act.active(p)) continue;
+                            int x0 = (p % w.act.pw) * 32, y0 = (p / w.act.pw) * 32;
+                            for (int k = 0; k < 1024; k += 37) check(w.flow.atCell(x0 + k % 32, y0 + k / 32) == Flow.INF, "scent on an inactive chunk");
+                        }
+                        w.shutdown();
+                    }
+                });
+            }
+        });
     }
 
     // ------------------------------------------------------------------ real scale (docs/SCALE_PLAN.md P0 and P5)

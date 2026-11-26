@@ -7,7 +7,7 @@ import java.util.List;
  * One running outbreak: the region, everyone in it, and the order things happen in each step.
  *
  * A step is 1/20 s of game time:
- * 1. once a second: the sectors (the people and the dead not simulated one by one), command, logistics,
+ * 1. once a second: the active chunks (ActiveSet), the sectors (the people and the dead not simulated one by one), command, logistics,
  *    government, news, statistics;
  * 2. the spatial grid, and twice a second the scent field;
  * 3. squads decide (one decision per squad, in order);
@@ -25,6 +25,8 @@ public final class World {
     public final Region r;
     public final long seed;
     public final Ents e;
+    /** The chunks the street-level simulation reads (all of them on today's maps). */
+    public final ActiveSet act;
     public final Spatial sp;
     public final Flow flow;
     public final NavPath nav;
@@ -95,14 +97,21 @@ public final class World {
     final Combat combat;
 
     public World(Content c, Region r, long seed, int threads) {
+        this(c, r, seed, threads, ActiveSet.sparseDefault);
+    }
+
+    /** sparse: only the chunks the simulation needs are active (on today's maps every chunk is, unless a test asks). */
+    World(Content c, Region r, long seed, int threads, boolean sparse) {
         this.c = c;
         this.r = r;
         this.seed = seed;
         rng = new Rng(seed ^ 0x5EEDL);
         e = new Ents(8192);
-        sp = new Spatial(r);
-        flow = new Flow(r);
-        nav = new NavPath(r);
+        act = new ActiveSet(this, sparse);
+        if (sparse) e.act = act;
+        sp = new Spatial(r, act);
+        flow = new Flow(r, act);
+        nav = new NavPath(r, act);
         fx = new Effects();
         doors();
         sec = new Sectors(this);
@@ -237,6 +246,7 @@ public final class World {
         tick++;
         time += DT;
         if (tick % 20 == 0) secondly(1f);
+        else if (act.fresh) act.update(); // a new sparse game's first step
         sp.build(e);
         if (tick % 10 == 1) flow.build(this);
         sq.update();
@@ -261,6 +271,7 @@ public final class World {
     }
 
     private void secondly(float dt) {
+        if (!strategic) act.update();
         sec.update(dt);
         if (!strategic) disp.update();
         mil.update(dt);
