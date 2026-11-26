@@ -527,7 +527,7 @@ public final class Game {
             for (int i = 0; i < RegionGen.SIZES.length; i++) if (RegionGen.SIZES[i] == size) si = i;
             // (a real-scale size isn't on the menu yet: a code is the hidden way to one)
             boolean nat = national(size) || size == SMALL_NATIONAL;
-            if ((si < 0 && !nat) || preset < 0 || preset >= RegionGen.PRESETS.length) return false;
+            if ((si < 0 && !nat) || preset < 0 || preset >= Data.presetCount()) return false;
             if (si >= 0) ngSize = si;
             ngNational = nat ? size : 0;
             ngPreset = preset;
@@ -653,7 +653,7 @@ public final class Game {
         ry += Math.min(dh, ui.dp(12) * 1.3f * 5) + ui.dp(12);
         // the map
         float bw = (rightW - ui.dp(16)) / 3;
-        ui.button("preset", rightX, ry, bw, ui.dp(40), RegionGen.PRESETS[ngPreset], false, 13);
+        ui.button("preset", rightX, ry, bw, ui.dp(40), Data.presetName(ngPreset), false, 13);
         ui.button("size", rightX + bw + ui.dp(8), ry, bw, ui.dp(40), ngSizeName(), false, 13);
         ui.button("seed", rightX + (bw + ui.dp(8)) * 2, ry, bw, ui.dp(40), "New map", false, 13);
         ry += ui.dp(46);
@@ -911,7 +911,7 @@ public final class Game {
         closeWorld();
         loadingFrom = S_NEW;
         screen = S_LOADING;
-        loadingText = "Building " + ngSizeName().toLowerCase() + " (" + RegionGen.PRESETS[preset].toLowerCase() + ")...";
+        loadingText = "Building " + ngSizeName().toLowerCase() + " (" + Data.presetName(preset).toLowerCase() + ")...";
         loaded = null;
         loadError = null;
         final int gen = ++loadGen;
@@ -3914,7 +3914,7 @@ public final class Game {
                 scroll = 0;
                 return;
             case "start": start(); return;
-            case "preset": ngPreset = (ngPreset + 1) % RegionGen.PRESETS.length; return;
+            case "preset": ngPreset = (ngPreset + 1) % Data.presetCount(); return;
             case "size": ngSize = (ngSize + 1) % RegionGen.SIZES.length; ngNational = 0; return;
             case "seed": ngSeed = (ngSeed * 1103515245L + 12345L + System.nanoTime()) % 1000000L; if (ngSeed < 0) ngSeed = -ngSeed; return;
             case "pause": screen = S_PAUSE; return;
@@ -5133,7 +5133,7 @@ public final class Game {
             body.append(floors <= 0 ? ". " : "; about " + WorldView.people(Math.min(in, res * 3)) + " sheltering inside now. ");
         }
         if (w.fires.heat(b) > 0) body.append("On fire. ");
-        return new String[]{Region.BNAMES[kind], sub, body.toString()};
+        return new String[]{Data.buildingName(kind), sub, body.toString()};
     }
 
     /** A district's people indoors and out, the dead, the bitten, home count and fires: {people, dead, infected, homes, fires}. */

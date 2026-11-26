@@ -874,23 +874,9 @@ public final class ChunkGen {
         } else out.add(new int[]{x0, y0, x1, y1});
     }
 
+    /** A new building's roof on a national map: one of its kind's colours (content.ini's [building] roofs@national). */
     static int roof(int kind, Rng r) {
-        int[] pal;
-        switch (kind) {
-            case Region.B_HOUSE: pal = new int[]{0xFF9A5B44, 0xFF7E5A4A, 0xFF6B6F78, 0xFF8C4A3C, 0xFF5E5A56, 0xFFA0785A}; break;
-            case Region.B_APARTMENT: pal = new int[]{0xFF8A8580, 0xFF7C7670, 0xFF9C948A, 0xFF6E6A66, 0xFFA08A78}; break;
-            case Region.B_OFFICE: pal = new int[]{0xFF7A8088, 0xFF8C9298, 0xFF6C737C, 0xFF9AA0A6}; break;
-            case Region.B_TOWER: pal = new int[]{0xFF5E6A78, 0xFF6E7A88, 0xFF4E5866, 0xFF80909E}; break;
-            case Region.B_SHOP: pal = new int[]{0xFFA89A84, 0xFF9C8C74, 0xFFB4A48A}; break;
-            case Region.B_WAREHOUSE: pal = new int[]{0xFF8E9296, 0xFF7E8488, 0xFF9AA0A0, 0xFF8A8270}; break;
-            case Region.B_FARMHOUSE: pal = new int[]{0xFF8C4A3C, 0xFF6E5040}; break;
-            case Region.B_BARN: return 0xFF9A3A2E;
-            case Region.B_CHURCH: return 0xFF7A6A5A;
-            case Region.B_SCHOOL: return 0xFFA07A5A;
-            case Region.B_MALL: return 0xFFA8A8A0;
-            default: return 0xFF888888;
-        }
-        return pal[r.nextInt(pal.length)];
+        return Data.roof(kind, r, true);
     }
 
     // ------------------------------------------------------------------ 6. farmsteads

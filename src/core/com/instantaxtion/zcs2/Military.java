@@ -150,7 +150,7 @@ public final class Military {
         }
         // national mobilisation: a new formation every few game hours while the army is short of that
         if (w.gov.level >= 4 && regularT <= 0 && room && dead > 1500 && soldiers < want) {
-            String[] kinds = {"infantry", "armour", "infantry", "artillery"};
+            String[] kinds = Data.outside("mobilise", new String[]{"infantry"}); // (content.ini's [outside] mobilise)
             arrive(kinds[regularsArrived % kinds.length], "Army");
             regularsArrived++;
             regularT = w.c.rule("mobiliseEvery", 240);

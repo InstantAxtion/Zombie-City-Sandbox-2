@@ -62,6 +62,8 @@ public final class World {
     public final Orders orders;
     public final Roles roles;
     public final Director director;
+    /** The scenario's triggers and goals, or null when it has none (Script.attach). */
+    public Script script;
     public final Recovery recovery;
     /** What the dead do beyond chasing and biting (smashing, feeding, alphas, lunges), and its state. */
     public final Undead undead;

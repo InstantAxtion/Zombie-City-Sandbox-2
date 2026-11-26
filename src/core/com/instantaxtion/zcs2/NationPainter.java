@@ -248,14 +248,14 @@ public final class NationPainter {
 
     // ------------------------------------------------------------------ blocks, as their district builds them
 
-    // roof palettes (ChunkGen.roof's)
-    private static final int[] P_HOUSE = {0xFF9A5B44, 0xFF7E5A4A, 0xFF6B6F78, 0xFF8C4A3C, 0xFF5E5A56, 0xFFA0785A};
-    private static final int[] P_APT = {0xFF8A8580, 0xFF7C7670, 0xFF9C948A, 0xFF6E6A66, 0xFFA08A78};
-    private static final int[] P_OFFICE = {0xFF7A8088, 0xFF8C9298, 0xFF6C737C, 0xFF9AA0A6};
-    private static final int[] P_TOWER = {0xFF5E6A78, 0xFF6E7A88, 0xFF4E5866, 0xFF80909E};
-    private static final int[] P_SHOP = {0xFFA89A84, 0xFF9C8C74, 0xFFB4A48A};
-    private static final int[] P_SHED = {0xFF8E9296, 0xFF7E8488, 0xFF9AA0A0, 0xFF8A8270};
-    private static final int P_SCHOOL = 0xFFA07A5A, P_CHURCH = 0xFF7A6A5A;
+    // roof palettes (ChunkGen.roof's: content.ini's [building] roofs@national)
+    private final int[] P_HOUSE = Data.roofs(Region.B_HOUSE, true);
+    private final int[] P_APT = Data.roofs(Region.B_APARTMENT, true);
+    private final int[] P_OFFICE = Data.roofs(Region.B_OFFICE, true);
+    private final int[] P_TOWER = Data.roofs(Region.B_TOWER, true);
+    private final int[] P_SHOP = Data.roofs(Region.B_SHOP, true);
+    private final int[] P_SHED = Data.roofs(Region.B_WAREHOUSE, true);
+    private final int P_SCHOOL = Data.roofs(Region.B_SCHOOL, true)[0], P_CHURCH = Data.roofs(Region.B_CHURCH, true)[0];
 
     private static int pick(int[] pal, long h) {
         return pal[(int) ((h >>> 33) % pal.length)];

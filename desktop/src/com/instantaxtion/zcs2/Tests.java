@@ -777,7 +777,7 @@ public final class Tests {
         test("region: every preset and size builds", new T() {
             public void run() {
                 for (int size : new int[]{768, 1024}) {
-                    for (int p = 0; p < RegionGen.PRESETS.length; p++) {
+                    for (int p = 0; p < Data.presetCount(); p++) {
                         Region r = RegionGen.generate(size, p, 100 + p);
                         check(r.settlements.get(0).kind == Region.S_CITY, "a city first");
                         int towns = 0, bases = 0;
@@ -786,7 +786,7 @@ public final class Tests {
                             if (s.kind == Region.S_BASE) bases++;
                             check(s.hubNode >= 0 || s.kind == Region.S_VILLAGE, s.name + " has no centre junction");
                         }
-                        check(towns >= 2, RegionGen.PRESETS[p] + " " + size + ": towns " + towns);
+                        check(towns >= 2, Data.presetName(p) + " " + size + ": towns " + towns);
                         check(bases == 1, "one army base, got " + bases);
                         check(r.city().residents > 5000, "the city has people: " + r.city().residents);
                         check(r.entryNodes.size() >= 2, "roads out of the region");
@@ -3357,7 +3357,7 @@ public final class Tests {
                                 if (w.r.bfloors(b) <= 0 || w.r.building((int) (bx / Tile.SIZE), (int) (by / Tile.SIZE)) != b) continue;
                                 check(Game.buildingAt(w, bx, by) == b, "a tap on building " + Integer.toHexString(b) + " found " + Integer.toHexString(Game.buildingAt(w, bx, by)));
                                 String[] d = Game.describeBuilding(w, b);
-                                check(d != null && d[0].equals(Region.BNAMES[w.r.bkind(b)]), "the sheet of building " + b + " names it " + (d == null ? null : d[0]));
+                                check(d != null && d[0].equals(Data.buildingName(w.r.bkind(b))), "the sheet of building " + b + " names it " + (d == null ? null : d[0]));
                                 tapped++;
                             }
                         }
@@ -3517,7 +3517,7 @@ public final class Tests {
         });
         test("nation: every place can be reached by road, on every preset", new T() {
             public void run() {
-                for (int p = 0; p < RegionGen.PRESETS.length; p++) {
+                for (int p = 0; p < Data.presetCount(); p++) {
                     Nation n = p == RegionGen.COAST ? country() : NationGen.generate(20480, p, 10 + p, 2);
                     RoadGraph g = n.roads;
                     boolean[] seen = new boolean[g.nodeCount];
@@ -3535,8 +3535,8 @@ public final class Tests {
                             }
                         }
                     }
-                    for (Region.Settlement s : n.settlements) check(s.hubNode >= 0 && seen[s.hubNode], RegionGen.PRESETS[p] + ": no road to " + s.name);
-                    check(t == g.nodeCount, RegionGen.PRESETS[p] + ": " + (g.nodeCount - t) + " junctions cut off");
+                    for (Region.Settlement s : n.settlements) check(s.hubNode >= 0 && seen[s.hubNode], Data.presetName(p) + ": no road to " + s.name);
+                    check(t == g.nodeCount, Data.presetName(p) + ": " + (g.nodeCount - t) + " junctions cut off");
                     for (Region.Facility f : n.facilities) check(f.node >= 0, f.name + " has no junction");
                     check(n.entryNodes.size() >= 2 && n.railEntries.size() >= 1, "roads and rails from abroad");
                     for (int e : n.entryNodes) check(seen[e], "a road from abroad is cut off");
@@ -3751,7 +3751,7 @@ public final class Tests {
                         check(c.bres[b] >= 0, "negative residents");
                         for (int y = c.by[b]; y < c.by[b] + c.bh[b]; y++)
                             for (int x = c.bx[b]; x < c.bx[b] + c.bw[b]; x++) {
-                                check(!wet[y * 64 + x], Region.BNAMES[c.bkind[b]] + " on water in chunk " + p[0] + "," + p[1]);
+                                check(!wet[y * 64 + x], Data.buildingName(c.bkind[b]) + " on water in chunk " + p[0] + "," + p[1]);
                                 check(c.bld[y * 64 + x] == b + 1 && c.t(x, y) == Tile.BUILDING, "a building's tiles");
                             }
                         check(c.doorX[b] >= 0 && Tile.walkable(c.t(c.doorX[b], c.doorY[b])), "a building without a door");
@@ -3760,7 +3760,7 @@ public final class Tests {
                     }
                     for (int i = 0; i < Chunk.AREA; i++) {
                         int v = c.bld[i];
-                        if (v < 0) check(!wet[i], "national building " + Region.BNAMES[n.bkind[-v - 1]] + " on water in chunk " + p[0] + "," + p[1]);
+                        if (v < 0) check(!wet[i], "national building " + Data.buildingName(n.bkind[-v - 1]) + " on water in chunk " + p[0] + "," + p[1]);
                     }
                     people += c.residents();
                     buildings += c.bCount;
