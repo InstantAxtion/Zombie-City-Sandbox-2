@@ -59,10 +59,17 @@ one person.
     evacuate it. In a campaign your goal is your own district and its station: the other stations leave its calls
     to you.
   - *Squad leader*: one squad; tell it where to go (in a campaign: put down sixty of the dead and keep it alive).
-  - *Police officer*: one officer with a patrol following; move with the stick, you shoot by yourself (in a
-    campaign: get to the scene of four 911 calls and live).
-  - *Survivor*: one person; move with the stick, survive (in a campaign: reach the army base, an evacuation point,
-    a survivor settlement or the boats on the shore).
+  - *Police officer*: one officer with a patrol following; move with the stick, you shoot by yourself, with the
+    survivor's shove and a baton, weapons, tap-to-aim and cars (in a campaign: get to the scene of four 911 calls
+    and live).
+  - *Survivor*: one person at street level. Move with the stick (all the way to sprint, on your breath); hide in a
+    building and barricade the door so the dead must break it in; search buildings (once each: homes, shops,
+    police stations and hospitals hold different things, and a street runs dry) for food, water, medkits, tools,
+    fuel and guns; keep fed, watered and rested; shove the dead off, or use a bat or crowbar; carry several weapons,
+    each with its own rounds, and tap to aim when you want to choose; drive a parked or abandoned car on what's in
+    its tank (the dead mob a slow one); take up to three people with you, who follow, stay or carry, and can be
+    bitten and turn. A card shows your needs, your weapon and the nearest safe place; the Kit holds the rest. Get
+    to the army base, an evacuation point, a survivor settlement (and join it) or the boats on the shore.
 - **Scenarios and campaigns.** Sandbox starts: an open country, a lab leak, a crashed airliner, a prison riot, a
   summer festival, a ship in the port, somewhere random. Campaigns: hold the capital for 30 days, evacuate the
   coast, retake a fallen state, protect the capital from hordes of tens of thousands. A campaign's progress (and
@@ -132,11 +139,13 @@ The game is plain Java with no libraries and no game engine.
 The tests and `play.sh` only need Java 8 or newer. CI (`.github/workflows/build-apk.yml`) runs the tests and
 builds the APK on every push.
 
-Headless tools (run from the repository root, with `build/test` on the classpath): `Probe` (an outbreak of any
+Headless tools (run from the repository root, with `build/test` on the classpath): `SurvivalBot [seeds] [size] [days]`
+(a scripted survivor against an idle one: how often each reaches safety), `Probe` (an outbreak of any
 size, printing the numbers; `STRAT=days` then fast-forwards, `OVERLAP=1` counts vehicles standing on each other), `Shot` (the world at five zooms), `UiShot` (the
 interface driven by scripted taps; `UiShot dir 1080 2400 2.75` shoots a phone in portrait, `UiShot dir 2400 1080
 2.75` sideways, and `UiShot dir 1080 2400 2.75 director` walks the roles, campaigns, editor, layers, the hand-over
-to the general, the timelapse and replays).
+to the general, the timelapse and replays; `UiShot dir 1080 2400 2.75 survival` the survivor's card, Kit, a
+building, a car and companions).
 
 `tools/balance.sh 5000,50000,100000,250000 8 2304 30 4` plays each outbreak size on many seeds in fast-forward
 and prints the spread of outcomes (days to contain or fall, share of the country lost, losses); every run goes to

@@ -21,6 +21,8 @@ public final class SurvivalBot {
     private float lastX, lastY;
     public String log = "";
     static final int DEBUG_EVERY = Integer.parseInt(System.getenv().containsKey("BOTEVERY") ? System.getenv("BOTEVERY") : "120");
+    /** BOTNOCAR: the competent survivor walks (no cars), to see the rest of it at work. */
+    static final boolean NOCAR = System.getenv("BOTNOCAR") != null;
     static final boolean DEBUG = System.getenv("BOTDEBUG") != null;
 
     public SurvivalBot(World w) {
@@ -133,7 +135,7 @@ public final class SurvivalBot {
             return;
         }
         if (second && s.can(Survival.PICKUP)) Actions.survival(w, Survival.PICKUP);
-        if (second && s.can(Survival.CAR) && around < 4) {
+        if (second && !NOCAR && s.can(Survival.CAR) && around < 4) {
             int v = s.carNear(px, py);
             if (v >= 0) {
                 Actions.survival(w, Survival.CAR);
@@ -152,7 +154,7 @@ public final class SurvivalBot {
         // a car close by: get to it
         int v = s.carNear(px, py);
         if (v < 0) v = carWithin(px, py, 260);
-        if (v >= 0 && around < 3) {
+        if (v >= 0 && around < 3 && !NOCAR) {
             toward(w.veh.x[v], w.veh.y[v], 20);
             return;
         }
