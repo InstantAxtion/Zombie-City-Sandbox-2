@@ -2098,7 +2098,8 @@ public final class Game {
             case "police": return placeTemplate != null ? "Tap the map to place the squad and its vehicle" : placeVehicle != null ? "Tap a road to place the vehicle" : "Tap the map to place a squad";
             case "army": return placeTemplate != null ? "Tap the map to place the squad and its vehicle" : placeVehicle != null ? "Tap a road to place the vehicle" : "Tap the map to place soldiers";
             case "strike": return "Tap where to aim, then confirm";
-            case "town": return "Tap a town: " + (townMode.equals("info") ? "see how it's doing" : townMode.equals("evac") ? "evacuate it" : townMode.equals("quar") ? "quarantine it" : "send the army");
+            case "town": return "Tap a town: " + (townMode.equals("info") ? "see how it's doing" : townMode.equals("evac") ? "evacuate it" : townMode.equals("quar") ? "quarantine it"
+                    : townMode.equals("corr") ? "open an escorted corridor out of it" : townMode.equals("amb") ? "should its ambulances take the bitten to hospital (and the infection with them)?" : "send the army");
             case "send": return "Pick who to send, then tap where they go";
             case "map": return "Layers of the national map";
             case "erase": return eraseMode.equals("town") ? "Tap a town: its counted dead are gone" : "Drag to clear the dead away, or clear everything of a kind";
@@ -2106,7 +2107,8 @@ public final class Game {
                 if (ordVeh >= 0 && w.veh.usable(ordVeh)) {
                     String vn = w.veh.type(ordVeh).name;
                     if (w.orders.drives(ordVeh)) return vn + ": drive it with the stick";
-                    return vn + ": tap where to " + (vehMode == Orders.VO_ORBIT ? "orbit" : vehMode == Orders.VO_ATTACK ? "attack" : "go");
+                    return vn + ": tap where to " + (vehMode == Orders.VO_ORBIT ? "orbit" : vehMode == Orders.VO_ATTACK ? "attack"
+                            : vehMode == Orders.VO_ASSAULT ? "fly a squad in" : vehMode == Orders.VO_EVAC ? "pick up whoever is there" : "go");
                 }
                 if (inspFormation != null && inspFormation.alive)
                     return Forces.shortName(inspFormation) + " (" + inspFormation.strength() + "): " + (underGeneral(inspFormation) ? "the general has it; tap where to send it to take it back"
@@ -2149,8 +2151,10 @@ public final class Game {
                 int lv = w.gov.level;
                 String[] row2 = {"curfew", w.gov.curfew ? "Lift curfew" : "Curfew", lv >= Gov.LEVELS.length - 1 ? "x:alert" : "n:alert", "Raise alert",
                         lv <= 0 ? "x:lower" : "n:lower", "Lower alert"};
-                String[] row3 = {"n:martial", lv >= 3 ? "Lift martial law" : "Martial law", "n:mobilise", lv >= 4 ? "End mobilisation" : "Mobilise"};
-                return new String[][]{row1, row2, row3};
+                String[] row3 = {"n:martial", lv >= 3 ? "Lift martial law" : "Martial law", "n:mobilise", lv >= 4 ? "End mobilisation" : "Mobilise",
+                        "n:airport", w.services.airportClosed ? "Open airport" : "Close airport"};
+                String[] row4 = {"tm:corr", "Escorted corridor", "tm:amb", "Bitten to hospital?"};
+                return new String[][]{row1, row2, row3, row4};
             }
             case "send": {
                 if (w.roles.target < 0) return null;
@@ -2178,6 +2182,9 @@ public final class Game {
             case "orders":
                 if (ordVeh >= 0 && w.veh.usable(ordVeh)) {
                     boolean flies = w.veh.type(ordVeh).flies, driving = w.orders.drives(ordVeh);
+                    if (w.services.transport(ordVeh))
+                        return new String[][]{{"vo:5", "Air assault", "vo:6", "Lift out", "vo:1", "Go here", "vo:4", "Return"},
+                                {"vo:drive", driving ? "Let go of the wheel" : "Take the wheel", "vo:done", "Done"}};
                     return new String[][]{{"vo:1", "Go here", flies ? "vo:2" : "x:vo2", "Orbit", "vo:3", "Attack area", "vo:4", "Return"},
                             {"vo:drive", driving ? "Let go of the wheel" : "Take the wheel", "vo:done", "Done"}};
                 }
@@ -2266,6 +2273,14 @@ public final class Game {
             items.add("Barricade");
             items.add("bd:wall");
             items.add("Wall");
+            if (w.roles.role == Roles.GOD || w.roles.commandsFormations()) {
+                items.add("bd:eng_wall");
+                items.add("Engineers: wall");
+                items.add("bd:eng_fob");
+                items.add("Engineers: FOB");
+                items.add("bd:eng_bridge");
+                items.add("Engineers: blow bridge");
+            }
             for (int k = 0; k < Defences.KINDS; k++) {
                 items.add("bd:" + Defences.IDS[k]);
                 items.add(Defences.NAMES[k]);
@@ -2281,6 +2296,9 @@ public final class Game {
         if (b.startsWith("bv:")) return "Tap a road to place the vehicle";
         String k = b.substring(3);
         if (k.equals("barricade") || k.equals("wall")) return "Drag to build a " + k + " the dead must smash through";
+        if (k.equals("eng_wall")) return "Tap a street: engineers drive out and wall it off (the dead can stop the work)";
+        if (k.equals("eng_fob")) return "Tap where engineers should build a forward base (ammunition, fuel, a field hospital)";
+        if (k.equals("eng_bridge")) return "Tap a bridge: engineers go out, mine it and blow it";
         if (k.equals("road")) return "Drag to lay a road";
         if (k.equals("clear")) return "Drag to clear rubble, trees and walls to open ground";
         if (k.equals("house")) return "Tap open ground to build a house";
@@ -4411,6 +4429,10 @@ public final class Game {
             // lifting martial law goes back to a state of emergency; ending mobilisation back to martial law
             case "n:martial": Actions.level(w, w.gov.level < 3 ? 3 : 2); return;
             case "n:mobilise": Actions.level(w, w.gov.level < 4 ? 4 : 3); return;
+            case "n:airport":
+                Actions.airport(w, !w.services.airportClosed);
+                toast(w.services.airportClosed ? "The airport is closed to civilian flights" : "The airport is open again");
+                return;
             case "m:jump": mapToggle(); return;
             case "aim:go": fireAimed(); return;
             case "aim:no": view.aimX = -1; return;
@@ -5232,6 +5254,13 @@ public final class Game {
                     toast(v >= 0 ? w.c.vtype(buildItem.substring(3)).name + " placed" : "No road near there");
                 } else if (buildItem.equals("bd:house")) {
                     if (Actions.build(w, Tools.B_HOUSE, x, y) == 0) toast("A house needs open ground, off the road");
+                } else if (buildItem.startsWith("bd:eng_")) {
+                    String k = buildItem.substring(7);
+                    int kind = k.equals("fob") ? Engineers.J_FOB : k.equals("bridge") ? Engineers.J_BRIDGE : Engineers.J_WALL;
+                    if (Actions.engineer(w, kind, x, y)) {
+                        ping(x, y);
+                        toast(kind == Engineers.J_BRIDGE ? "Engineers are on their way to the bridge" : "Engineers are on their way");
+                    } else toast(kind == Engineers.J_BRIDGE ? "Tap a bridge on a road" : "They can't build there");
                 } else {
                     String k = buildItem.substring(3);
                     int kind = -1;
@@ -5382,6 +5411,14 @@ public final class Game {
                 if (townMode.equals("evac") && town) Actions.evac(w, st, !w.gov.evacuating(st));
                 else if (townMode.equals("quar") && town) Actions.quarantine(w, st, !w.roles.quarantined(st));
                 else if (townMode.equals("army") && town) Actions.requestArmy(w, st);
+                else if (townMode.equals("corr") && town) {
+                    if (!w.gov.evacuating(st)) toast("Evacuate " + s.name + " first");
+                    else toast(Actions.corridor(w, st) ? "Corridor open from " + s.name : "No officers to spare, or a corridor is open already");
+                } else if (townMode.equals("amb") && town) {
+                    boolean admit = !w.services.admitsBitten(st);
+                    Actions.admitBitten(w, st, admit);
+                    toast(admit ? s.name + ": the bitten are taken to hospital" : s.name + ": the bitten are kept at home, not taken to hospital");
+                }
                 else {
                     closeInspector();
                     inspSettle = st;

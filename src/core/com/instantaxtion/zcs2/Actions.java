@@ -13,7 +13,8 @@ public final class Actions {
             DEPLOY = 17, ARTILLERY = 18, REQUEST_ARMY = 19, CAMERA = 20, STRATEGIC = 21, JOY = 22, FIRE = 23, MAX_IND = 24,
             WATCH = 25, ADD_PLAYER = 26, SWITCH_PLAYER = 27, GENERAL = 28, PRECINCT_CORDON = 29, PRECINCT_EVAC = 30,
             DEFENCE = 31, BUILD = 32, VEH_ORDER = 33, DRIVE = 34, POSSESS = 35, STANCE = 36, SQ_ORDER = 37, MOUNT = 38,
-            POSTURE = 39, RULE = 40, CLEAR = 41, TEMPLATE = 42, MASS = 43, SURV = 44, SEND = 45, MESSAGE = 46;
+            POSTURE = 39, RULE = 40, CLEAR = 41, TEMPLATE = 42, MASS = 43, SURV = 44, SEND = 45, MESSAGE = 46,
+            ENGINEER = 47, AIRPORT = 48, ADMIT = 49, CORRIDOR = 50;
 
     public static Object exec(World w, int kind, float[] f, int[] i, String s) {
         w.director.record(kind, f, i, s);
@@ -242,6 +243,10 @@ public final class Actions {
                 return best;
             }
             case MESSAGE: w.news.headline(e.s, f.length >= 2 ? f[0] : -1, f.length >= 2 ? f[1] : -1); return null;
+            case ENGINEER: return w.engineers.order(i[0], f[0], f[1]);
+            case AIRPORT: w.services.setAirport(i[0] != 0, true); return null;
+            case ADMIT: w.services.setAdmitBitten(i[0], i[1] != 0, true); return null;
+            case CORRIDOR: return w.services.openCorridor(i[0], true);
             default:
                 return null;
         }
@@ -303,6 +308,26 @@ public final class Actions {
 
     public static boolean formation(World w, Forces.Formation f, float x, float y) {
         return (Boolean) exec(w, FORM_ORDER, new float[]{x, y}, new int[]{f.id, -1}, null);
+    }
+
+    /** The engineers: a wall (Engineers.J_WALL) or a forward base here, or blow the bridge here. False if they can't. */
+    public static boolean engineer(World w, int kind, float x, float y) {
+        return (Boolean) exec(w, ENGINEER, new float[]{x, y}, new int[]{kind}, null);
+    }
+
+    /** The President closes the airport to civilian flights (or opens it again). */
+    public static void airport(World w, boolean closed) {
+        exec(w, AIRPORT, null, new int[]{closed ? 1 : 0}, null);
+    }
+
+    /** Whether a town's ambulances take the bitten to its hospital. */
+    public static void admitBitten(World w, int settlement, boolean admit) {
+        exec(w, ADMIT, null, new int[]{settlement, admit ? 1 : 0}, null);
+    }
+
+    /** An escorted evacuation corridor out of a town. */
+    public static boolean corridor(World w, int settlement) {
+        return (Boolean) exec(w, CORRIDOR, null, new int[]{settlement}, null);
     }
 
     public static void releaseFormation(World w, Forces.Formation f) {

@@ -24,6 +24,15 @@ public final class Navy extends Module {
         public float fx, fy, tx, ty, x, y;
     }
 
+    /** A coast guard boat seen coming in to a shore where people are being taken off (rule coastBoats). */
+    public static final class Boat {
+        public float x, y, sx, sy, tx, ty, head, t;
+        public int sector, phase, aboard;
+    }
+
+    public final List<Boat> boats = new ArrayList<Boat>();
+    private final boolean boatsOn;
+    public int boatTrips, boatCarried;
     public final List<Ship> ships = new ArrayList<Ship>();
     public final List<Flight> flights = new ArrayList<Flight>();
     private final boolean[] coastal;
@@ -67,6 +76,7 @@ public final class Navy extends Module {
         coastal = new boolean[w.sec.n];
         boolean[] deepHere = new boolean[w.sec.n];
         coastNews = new boolean[w.r.settlements.size()];
+        boatsOn = w.rule("coastBoats", 0) > 0;
         // which sectors touch open water (boats can come in)
         Region r = w.r;
         if (r.nation != null) coastNational(deepHere);
@@ -166,6 +176,10 @@ public final class Navy extends Module {
         ships(dt);
         coastGuard(dt);
         airlift(dt);
+        if (boatsOn) {
+            if (w.strategic) boats.clear();
+            else boats(dt);
+        }
     }
 
     private void ships(float dt) {
@@ -280,10 +294,97 @@ public final class Navy extends Module {
             sec.popIn[sec.touch(s)] -= k;
             w.strat.leftCountry(st, k);
             rescued += k;
+            // near the camera: the boats are seen coming in for them
+            if (boatsOn && !w.strategic && (sec.cam[s] || sec.hot[s] > 0)) launchBoat(s);
             if (!coastNews[st]) {
                 coastNews[st] = true;
                 w.news.radio("Coast guard and navy: boats are taking people off the shore at " + w.r.settlements.get(st).name, sec.cx(s), sec.cy(s), News.COMMAND);
             }
+        }
+    }
+
+    /** A boat comes in from the deep water off the shore of sector s (a few at a time, one for each stretch of shore). */
+    private void launchBoat(int s) {
+        if (boats.size() >= 6) return;
+        for (Boat b : boats) if (b.sector == s) return;
+        Sectors sec = w.sec;
+        float cx = sec.cx(s), cy = sec.cy(s);
+        float[] sea = sea(cx, cy, 3000);
+        if (sea == null) return;
+        // the shore: from the sea towards the street, the last water before the land
+        float dx = cx - sea[0], dy = cy - sea[1], d = (float) Math.sqrt(dx * dx + dy * dy) + 0.01f;
+        float tx = -1, ty = -1;
+        for (float k = 0; k < d; k += 12) {
+            float px = sea[0] + dx / d * k, py = sea[1] + dy / d * k;
+            if (!Tile.water(w.r.tileAtPx(px, py))) break;
+            tx = px;
+            ty = py;
+        }
+        if (tx < 0 || dist2(tx, ty, sea[0], sea[1]) < 60 * 60) return;
+        Boat b = new Boat();
+        b.sector = s;
+        b.sx = sea[0] + (Rng.unit(w.seed, w.tick, s * 5L + 1) - 0.5f) * 200;
+        b.sy = sea[1] + (Rng.unit(w.seed, w.tick, s * 5L + 2) - 0.5f) * 200;
+        if (!Tile.water(w.r.tileAtPx(b.sx, b.sy))) {
+            b.sx = sea[0];
+            b.sy = sea[1];
+        }
+        b.x = b.sx;
+        b.y = b.sy;
+        b.tx = tx;
+        b.ty = ty;
+        b.head = (float) Math.atan2(ty - b.sy, tx - b.sx);
+        boats.add(b);
+    }
+
+    private static float dist2(float ax, float ay, float bx, float by) {
+        return (ax - bx) * (ax - bx) + (ay - by) * (ay - by);
+    }
+
+    /** Boats run in to the shore, take whoever is waiting at the water's edge aboard, and head back out to sea. */
+    private void boats(float dt) {
+        Ents e = w.e;
+        float speed = 90;
+        for (int k = boats.size() - 1; k >= 0; k--) {
+            Boat b = boats.get(k);
+            b.t += dt;
+            float gx = b.phase == 0 ? b.tx : b.sx, gy = b.phase == 0 ? b.ty : b.sy;
+            float dx = gx - b.x, dy = gy - b.y, d = (float) Math.sqrt(dx * dx + dy * dy) + 0.01f;
+            if (b.phase == 1) {
+                // at the shore: people near the water's edge climb in
+                int c0 = w.sp.cellOf(b.x, b.y);
+                for (int j = w.sp.lStart[c0]; j < w.sp.lEnd[c0] && b.aboard < 20; j++) {
+                    int i = w.sp.lList[j];
+                    if (e.loc[i] != Ents.FREE || e.kind[i] != Ents.CIV || i == w.playerEnt || (e.flags[i] & (Ents.F_COMPANION | Ents.F_CREW)) != 0) continue;
+                    if (dist2(e.x[i], e.y[i], b.x, b.y) > 90 * 90 || !w.stats.resident(i)) continue;
+                    int st = w.sec.settlement[w.r.sectorOfPx(e.x[i], e.y[i])];
+                    // taken off: out of the country (the bitten among them too, unknowing)
+                    w.retire(i);
+                    w.strat.leftCountry(st, 1);
+                    rescued++;
+                    boatCarried++;
+                    b.aboard++;
+                }
+                if (b.t > 14) {
+                    b.phase = 2;
+                    b.head = (float) Math.atan2(b.sy - b.y, b.sx - b.x);
+                }
+                continue;
+            }
+            if (d < 14) {
+                if (b.phase == 0) {
+                    b.phase = 1;
+                    b.t = 0;
+                    boatTrips++;
+                } else {
+                    boats.remove(k);
+                }
+                continue;
+            }
+            float step = Math.min(d, speed * dt);
+            b.x += dx / d * step;
+            b.y += dy / d * step;
+            b.head = (float) Math.atan2(dy, dx);
         }
     }
 
@@ -380,6 +481,15 @@ public final class Navy extends Module {
         o.writeInt(rescued);
         o.writeInt(airlifts);
         o.writeFloat(targetT);
+        if (boatsOn) {
+            o.writeInt(boatTrips);
+            o.writeInt(boatCarried);
+            o.writeInt(boats.size());
+            for (Boat b : boats) {
+                o.writeFloat(b.x); o.writeFloat(b.y); o.writeFloat(b.sx); o.writeFloat(b.sy); o.writeFloat(b.tx); o.writeFloat(b.ty);
+                o.writeFloat(b.head); o.writeFloat(b.t); o.writeInt(b.sector); o.writeInt(b.phase); o.writeInt(b.aboard);
+            }
+        }
     }
 
     @Override
@@ -408,6 +518,18 @@ public final class Navy extends Module {
         rescued = in.readInt();
         airlifts = in.readInt();
         targetT = in.readFloat();
+        boats.clear();
+        if (in.available() > 0) {
+            boatTrips = in.readInt();
+            boatCarried = in.readInt();
+            n = in.readInt();
+            for (int k = 0; k < n; k++) {
+                Boat b = new Boat();
+                b.x = in.readFloat(); b.y = in.readFloat(); b.sx = in.readFloat(); b.sy = in.readFloat(); b.tx = in.readFloat(); b.ty = in.readFloat();
+                b.head = in.readFloat(); b.t = in.readFloat(); b.sector = in.readInt(); b.phase = in.readInt(); b.aboard = in.readInt();
+                boats.add(b);
+            }
+        }
     }
 
     private final float[] hull = new float[10];
@@ -440,6 +562,31 @@ public final class Navy extends Module {
             g.fillRect(-L * 0.1f, -W * 0.25f, L * 0.25f, W * 0.5f);
             g.restore();
             if (z < 0.3f) view.label(g, s.name, sx, sy - W - 5 * dp, 10, 0xFFE8F0FF, Gfx.ALIGN_CENTER, false);
+        }
+        // coast guard boats: orange and white, a wake behind them
+        for (Boat b : boats) {
+            float sx = cam.toScreenX(b.x), sy = cam.toScreenY(b.y);
+            if (sx < -60 * dp || sy < -60 * dp || sx > cam.sw + 60 * dp || sy > cam.sh + 60 * dp) continue;
+            float L = Math.max(10 * dp, 34 * z), W = Math.max(4 * dp, 12 * z);
+            g.save();
+            g.translate(sx, sy);
+            g.rotate(b.head);
+            if (b.phase != 1) {
+                g.color(0x60FFFFFF);
+                g.fillRect(-L * 1.6f, -W * 0.25f, L * 1.1f, W * 0.5f);
+            }
+            hull[0] = L / 2; hull[1] = 0; hull[2] = L / 4; hull[3] = -W / 2; hull[4] = -L / 2; hull[5] = -W / 2; hull[6] = -L / 2; hull[7] = W / 2; hull[8] = L / 4; hull[9] = W / 2;
+            g.color(0xFF0C0C0C);
+            g.save();
+            g.scale(1.15f);
+            g.fillPoly(hull, 5);
+            g.restore();
+            g.color(0xFFF07020);
+            g.fillPoly(hull, 5);
+            g.color(0xFFF4F4F4);
+            g.fillRect(-L * 0.25f, -W * 0.3f, L * 0.3f, W * 0.6f);
+            g.restore();
+            if (z > 0.15f) view.label(g, "Coast guard" + (b.aboard > 0 ? " (" + b.aboard + " aboard)" : ""), sx, sy - W - 8 * dp, 9.5f, 0xFFFFE0C0, Gfx.ALIGN_CENTER, false);
         }
         for (Flight f : flights) {
             float sx = cam.toScreenX(f.x), sy = cam.toScreenY(f.y);

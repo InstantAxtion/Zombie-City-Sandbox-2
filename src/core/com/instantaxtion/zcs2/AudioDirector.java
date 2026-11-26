@@ -120,7 +120,10 @@ final class AudioDirector {
     // vehicle classes, per vehicle type of this world
     private static final byte VC_NONE = 0, VC_CAR = 1, VC_TRUCK = 2, VC_TANK = 3, VC_HELI = 4, VC_PLANE = 5;
     private byte[] vClass = new byte[0];
-    private boolean[] vFire = new boolean[0];
+    private boolean[] vFire = new boolean[0], vAmb = new boolean[0];
+    /** Content has ambulances (Services): their sirens are real vehicles', not the one passing a few streets away. */
+    private boolean realAmb;
+    private float ambBest;
     private float[] vMax = new float[0];
     private Content vContent;
 
@@ -437,7 +440,9 @@ final class AudioDirector {
         int n = w.c.vtypes.size();
         vClass = new byte[n];
         vFire = new boolean[n];
+        vAmb = new boolean[n];
         vMax = new float[n];
+        realAmb = false;
         for (int k = 0; k < n; k++) {
             Content.VType t = w.c.vtypes.get(k);
             String id = t.id == null ? "" : t.id;
@@ -449,6 +454,8 @@ final class AudioDirector {
             else c = VC_CAR;
             vClass[k] = c;
             vFire[k] = id.equals("fire_engine");
+            vAmb[k] = id.equals("ambulance");
+            realAmb |= vAmb[k];
             vMax[k] = Math.max(1, t.speed);
         }
     }
@@ -460,8 +467,9 @@ final class AudioDirector {
 
     private void vehicles(World w, boolean fast) {
         for (int k = SL_POLICE; k <= SL_AIR; k++) {
-            if (k != SL_AMB) slotVol[k] = 0;
+            if (k != SL_AMB || realAmb) slotVol[k] = 0;
         }
+        ambBest = 0;
         if (fast) return;
         Vehicles v = w.veh;
         float polBest = 0, fireBest = 0;
@@ -476,7 +484,16 @@ final class AudioDirector {
             float x = v.x[i], y = v.y[i];
             boolean air = c == VC_HELI || c == VC_PLANE;
             if (air && v.alt[i] < 0.05f) continue;
-            if (v.siren[i]) {
+            if (v.siren[i] && vAmb[t]) {
+                // an ambulance: its own siren, on its own loop
+                float g = gainAt(x, y, 2800);
+                if (g > ambBest) {
+                    ambBest = g;
+                    slotPan[SL_AMB] = panOut;
+                    slotPitch[SL_AMB] = doppler(v, i);
+                }
+                if (g > 0.01f) best[SL_AMB] = Math.max(best[SL_AMB], g) + Math.min(g, best[SL_AMB]) * 0.15f;
+            } else if (v.siren[i]) {
                 float g = gainAt(x, y, 2800);
                 if (g > 0.01f) {
                     float pitch = doppler(v, i);
@@ -511,6 +528,10 @@ final class AudioDirector {
         }
         slotVol[SL_POLICE] = Math.min(0.55f, slotVol[SL_POLICE] * 0.5f);
         slotVol[SL_FIRE] = Math.min(0.55f, slotVol[SL_FIRE] * 0.5f);
+        if (realAmb) {
+            slotVol[SL_AMB] = Math.min(0.5f, slotVol[SL_AMB] * 0.5f);
+            if (ambBest > 0.15f) caption("Ambulance siren", slotPan[SL_AMB]);
+        }
         slotVol[SL_ENGINE] = Math.min(0.4f, slotVol[SL_ENGINE] * 0.35f);
         slotVol[SL_TRUCK] = Math.min(0.45f, slotVol[SL_TRUCK] * 0.4f);
         slotVol[SL_TRACKS] = Math.min(0.55f, slotVol[SL_TRACKS] * 0.55f);
@@ -758,9 +779,11 @@ final class AudioDirector {
                 if (near) vibrate(70);
             }
         }
-        // an ambulance passing a few streets away, in a town with trouble in it
+        // an ambulance passing a few streets away, in a town with trouble in it (unless the ambulances are real)
         boolean trouble = w.sp.zCount > 0 || w.gov.level >= 1;
-        if (ambT >= 0) {
+        if (realAmb) {
+            ambT = -1;
+        } else if (ambT >= 0) {
             ambT += dt;
             float u = ambT / 12f;
             if (u >= 1) {

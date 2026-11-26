@@ -1202,7 +1202,8 @@ public final class Vehicles implements ActiveSet.Paged {
             return;
         }
         head[v] = (float) Math.atan2(dy, dx);
-        float s = Math.min(t.speed, d * 1.5f + 20) * dt;
+        // (on national maps aircraft cross the country at airSpeed; today's maps keep each type's own speed)
+        float s = Math.min(w.national ? w.rule("airSpeed", t.speed) : t.speed, d * 1.5f + 20) * dt;
         x[v] += dx / d * s;
         y[v] += dy / d * s;
         fuel[v] -= dt / 900f;

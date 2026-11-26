@@ -971,8 +971,7 @@ public final class Services extends Module {
         Squads.Squad s = w.forces.deploy(best, t);
         if (s == null) return;
         s.task = TASK_CHECKPOINT;
-        Tools.orderSquad(w, s, x, y);
-        s.order = Squads.O_GUARD;
+        w.sq.order(s, Squads.O_GUARD, x, y);
         c.squad = s.id;
         w.news.count("ckpt:" + c.settlement, w.r.settlements.get(c.settlement).name + ": police are manning a checkpoint on the road out|"
                 + w.r.settlements.get(c.settlement).name + ": %d more checkpoint{s} manned", 1, x, y);
@@ -1122,8 +1121,7 @@ public final class Services extends Module {
         Squads.Squad sq = w.forces.deploy(police, t);
         if (sq == null) return;
         sq.task = TASK_RESCUE;
-        Tools.orderSquad(w, sq, door[0], door[1]);
-        sq.order = Squads.O_HOLD;
+        w.sq.order(sq, Squads.O_HOLD, door[0], door[1]);
         float[] yard = w.r.openGroundNear(depot.x, depot.y, true);
         int v = w.veh.add(bus, yard[0], yard[1], 0, depot.id);
         if (!w.veh.driveTo(v, door[0], door[1], 0)) {
@@ -1304,7 +1302,7 @@ public final class Services extends Module {
                 int p = w.sec.popIn[c.sector];
                 f.food = Math.max(0, f.food - p * campT / 1440f);
                 if (f.food <= 0 && p > 200) {
-                    w.sec.panic[c.sector] = Math.min(1, w.sec.panic[c.sector] + 0.05f);
+                    w.sec.panic[w.sec.touch(c.sector)] = Math.min(1, w.sec.panic[c.sector] + 0.05f);
                     w.gov.trust = Math.max(0, w.gov.trust - 0.01f * campT / 60f);
                     w.news.radio("hungry:" + c.facility, c.name + " has run out of food. Aid agencies are asking for convoys", c.x, c.y, News.COMMAND, 2880);
                 }

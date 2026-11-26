@@ -1330,10 +1330,12 @@ public final class Tests {
                         // P9b: mechanics that are off (or as before) on today's maps, and balance numbers on national maps
                         "hordeArrivePeople", 0f, "overrunRatio", 20f, "wanderOver", 0f, "refugeeCarShare", 0f, "reachScale", 1f,
                         "formationRefront", 0f, "aggregateKill", 0.014f, "findHalf", 300f, "sweepBelow", 4000f, "sweepRate", 1f,
-                        "sweepPeakShare", 0f, "hiddenSpread", 1f, "maxFormations", 22f, "edgeHordeRing", 0f, "interceptWaiting", 1f};
+                        "sweepPeakShare", 0f, "hiddenSpread", 1f, "maxFormations", 22f, "edgeHordeRing", 0f, "interceptWaiting", 1f,
+                        // the air and emergency services (new: their plain values are the code defaults)
+                        "airReach", 9000f, "ambulanceReach", 3500f, "corridorWidth", 1500f};
                 // national only: today the code uses the type's own speed ([formation] speed, the destroyer's, the
                 // transport plane's), or has no such rule yet (tactical moves, evacuation per highway exit)
-                List<String> only = java.util.Arrays.asList("formationSpeed", "formationTactical", "warshipSpeed", "airliftSpeed", "evacPerHourPerExit");
+                List<String> only = java.util.Arrays.asList("formationSpeed", "formationTactical", "warshipSpeed", "airliftSpeed", "evacPerHourPerExit", "airSpeed");
                 java.util.Map<String, Float> was = new java.util.HashMap<String, Float>();
                 for (int k = 0; k < old.length; k += 2) was.put((String) old[k], (Float) old[k + 1]);
                 List<String> keys = content.nationalRuleKeys();
