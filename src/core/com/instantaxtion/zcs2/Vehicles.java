@@ -89,7 +89,9 @@ public final class Vehicles {
         // a car or truck put down where another already stands moves along the kerb to a free place
         if (onRoad(v) && !freeAt(v, px, py, heading, 2)) {
             int n = w.r.roads.nearestNode(px, py, 300);
-            if (n >= 0 && findSlot(v, n, px, py, 400)) {
+            // the kerbs round the junction; when a crowded yard (a formation sending out a dozen squads at once) has
+            // filled those, the streets further out: never on top of another vehicle
+            if (n >= 0 && (findSlot(v, n, px, py, 400) || findSlot(v, n, px, py, 1500, 8))) {
                 x[v] = homeX[v] = slotX[v];
                 y[v] = homeY[v] = slotY[v];
                 head[v] = slotH[v];
@@ -871,16 +873,38 @@ public final class Vehicles {
      * junction. Sets slotX, slotY, slotH; false if there's none.
      */
     private boolean findSlot(int v, int n, float px, float py, float maxDist) {
+        return findSlot(v, n, px, py, maxDist, 1);
+    }
+
+    /**
+     * As above, looking along the roads out of the junctions up to `rings` junctions away from n, nearest ring first:
+     * the nearest free place in the first ring that has one.
+     */
+    private boolean findSlot(int v, int n, float px, float py, float maxDist, int rings) {
         RoadGraph g = w.r.roads;
         Content.VType t = type(v);
         float hl = t.length * 0.5f, hw = t.width * 0.5f;
         float best = maxDist * maxDist;
         boolean found = false;
-        for (int ring = 0; ring < 2 && !found; ring++) {
-            int a0 = g.adjStart[n], a1 = g.adjStart[n + 1];
-            int nodes = ring == 0 ? 1 : a1 - a0;
-            for (int q = 0; q < nodes; q++) {
-                int m = ring == 0 ? n : g.other(g.adjEdge[a0 + q], n);
+        java.util.ArrayList<Integer> ring = new java.util.ArrayList<Integer>();
+        java.util.HashSet<Integer> seen = new java.util.HashSet<Integer>();
+        ring.add(n);
+        seen.add(n);
+        for (int r = 0; r <= rings && !found && !ring.isEmpty(); r++) {
+            if (r > 0) {
+                // the next ring: the junctions one road further out (along live roads past the first ring)
+                java.util.ArrayList<Integer> next = new java.util.ArrayList<Integer>();
+                for (int m : ring)
+                    for (int k = g.adjStart[m]; k < g.adjStart[m + 1]; k++) {
+                        int e = g.adjEdge[k];
+                        if (r > 1 && !g.ealive[e]) continue;
+                        int o = g.other(e, m);
+                        if (seen.add(o)) next.add(o);
+                    }
+                ring = next;
+            }
+            for (int q = 0; q < ring.size(); q++) {
+                int m = ring.get(q);
                 float maxHalf = 0;
                 for (int k = g.adjStart[m]; k < g.adjStart[m + 1]; k++) maxHalf = Math.max(maxHalf, g.ehalf[g.adjEdge[k]]);
                 for (int k = g.adjStart[m]; k < g.adjStart[m + 1]; k++) {

@@ -1218,7 +1218,8 @@ public final class Forces extends Module {
         for (int k = 0; k < n; k++) {
             Formation f = new Formation();
             f.id = k;
-            f.t = w.c.formations.get(in.readInt());
+            int ft = in.readInt();
+            f.t = w.c.formations.get(w.loadRemap != null ? w.loadRemap.formation(ft) : ft); // by the save's content index
             f.name = in.readUTF();
             f.faction = in.readInt();
             f.hq = w.r.facilities.get(in.readInt());

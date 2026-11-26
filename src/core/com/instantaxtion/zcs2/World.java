@@ -59,6 +59,8 @@ public final class World {
     public static final float STRATEGIC_DT = 10f;
     public final Rng rng;
     public Parallel par;
+    /** While a save loads its modules: the save's content indices mapped to this content's (null otherwise). */
+    SaveIO.Remap loadRemap;
 
     public long tick;
     /** Game seconds since the start (one game hour is 60 s, a day 24 minutes at 1x). */

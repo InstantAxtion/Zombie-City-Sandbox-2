@@ -15,10 +15,117 @@ import java.util.zip.InflaterInputStream;
  * rebuilt from its seed, then the saved tiles (rubble, blown bridges) are laid over it.
  */
 public final class SaveIO {
-    public static final int VERSION = 5;
+    public static final int VERSION = 6;
     /** The oldest save this version still reads (3: the game's 1.2; the fields added since get their defaults). */
     public static final int OLDEST = 3;
     private static final int MAGIC = 0x5A435332; // "ZCS2"
+
+    /**
+     * The content a save before version 6 was made with (the game's 1.2 up to the armed-AI work): the ids of its
+     * units, squads, vehicles, zombies and formations in index order. Such a save holds content by index; a save from
+     * version 6 on holds these lists itself, so content added or reordered since loads by id, never by position.
+     */
+    private static final String[] OLD_UNITS = {"civilian", "survivor", "militia", "patrol", "trooper", "swat", "riot",
+            "marksman", "rifleman", "gunner", "grenadier", "sniper", "engineer", "guard", "firefighter"};
+    private static final String[] OLD_SQUADS = {"patrol", "swat", "riot", "troopers", "rifle", "fireteam", "mech",
+            "engineers", "guard"};
+    private static final String[] OLD_VTYPES = {"patrol_car", "swat_van", "riot_van", "police_heli", "humvee",
+            "army_truck", "apc", "tank", "gunship", "transport_heli", "jet", "supply_truck", "bus", "fire_engine",
+            "destroyer", "transport_plane"};
+    private static final String[] OLD_ZTYPES = {"walker", "runner", "brute", "armoured", "stalker", "giant"};
+    private static final String[] OLD_FORMATIONS = {"police_reserve", "guard_brigade", "infantry", "armour",
+            "artillery", "marines"};
+
+    /** A save's content indices mapped to this content's, by id (-1: this content has no such thing). */
+    static final class Remap {
+        int[] unit, squad, vtype, ztype, formation;
+
+        static int at(int[] m, int i) {
+            return i >= 0 && i < m.length ? m[i] : -1;
+        }
+
+        /** The formation a save's index names, in this content (the first one if this content lacks it). */
+        int formation(int i) {
+            return Math.max(0, at(formation, i));
+        }
+    }
+
+    private static int[] mapIds(String[] saved, java.util.List<String> now) {
+        int[] m = new int[saved.length];
+        for (int i = 0; i < saved.length; i++) m[i] = now.indexOf(saved[i]);
+        return m;
+    }
+
+    private static java.util.List<String> unitIds(Content c) {
+        java.util.List<String> l = new java.util.ArrayList<String>();
+        for (Content.Unit u : c.units) l.add(u.id);
+        return l;
+    }
+
+    private static java.util.List<String> squadIds(Content c) {
+        java.util.List<String> l = new java.util.ArrayList<String>();
+        for (Content.SquadT t : c.squads) l.add(t.id);
+        return l;
+    }
+
+    private static java.util.List<String> vtypeIds(Content c) {
+        java.util.List<String> l = new java.util.ArrayList<String>();
+        for (Content.VType t : c.vtypes) l.add(t.id);
+        return l;
+    }
+
+    private static java.util.List<String> ztypeIds(Content c) {
+        java.util.List<String> l = new java.util.ArrayList<String>();
+        for (Content.ZType t : c.ztypes) l.add(t.id);
+        return l;
+    }
+
+    private static java.util.List<String> formationIds(Content c) {
+        java.util.List<String> l = new java.util.ArrayList<String>();
+        for (Content.FormationT t : c.formations) l.add(t.id);
+        return l;
+    }
+
+    private static void writeIds(DataOutputStream o, java.util.List<String> ids) throws IOException {
+        o.writeInt(ids.size());
+        for (String id : ids) o.writeUTF(id);
+    }
+
+    private static String[] readIds(DataInputStream in) throws IOException {
+        String[] a = new String[in.readInt()];
+        for (int i = 0; i < a.length; i++) a[i] = in.readUTF();
+        return a;
+    }
+
+    /** The content table a save holds (version 6 on), or the one older saves were made with. */
+    private static Remap readRemap(DataInputStream in, Content c, int ver) throws IOException {
+        String[] u = OLD_UNITS, sq = OLD_SQUADS, vt = OLD_VTYPES, zt = OLD_ZTYPES, fm = OLD_FORMATIONS;
+        if (ver >= 6) {
+            u = readIds(in);
+            sq = readIds(in);
+            vt = readIds(in);
+            zt = readIds(in);
+            fm = readIds(in);
+        }
+        Remap m = new Remap();
+        m.unit = mapIds(u, unitIds(c));
+        m.squad = mapIds(sq, squadIds(c));
+        m.vtype = mapIds(vt, vtypeIds(c));
+        m.ztype = mapIds(zt, ztypeIds(c));
+        m.formation = mapIds(fm, formationIds(c));
+        return m;
+    }
+
+    /** Counts kept by a save's content index, moved to this content's indices (n of them); null stays null. */
+    private static int[] remapCounts(int[] saved, int[] map, int n) {
+        if (saved == null) return null;
+        int[] a = new int[n];
+        for (int i = 0; i < saved.length; i++) {
+            int j = Remap.at(map, i);
+            if (j >= 0) a[j] += saved[i];
+        }
+        return a;
+    }
 
     /** A save from a version of the game too old to read. */
     public static final class TooOld extends IOException {
@@ -93,6 +200,12 @@ public final class SaveIO {
         o.writeInt(MAGIC);
         o.writeInt(VERSION);
         o.writeLong(w.c.rulesHash);
+        // the content by id, so a later game with more or reordered content reads this save by name
+        writeIds(o, unitIds(w.c));
+        writeIds(o, squadIds(w.c));
+        writeIds(o, vtypeIds(w.c));
+        writeIds(o, ztypeIds(w.c));
+        writeIds(o, formationIds(w.c));
         // the region
         o.writeInt(w.r.W);
         o.writeInt(w.r.preset);
@@ -142,6 +255,7 @@ public final class SaveIO {
         if (ver > VERSION) throw new IOException("this save is from a newer version of the game");
         if (ver < OLDEST) throw new TooOld();
         long rules = in.readLong();
+        Remap map = readRemap(in, c, ver);
         int size = in.readInt(), preset = in.readInt();
         long rseed = in.readLong(), seed = in.readLong();
         String scen = in.readUTF();
@@ -161,7 +275,7 @@ public final class SaveIO {
         }
         boolean[] alive = readBools(in);
         System.arraycopy(alive, 0, r.roads.ealive, 0, Math.min(alive.length, r.roads.edgeCount));
-        readFacilities(in, w);
+        readFacilities(in, w, map);
         r.rebuildNav(0, 0, r.W - 1, r.H - 1);
         w.sec.connectivity();
         w.tick = in.readLong();
@@ -176,9 +290,9 @@ public final class SaveIO {
         w.camDetail = in.readBoolean();
         w.maxIndividuals = in.readInt();
         w.strategic = in.readBoolean();
-        readEnts(in, w.e);
-        readVehicles(in, w.veh);
-        readSquads(in, w, ver);
+        readEnts(in, w.e, map);
+        readVehicles(in, w.veh, map);
+        readSquads(in, w, ver, map);
         readSectors(in, w.sec);
         readDispatch(in, w.disp);
         readMilitary(in, w.mil);
@@ -188,7 +302,12 @@ public final class SaveIO {
         readStats(in, w.stats);
         readEffects(in, w.fx);
         readFlow(in, w.flow);
-        readModules(in, w, ver);
+        w.loadRemap = map;
+        try {
+            readModules(in, w, ver);
+        } finally {
+            w.loadRemap = null;
+        }
         if (ver >= 4) readExtras(in, w);
         else olderDefaults(w);
         if (ver >= 5) readExtras5(in, w);
@@ -233,7 +352,7 @@ public final class SaveIO {
         }
     }
 
-    private static void readFacilities(DataInputStream in, World w) throws IOException {
+    private static void readFacilities(DataInputStream in, World w, Remap map) throws IOException {
         int n = in.readInt();
         java.util.List<Region.Facility> fs = w.r.facilities;
         for (int k = 0; k < n; k++) {
@@ -246,8 +365,9 @@ public final class SaveIO {
             } else f = fs.get(k);
             f.x = in.readFloat();
             f.y = in.readFloat();
-            f.pool = readIntArr(in);
-            f.vpool = readIntArr(in);
+            // kept by content index: moved to this content's indices by id (content may have grown or moved since)
+            f.pool = remapCounts(readIntArr(in), map.unit, w.c.units.size());
+            f.vpool = remapCounts(readIntArr(in), map.vtype, w.c.vtypes.size());
             f.ammo = in.readFloat();
             f.fuel = in.readFloat();
             f.food = in.readFloat();
@@ -442,7 +562,7 @@ public final class SaveIO {
         intArr(o, e.freeOrder());
     }
 
-    private static void readEnts(DataInputStream in, Ents e) throws IOException {
+    private static void readEnts(DataInputStream in, Ents e, Remap map) throws IOException {
         int n = in.readInt();
         e.ensure(n + 1);
         e.top = n;
@@ -453,6 +573,12 @@ public final class SaveIO {
         readBytesInto(in, e.kind); readBytesInto(in, e.loc); readBytesInto(in, e.state);
         readShorts(in, e.type); readShorts(in, e.ammo); readShorts(in, e.kills); readShorts(in, e.rank);
         readInts(in, e.flags); readInts(in, e.target); readInts(in, e.squad); readInts(in, e.vehicle); readInts(in, e.uid); readInts(in, e.home);
+        for (int i = 0; i < n; i++) {
+            if (e.loc[i] == Ents.NONE) continue;
+            // a zombie's type is its kind of zombie, anyone else's the kind of person (by the save's content index)
+            int t = Remap.at(e.kind[i] == Ents.ZOMBIE ? map.ztype : map.unit, e.type[i]);
+            e.type[i] = (short) Math.max(0, t);
+        }
         e.rebuildFree();
         int[] order = readIntArr(in);
         if (order != null) e.setFreeOrder(order);
@@ -479,7 +605,7 @@ public final class SaveIO {
         }
     }
 
-    private static void readVehicles(DataInputStream in, Vehicles v) throws IOException {
+    private static void readVehicles(DataInputStream in, Vehicles v, Remap map) throws IOException {
         int n = in.readInt();
         v.ensure(n + 1);
         v.top = n;
@@ -489,6 +615,7 @@ public final class SaveIO {
         readFloats(in, v.stuck); readFloats(in, v.wpnT); readFloats(in, v.wpn2T); readFloats(in, v.timer); readFloats(in, v.mobT);
         readFloats(in, v.seg); readFloats(in, v.orbitA); readFloats(in, v.ghost); readFloats(in, v.alt);
         readShorts(in, v.type); readShorts(in, v.kills);
+        for (int i = 0; i < n; i++) v.type[i] = (short) Math.max(0, Remap.at(map.vtype, v.type[i]));
         readBytesInto(in, v.state); readBytesInto(in, v.role);
         readInts(in, v.squad); readInts(in, v.home); readInts(in, v.ri); readInts(in, v.crewN); readInts(in, v.ammo);
         readInts(in, v.cargo); readInts(in, v.uid); readInts(in, v.target);
@@ -519,7 +646,7 @@ public final class SaveIO {
         }
     }
 
-    private static void readSquads(DataInputStream in, World w, int ver) throws IOException {
+    private static void readSquads(DataInputStream in, World w, int ver, Remap map) throws IOException {
         int n = in.readInt();
         w.sq.list.clear();
         for (int i = 0; i < n; i++) {
@@ -534,6 +661,7 @@ public final class SaveIO {
             if (ver >= 4) {
                 s.idleT = in.readFloat();
                 s.template = in.readInt();
+                if (s.template >= 0) s.template = Remap.at(map.squad, s.template); // by the save's content index
             }
             s.path = readFloatArr(in);
             s.pathI = in.readInt();
