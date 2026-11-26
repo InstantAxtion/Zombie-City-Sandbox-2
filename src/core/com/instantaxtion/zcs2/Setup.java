@@ -7,6 +7,8 @@ import java.util.List;
 public final class Setup {
     /** Where the outbreak starts (for the camera), set by scenario(). */
     public static float originX, originY;
+    /** Where the outbreak itself is (originX/Y moves to the player's person, if there is one). */
+    public static float outbreakX, outbreakY;
 
     public static World newGame(Content c, int size, int preset, long seed, Content.Scenario sc, int threads) {
         return newGame(c, size, preset, seed, sc, threads, -1, 60000);
@@ -24,8 +26,13 @@ public final class Setup {
 
     /** A new game played as a role (-1 = the scenario's own), with maxInd people simulated in detail at most. */
     public static World newGame(Content c, int size, int preset, long seed, Content.Scenario sc, int threads, int role, int maxInd) {
+        return newGame(c, size, preset, seed, sc, threads, role, maxInd, null);
+    }
+
+    /** As above, on a region already generated from the same size, preset and seed (the New Game preview's), or null. */
+    public static World newGame(Content c, int size, int preset, long seed, Content.Scenario sc, int threads, int role, int maxInd, Region pre) {
         if (role < 0) role = defaultRole(sc);
-        Region r = RegionGen.generate(size, preset, seed);
+        Region r = pre != null && pre.W == size && pre.preset == preset && pre.seed == seed ? pre : RegionGen.generate(size, preset, seed);
         World w = new World(c, r, seed, threads);
         w.maxIndividuals = maxInd;
         w.scenario = sc;
@@ -43,6 +50,8 @@ public final class Setup {
         originX = city.cx * 16f;
         originY = city.cy * 16f;
         if (sc != null) scenario(w, sc);
+        outbreakX = originX;
+        outbreakY = originY;
         w.roles.assign(role, originX, originY);
         if (role == Roles.SURVIVOR && w.playerEnt < 0) survivor(w);
         if (w.playerEnt >= 0) {
@@ -382,7 +391,18 @@ public final class Setup {
         Region r = w.r;
         {
             Content.Unit u = w.c.unit("survivor");
+            // somewhere a few kilometres from the outbreak, on a street, in a sector with none of the dead in it
+            // or round it: a person dropped next to the outbreak lives for seconds
             float[] p = null;
+            for (int a = 0; a < 400 && p == null; a++) {
+                float ang = a * 0.7f, d = 1800 + a * 12;
+                float x = originX + (float) Math.cos(ang) * d, y = originY + (float) Math.sin(ang) * d;
+                if (x < 64 || y < 64 || x > r.px() - 64 || y > r.px() - 64) continue;
+                int t = r.tileAtPx(x, y);
+                if (t != Tile.PAVEMENT && t != Tile.PLAZA && t != Tile.YARD) continue;
+                if (!quiet(w, x, y)) continue;
+                p = new float[]{x, y};
+            }
             for (int a = 0; a < 100 && p == null; a++) {
                 float ang = a * 0.7f, d = 650 + a * 8;
                 float x = originX + (float) Math.cos(ang) * d, y = originY + (float) Math.sin(ang) * d;
@@ -397,6 +417,24 @@ public final class Setup {
             originX = p[0];
             originY = p[1];
         }
+    }
+
+    /** No dead (counted or walking) in the sector at (x, y) or its neighbours, and no infected waiting to turn. */
+    private static boolean quiet(World w, float x, float y) {
+        Region r = w.r;
+        for (int dy = -1; dy <= 1; dy++)
+            for (int dx = -1; dx <= 1; dx++) {
+                float sx = x + dx * 512, sy = y + dy * 512;
+                if (sx < 0 || sy < 0 || sx >= r.px() || sy >= r.px()) continue;
+                int s = r.sectorOfPx(sx, sy);
+                if (w.sec.zIn[s] > 0 || w.sec.inf[s] > 0) return false;
+            }
+        for (int i = 0; i < w.e.top; i++) {
+            if (w.e.loc[i] != Ents.FREE || w.e.kind[i] != Ents.ZOMBIE) continue;
+            float ddx = w.e.x[i] - x, ddy = w.e.y[i] - y;
+            if (ddx * ddx + ddy * ddy < 1200f * 1200f) return false;
+        }
+        return true;
     }
 
     /** A walkable point near (x, y). */

@@ -27,7 +27,12 @@ final class GameView extends View {
         long now = System.nanoTime();
         float dt = last == 0 ? 1 / 60f : (now - last) / 1e9f;
         last = now;
-        game.frame(gfx.set(canvas, getWidth(), getHeight()), dt);
+        try {
+            game.frame(gfx.set(canvas, getWidth(), getHeight()), dt);
+        } catch (Throwable t) {
+            // never take the app down from a frame: the game shows what went wrong and offers the menu
+            game.crashed(t);
+        }
         if (running) postInvalidateOnAnimation();
     }
 
@@ -48,6 +53,10 @@ final class GameView extends View {
         int idx = e.getActionIndex();
         switch (action) {
             case MotionEvent.ACTION_DOWN:
+                // the first finger: whatever the game thinks is still down (a lost UP) isn't
+                game.resetTouches();
+                game.touch(Game.DOWN, e.getPointerId(idx), e.getX(idx), e.getY(idx));
+                break;
             case MotionEvent.ACTION_POINTER_DOWN:
                 game.touch(Game.DOWN, e.getPointerId(idx), e.getX(idx), e.getY(idx));
                 break;
@@ -60,6 +69,7 @@ final class GameView extends View {
                 break;
             case MotionEvent.ACTION_CANCEL:
                 for (int i = 0; i < e.getPointerCount(); i++) game.touch(Game.CANCEL, e.getPointerId(i), e.getX(i), e.getY(i));
+                game.resetTouches();
                 break;
             default:
         }

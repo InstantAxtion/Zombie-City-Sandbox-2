@@ -30,8 +30,8 @@ public class MainActivity extends Activity implements GLGameView.Fallback {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         platform = new AndroidPlatform(this);
         game = new Game(platform);
-        // the GPU renderer unless the player chose Canvas, or the GPU failed its test on this phone before
-        boolean gpu = Boolean.parseBoolean(platform.pref("gpu", "true")) && !Boolean.parseBoolean(platform.pref("gpuFailed", "false"));
+        // Canvas unless the player opted into the GPU renderer in Settings (and it hasn't failed on this phone before)
+        boolean gpu = game.settings.gpu && !Boolean.parseBoolean(platform.pref("gpuFailed", "false"));
         if (gpu) {
             glView = new GLGameView(this, game, this);
             setContentView(glView);
@@ -51,7 +51,7 @@ public class MainActivity extends Activity implements GLGameView.Fallback {
     @Override
     public void gpuFailed(final String why) {
         platform.setPref("gpuFailed", "true");
-        platform.setPref("gpu", "false");
+        platform.setPref("gpuOptIn", "false");
         runOnUiThread(new Runnable() {
             public void run() {
                 if (glView == null) return;

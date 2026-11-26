@@ -9,7 +9,7 @@ place in the response at any level, from the President down to one police office
 one person.
 
 **Download:** [`release/ZombieCitySandbox2.apk`](release/ZombieCitySandbox2.apk) (Android 5.0 and newer, about
-250 KB: every picture and sound is made by code). It installs alongside the first game.
+320 KB: every picture and sound is made by code). It installs alongside the first game.
 
 ## What's in it
 
@@ -63,9 +63,12 @@ one person.
 
 ## Controls
 
-Drag to move, pinch to zoom, tap to look. The **Map** tool jumps between the whole country and where you were
-and switches the layers; the minimap jumps too. Top right: pause and speed (1x to 16x, then fast-forward). The
-menu button (or the phone's back button) pauses. On a desktop: the mouse is a finger, the wheel zooms, space
+Drag to move, pinch to zoom, tap to look. The **Map** tool opens the map's layers and a button that jumps between
+the whole country and where you were; the minimap jumps too. Top right: pause and speed (1x to 16x, then fast-forward). The
+menu button (or the phone's back button) pauses, and the back button also cancels a load in progress. The officer and the survivor can't fast-forward
+(the speed button goes round 1x to 16x); when the phone can't keep up with a fast-forward speed, the button shows
+the rate it really reaches ("~15h/s"). The game saves itself every three minutes of play and whenever the app
+is paused. On a desktop: the mouse is a finger, the wheel zooms, space
 pauses, 1-8 set the speed, M toggles the map, Esc is back.
 
 ## Building and testing
@@ -94,9 +97,14 @@ and prints the spread of outcomes (days to contain or fall, share of the country
 `build/balance.csv`. On the combined game at the time of writing: 5,000 dead are put down within hours;
 50,000-100,000 are a fight of days to weeks; 250,000 is a long war that is won in about half of the runs.
 
-The game draws with the GPU (OpenGL ES 2.0) by default. On its first frame it draws a test pattern and reads it
-back; if that fails, or GL reports an error, it switches to the Canvas renderer for good and says so. Settings
-has "Renderer (next start)" to choose. The GPU renderer has only been compiled, not yet run on a real phone.
+The game draws with Android's Canvas by default. Settings has "Renderer (next start)": choosing GPU (OpenGL ES
+2.0, experimental) takes effect when the app next starts. On its first frame the GPU renderer draws a test pattern
+and reads it back; if that fails, or GL reports an error in the first frames, it switches to Canvas for good and
+says so. The GPU renderer has only been compiled, not yet run on a real phone.
+
+If something goes wrong in a frame the game doesn't close: it saves (unless the world was in the middle of a step),
+says what happened and offers the menu. A save that can't be read is renamed to `.bad` and no longer offered.
+Replays copied into the app's files as `.zcr` appear in the replay list.
 
 ## Changing the game: content.ini
 

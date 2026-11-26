@@ -54,6 +54,28 @@ public final class Tests {
         }
     }
 
+    private static final java.awt.image.BufferedImage SCREEN = new java.awt.image.BufferedImage(540, 1170, java.awt.image.BufferedImage.TYPE_INT_RGB);
+
+    static void frames(Game g, int n) {
+        for (int k = 0; k < n; k++) g.frame(new DesktopGfx(SCREEN.createGraphics(), 540, 1170), 1 / 30f);
+    }
+
+    /** Where the button with this id is on the last frame drawn, or null. */
+    static float[] findId(Game g, String id) {
+        for (int y = 4; y < 1170; y += 6)
+            for (int x = 4; x < 540; x += 6)
+                if (id.equals(g.hitAt(x, y))) return new float[]{x + 3, y + 3};
+        return null;
+    }
+
+    static boolean tapId(Game g, String id) {
+        float[] p = findId(g, id);
+        if (p == null) return false;
+        g.touch(Game.DOWN, 0, p[0], p[1]);
+        g.touch(Game.UP, 0, p[0], p[1]);
+        return true;
+    }
+
     public static void main(String[] args) throws Exception {
         content = Content.load(new FileInputStream("assets/content.ini"));
         define();
@@ -996,6 +1018,113 @@ public final class Tests {
                 w.shutdown();
                 l.shutdown();
                 r.w.shutdown();
+            }
+        });
+        test("workability: a damaged save is put aside and back leaves the error", new T() {
+            public void run() throws Exception {
+                java.io.File dir = new java.io.File("build/test-work1");
+                dir.mkdirs();
+                for (java.io.File f : dir.listFiles()) f.delete();
+                DesktopPlatform pf = new DesktopPlatform(dir);
+                java.io.OutputStream out = pf.openWrite("autosave.sav");
+                out.write("this is not a save".getBytes("UTF-8"));
+                out.close();
+                Game g = new Game(pf);
+                frames(g, 1);
+                check(tapId(g, "continue"), "no Continue button");
+                for (int k = 0; k < 200 && g.error == null; k++) {
+                    frames(g, 1);
+                    Thread.sleep(20);
+                }
+                check(g.error != null && g.error.contains("damaged"), "no error for a damaged save: " + g.error);
+                check(pf.exists("autosave.bad") && !pf.exists("autosave.sav"), "the damaged save wasn't put aside");
+                frames(g, 1);
+                check(findId(g, "errmenu") != null, "the error screen has no way out");
+                check(g.back(), "back closed the app from the error screen");
+                check(g.error == null && g.screen() == Game.S_MENU, "back didn't leave the error screen");
+                frames(g, 1);
+                check(findId(g, "continue") == null, "Continue is still offered for the damaged save");
+            }
+        });
+        test("workability: speed, touches, dialogs and cancelling a load", new T() {
+            public void run() throws Exception {
+                java.io.File dir = new java.io.File("build/test-work2");
+                dir.mkdirs();
+                for (java.io.File f : dir.listFiles()) f.delete();
+                DesktopPlatform pf = new DesktopPlatform(dir);
+                Game g = new Game(pf);
+                // an officer: the speed button goes round the speeds a person allows, back to 1x
+                World w = Setup.newGame(content, 1536, RegionGen.COAST, 12, content.scenario("sandbox"), 1, Roles.OFFICER, 60000);
+                g.w = w;
+                g.view = new WorldView(w, pf);
+                g.screen = Game.S_PLAY;
+                frames(g, 2);
+                boolean back1x = false;
+                for (int k = 0; k < 8; k++) {
+                    check(tapId(g, "speed"), "no speed button");
+                    frames(g, 2);
+                    check(!w.strategic && g.speedIdx <= g.maxSpeedIdx(), "an officer got fast-forward: " + g.speedIdx);
+                    if (g.speedIdx == 0) back1x = true;
+                }
+                check(back1x, "the speed never came back to 1x");
+                int recorded = w.director.events.size();
+                g.key('8');
+                frames(g, 5);
+                check(!w.strategic && w.director.events.size() <= recorded + 1, "fast-forward attempts were recorded every frame");
+                // a lost UP doesn't leave the game thinking a finger is down
+                float cx = 300, cy = 600;
+                g.touch(Game.DOWN, 0, cx, cy);
+                g.touch(Game.DOWN, 0, cx, cy); // the UP was lost; the same finger again
+                g.touch(Game.UP, 0, cx, cy);
+                check(g.pointersDown() == 0, "pointer count stuck at " + g.pointersDown());
+                g.touch(Game.DOWN, 0, cx, cy);
+                g.touch(Game.DOWN, 1, cx + 50, cy); // two lost UPs
+                g.resetTouches(); // the platform's first-finger-down
+                g.touch(Game.DOWN, 2, cx, cy);
+                check(g.pointersDown() == 1, "reset didn't clear lost pointers: " + g.pointersDown());
+                g.touch(Game.UP, 2, cx, cy);
+                check(g.pointersDown() == 0, "pointer count stuck after reset");
+                // a dialog's answer is carried out on the game's thread, at the next frame
+                final boolean[] got = {false};
+                pf.answers.add("hello");
+                g.ask("test", "", new Platform.TextAnswer() {
+                    public void answer(String text) {
+                        got[0] = text.equals("hello");
+                    }
+                });
+                check(!got[0], "the answer ran on the dialog's thread, not the game's");
+                frames(g, 1);
+                check(got[0], "the answer never reached the game");
+                // the role's speed is kept if the game is handed a world that can't fast-forward
+                w.shutdown();
+                // back during loading cancels it, and the world it was building is thrown away
+                Game g2 = new Game(pf);
+                g2.ngSize = 0;
+                g2.screen = Game.S_NEW;
+                frames(g2, 1);
+                check(tapId(g2, "start"), "no Start button");
+                check(g2.screen() == Game.S_LOADING, "not loading");
+                check(g2.back(), "back during loading closed the app");
+                check(g2.screen() == Game.S_NEW, "back didn't cancel the loading: " + g2.screen());
+                for (int k = 0; k < 150; k++) {
+                    frames(g2, 1);
+                    Thread.sleep(20);
+                }
+                check(g2.world() == null && g2.screen() == Game.S_NEW, "a cancelled load still started the game");
+            }
+        });
+        test("workability: a survivor starts away from the outbreak", new T() {
+            public void run() throws Exception {
+                for (long seed = 1; seed <= 3; seed++) {
+                    World w = Setup.newGame(content, 1536, RegionGen.COAST, seed, content.scenario("sandbox"), 1, Roles.SURVIVOR, 60000);
+                    int me = w.playerEnt;
+                    check(me >= 0, "no survivor");
+                    float dx = w.e.x[me] - Setup.outbreakX, dy = w.e.y[me] - Setup.outbreakY;
+                    check(dx * dx + dy * dy > 1500f * 1500f, "the survivor starts at the outbreak (seed " + seed + ")");
+                    play(w, 60, true);
+                    check(w.e.loc[me] == Ents.FREE && w.e.kind[me] == Ents.CIV, "the survivor died within a minute (seed " + seed + ")");
+                    w.shutdown();
+                }
             }
         });
         test("perf: 20,000 of the dead", new T() {

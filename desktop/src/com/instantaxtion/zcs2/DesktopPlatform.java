@@ -27,6 +27,18 @@ public final class DesktopPlatform implements Platform {
     public OutputStream openWrite(String name) throws IOException { return new FileOutputStream(new File(dir, name)); }
     public boolean exists(String name) { return new File(dir, name).exists(); }
     public void delete(String name) { new File(dir, name).delete(); }
+    public boolean rename(String from, String to) {
+        File t = new File(dir, to);
+        t.delete();
+        return new File(dir, from).renameTo(t);
+    }
+    public String[] list() {
+        File[] fs = dir.listFiles();
+        if (fs == null) return new String[0];
+        java.util.List<String> out = new java.util.ArrayList<String>();
+        for (File f : fs) if (f.isFile()) out.add(f.getName());
+        return out.toArray(new String[0]);
+    }
     public String pref(String key, String def) { return prefs.getProperty(key, def); }
     public void setPref(String key, String value) { prefs.setProperty(key, value); }
     public void playSound(String name, float volume, float pan) { sounds++; }
