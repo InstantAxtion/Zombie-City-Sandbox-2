@@ -195,14 +195,19 @@ public final class ServicesShot {
                 w = game(size, seed, "sandbox");
                 Region.Facility st = null;
                 for (Region.Facility f : w.r.facilities) if (f.kind == Region.F_FIRE && f.settlement == w.r.city().id) st = f;
+                // a lived-in building 700 px or more from the station, in the streets round it (chunks active there)
+                steps(w, 20, st.x, st.y);
                 int b = -1;
                 float bd = Float.MAX_VALUE;
-                for (int k = 0; k < w.r.bCount; k++) {
-                    if (w.r.bfloors(k) <= 0 || w.r.doorX(k) < 0 || w.r.bres(k) <= 0) continue;
-                    float d = (float) Math.hypot(w.r.doorX(k) - st.x, w.r.doorY(k) - st.y);
-                    if (d > 700 && d < bd) {
-                        bd = d;
-                        b = k;
+                for (int s0 = 0; s0 < w.sec.n; s0++) {
+                    if (Math.abs(w.sec.cx(s0) - st.x) > 3000 || Math.abs(w.sec.cy(s0) - st.y) > 3000 || !w.act.activePx(w.sec.cx(s0), w.sec.cy(s0))) continue;
+                    for (int k : w.secBuildings[s0]) {
+                        if (w.r.bfloors(k) <= 0 || w.r.doorX(k) < 0 || w.r.bres(k) <= 0) continue;
+                        float d = (float) Math.hypot(w.r.doorX(k) - st.x, w.r.doorY(k) - st.y);
+                        if (d > 700 && d < bd) {
+                            bd = d;
+                            b = k;
+                        }
                     }
                 }
                 float bx = w.r.doorX(b), by = w.r.doorY(b);
@@ -270,7 +275,19 @@ public final class ServicesShot {
                 float x = w.r.roads.nx[node], y = w.r.roads.ny[node];
                 steps(w, 20, x, y);
                 Actions.quarantine(w, town.id, true);
-                steps(w, 20 * 40, x, y);
+                // until the post is manned (the police drive out from their station)
+                for (int k = 0; k < 20 * 240; k++) {
+                    cam(w, x, y);
+                    w.step();
+                    boolean manned = false;
+                    for (Services.Checkpoint cp : w.services.checkpoints) {
+                        if (cp.node != node || cp.squad < 0) continue;
+                        Squads.Squad q = w.sq.get(cp.squad);
+                        int ld = q.leader(w.e);
+                        manned = ld >= 0 && w.e.loc[ld] == Ents.FREE && Math.hypot(w.e.x[ld] - x, w.e.y[ld] - y) < 100;
+                    }
+                    if (manned) break;
+                }
                 Content.Unit civ = w.c.unit("civilian");
                 for (int k = 0; k < 6; k++) {
                     float[] q = w.r.openGroundNear(x + 40 + k * 8, y + 20, false);
@@ -311,7 +328,7 @@ public final class ServicesShot {
             }
             case "rescue": {
                 // (by road: the helicopters stay on their pads for this one)
-                c.setRule("airAssault", 0);
+                if (size < 8192) c.setRule("airAssault", 0); // (on a national map the bus is hours away: the helicopter goes)
                 w = game(size, seed, "sandbox");
                 c.setRule("airAssault", 1);
                 Region.Settlement ct = w.r.city();

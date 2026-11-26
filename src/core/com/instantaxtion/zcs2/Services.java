@@ -1797,7 +1797,7 @@ public final class Services extends Module {
         for (Aid a : aid) {
             float x = cam.toScreenX(a.x), y = cam.toScreenY(a.y);
             if (x < -30 * dp || y < -30 * dp || x > cam.sw + 30 * dp || y > cam.sh + 30 * dp) continue;
-            float s = Math.max(5 * dp, 18 * z);
+            float s = Math.max(7 * dp, 24 * z);
             g.color(0xFF101010);
             g.fillRect(x - s - dp, y - s * 0.55f - dp, s * 2 + 2 * dp, s * 1.1f + 2 * dp);
             g.color(0xFFF2F2F2);

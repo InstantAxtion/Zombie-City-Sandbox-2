@@ -480,8 +480,9 @@ public final class Fires extends Module {
         }
         float cx = (w.r.bx(b) + w.r.bw(b) / 2f) * Tile.SIZE, cy = (w.r.by(b) + w.r.bh(b) / 2f) * Tile.SIZE;
         if (!f.unloaded) {
-            boolean there = vh.state[v] == Vehicles.V_ARRIVED || vh.state[v] != Vehicles.V_DRIVE && vh.state[v] != Vehicles.V_PARKING
-                    && Math.abs(vh.x[v] - dx) + Math.abs(vh.y[v] - dy) < 500;
+            // pulled up close by (or as close as its road gets it, after a few seconds there)
+            boolean stopped = vh.state[v] != Vehicles.V_DRIVE && vh.state[v] != Vehicles.V_PARKING && vh.state[v] != Vehicles.V_PULLIN;
+            boolean there = stopped && (Math.abs(vh.x[v] - dx) + Math.abs(vh.y[v] - dy) < 450 || vh.timer[v] > 8);
             if (!there || unitFF < 0 || f.crews <= 0) return 0;
             // down from the engine: up to six of the crew, the rest stay with it
             int n = Math.min(6, f.crews);
