@@ -218,14 +218,37 @@ public final class Setup {
                 w.strat.addHorde(w.sec.cx(s), w.sec.cy(s), n / 12);
             }
             int left = n - 6 * (n / 12);
+            // the rest are in its towns (nests where people lived) and its fields; exactly as many as asked
+            List<Integer> towns = new ArrayList<Integer>();
+            long townHomes = 0;
             for (int s : secs) {
                 int set = w.sec.settlement[s];
-                if (set >= 0 && r.settlements.get(set).capital) continue;
-                int turned = w.sec.popIn[s] * 2 / 3;
-                w.sec.zIn[s] += turned;
-                w.sec.popIn[s] -= turned;
+                if (set >= 0 && !r.settlements.get(set).capital && w.sec.home[s] > 0) {
+                    towns.add(s);
+                    townHomes += w.sec.home[s];
+                }
             }
+            int inTowns = towns.isEmpty() ? 0 : left * 2 / 3, placed = 0;
+            for (int s : towns) {
+                int m = (int) ((long) inTowns * w.sec.home[s] / Math.max(1, townHomes));
+                w.sec.zIn[s] += m;
+                placed += m;
+            }
+            left -= placed;
             for (int k = 0; k < left && !secs.isEmpty(); k += 50) w.sec.zIn[secs.get(Rng.hashInt(w.seed, k, 34, secs.size()))] += Math.min(50, left - k);
+            // its people mostly got away before it fell: they're refugees in the capital now
+            Region.Settlement cap = r.city();
+            List<Integer> capSecs = new ArrayList<Integer>();
+            for (int s = 0; s < w.sec.n; s++) if (w.sec.settlement[s] == cap.id && w.sec.home[s] > 0) capSecs.add(s);
+            for (int s : secs) {
+                int set = w.sec.settlement[s];
+                if (set >= 0 && r.settlements.get(set).capital || capSecs.isEmpty()) continue;
+                int fled = w.sec.popIn[s] * 4 / 5;
+                if (fled <= 0) continue;
+                w.sec.popIn[s] -= fled;
+                w.sec.popIn[capSecs.get(s % capSecs.size())] += fled;
+                if (set >= 0) w.strat.refuge[set][cap.id] += fled;
+            }
             if (st >= 0) {
                 Region.Settlement c = r.settlements.get(r.states.get(st).capitalCity);
                 originX = c.cx * 16f;
@@ -292,7 +315,9 @@ public final class Setup {
                     w.sec.inf[s] += 10 + Rng.hashInt(w.seed, k, 92, 14);
                 }
             }
-            for (int k = 0; k < n; k++) {
+            // the first few hundred on the street, as people; any more are already inside the buildings round about
+            int ind = Math.min(n, 300);
+            for (int k = 0; k < ind; k++) {
                 float ang = k * 2.39f, rad = 6 + (float) Math.sqrt(k) * 7;
                 float x = at.x + (float) Math.cos(ang) * rad, y = at.y + (float) Math.sin(ang) * rad;
                 if (!r.walkablePx(x, y)) {
@@ -300,6 +325,18 @@ public final class Setup {
                     y = at.y;
                 }
                 w.spawnZombie(x, y, w.c.ztype("walker"));
+            }
+            if (n > ind) {
+                int s0 = r.sectorOfPx(at.x, at.y);
+                List<Integer> near = new ArrayList<Integer>();
+                for (int dy = -2; dy <= 2; dy++)
+                    for (int dx = -2; dx <= 2; dx++) {
+                        int x = s0 % w.sec.sw + dx, y = s0 / w.sec.sw + dy;
+                        if (x >= 0 && y >= 0 && x < w.sec.sw && y < w.sec.sh && w.sec.home[y * w.sec.sw + x] > 0) near.add(y * w.sec.sw + x);
+                    }
+                if (near.isEmpty()) near.add(s0);
+                int left = n - ind;
+                for (int k = 0; k < near.size(); k++) w.sec.zIn[near.get(k)] += left / near.size() + (k < left % near.size() ? 1 : 0);
             }
         } else if (o.equals("crash") || o.equals("countryside")) {
             Region.Settlement c = r.city();
@@ -337,14 +374,18 @@ public final class Setup {
                     w.strat.addHorde(w.sec.cx(s), w.sec.cy(s), n / 8);
                     left -= n / 8;
                 }
-                for (int k = 0; k < left && !open.isEmpty(); k++) w.sec.zIn[open.get(Rng.hashInt(w.seed, k, 78, open.size()))]++;
-                // the towns' people have mostly left or fallen
+                for (int k = 0; k < left && !open.isEmpty(); k += 10) w.sec.zIn[open.get(Rng.hashInt(w.seed, k, 78, open.size()))] += Math.min(10, left - k);
+                // the villages' people have mostly fled to the towns (counted as refugees there)
                 for (int s = 0; s < w.sec.n; s++) {
                     int st = w.sec.settlement[s];
-                    if (st >= 0 && r.settlements.get(st).kind == Region.S_VILLAGE) {
-                        w.sec.zIn[s] += w.sec.popIn[s] / 2;
-                        w.sec.popIn[s] /= 3;
-                    }
+                    if (st < 0 || r.settlements.get(st).kind != Region.S_VILLAGE || w.sec.popIn[s] == 0) continue;
+                    Region.Settlement to = nearestTown(w, r.settlements.get(st));
+                    if (to == null) continue;
+                    int fled = w.sec.popIn[s] * 2 / 3;
+                    int ts = r.sectorOfPx(to.cx * 16f, to.cy * 16f);
+                    w.sec.popIn[s] -= fled;
+                    w.sec.popIn[ts] += fled;
+                    w.strat.refuge[st][to.id] += fled;
                 }
                 w.gov.level = 3;
             }
@@ -352,13 +393,22 @@ public final class Setup {
             // hordes marching in from every side
             float m = r.px();
             float[][] pts = {{0.08f, 0.5f}, {0.92f, 0.5f}, {0.5f, 0.08f}, {0.5f, 0.92f}, {0.1f, 0.1f}, {0.9f, 0.9f}};
+            int wave = 0;
             for (float[] pt : pts) {
                 float x = pt[0] * m, y = pt[1] * m;
                 for (int a = 0; a < 40 && !r.walkablePx(x, y); a++) {
                     x += (m / 2 - x) * 0.05f;
                     y += (m / 2 - y) * 0.05f;
                 }
-                w.strat.addHorde(x, y, n / pts.length);
+                Strategic.Horde h = w.strat.addHorde(x, y, n / pts.length);
+                // marching on the capital
+                Region.Settlement cap = r.city();
+                h.target = r.sectorOfPx(cap.cx * 16f, cap.cy * 16f);
+                h.tx = w.sec.cx(h.target);
+                h.ty = w.sec.cy(h.target);
+                h.keepT = 1440 * 30;
+                // in waves, a couple of days apart
+                h.waitT = (wave++) * 1440 * 2.2f;
             }
             w.gov.level = 3;
             originX = r.city().cx * 16f;
@@ -375,6 +425,20 @@ public final class Setup {
             }
             w.strat.addHorde(x, y, sc.hordeSize);
         }
+    }
+
+    private static Region.Settlement nearestTown(World w, Region.Settlement from) {
+        Region.Settlement best = null;
+        float bd = Float.MAX_VALUE;
+        for (Region.Settlement s : w.r.settlements) {
+            if (s.kind != Region.S_TOWN && s.kind != Region.S_CITY) continue;
+            float dx = s.cx - from.cx, dy = s.cy - from.cy, d = dx * dx + dy * dy;
+            if (d < bd) {
+                bd = d;
+                best = s;
+            }
+        }
+        return best;
     }
 
     /** You, as a survivor: somewhere near the start, not in it. */

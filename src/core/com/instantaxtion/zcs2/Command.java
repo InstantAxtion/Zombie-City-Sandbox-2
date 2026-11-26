@@ -22,6 +22,8 @@ public final class Command extends Module {
     public static final class Official {
         public int role, where, nameId, replaced;
         public float approval = 62, lowT, cool;
+        /** What this official last asked for help over (the reported dead then): asks again only if it doubles. */
+        public float asked;
         public String last = "";
         public double lastT = -1;
     }
@@ -34,6 +36,9 @@ public final class Command extends Module {
     private float[] calmT;
     public boolean bridgesAuthorised;
     private float hourT, capitalT, fedT;
+    /** Game seconds the national picture has stayed below each alert level's lowering mark, and quiet for the curfew. */
+    private final float[] downT = new float[5];
+    private float curfewCalmT;
     private int[] phoneFacility; // per phone network: the exchange's facility id
 
     public Command(World w) {
@@ -89,6 +94,11 @@ public final class Command extends Module {
         return st >= 0 && st < quarantine.length && quarantine[st];
     }
 
+    /** Has the settlement been quiet (nothing reported) for this many game seconds? */
+    public boolean calm(int st, float secs) {
+        return st >= 0 && st < calmT.length && calmT[st] >= secs;
+    }
+
     public boolean sheltering(int st) {
         return st >= 0 && st < shelter.length && shelter[st];
     }
@@ -122,11 +132,13 @@ public final class Command extends Module {
     private void beliefs(float dt) {
         int n = repZ.length;
         float[] calls = new float[n];
-        for (Dispatch.Incident in : w.disp.incidents)
-            if (in.open && in.settlement >= 0 && in.settlement < n) {
-                calls[in.settlement] += in.zombies;
-                alerted[in.settlement] = true;
-            }
+        // open 911 calls still being seen (in fast-forward nobody is taking calls: the reports come in as numbers)
+        if (!w.strategic)
+            for (Dispatch.Incident in : w.disp.incidents)
+                if (in.open && in.settlement >= 0 && in.settlement < n && w.time - in.lastSeen < 60) {
+                    calls[in.settlement] += in.zombies;
+                    alerted[in.settlement] = true;
+                }
         int[] sectors = new int[n], infected = new int[n];
         for (int s = 0; s < w.sec.n; s++) {
             int st = w.sec.settlement[s];
@@ -136,17 +148,32 @@ public final class Command extends Module {
         }
         float detectUp = w.c.rule("reportShare", 0.8f), detectDown = w.c.rule("reportShareNoPhones", 0.3f);
         float lagUp = w.c.rule("reportLag", 60), lagDown = w.c.rule("reportLagNoPhones", 400);
+        float clearLag = w.c.rule("reportClearLag", 3);
         for (int st = 0; st < n; st++) {
             boolean phones = phonesUp(st);
             float truth = w.stats.zBySettlement[st];
-            if (truth > 0 && w.strategic) alerted[st] = true; // in fast-forward the calls are taken as read
-            float target = alerted[st] ? truth * (phones ? detectUp : detectDown) : 0;
-            // calls only get through as far as the phones let them
+            if (truth > 0 && w.strategic && !alerted[st]) {
+                // in fast-forward the calls are taken as read, once there are enough of the dead to be seen
+                if (truth >= 5) {
+                    alerted[st] = true;
+                    Region.Settlement s = w.r.settlements.get(st);
+                    w.gov.reportedAt(st, s.cx * 16f, s.cy * 16f);
+                }
+            }
+            // what reaches the authorities: a share of the truth (far less with the phones down); the panic online
+            // inflates it a little
+            float share = phones ? detectUp : detectDown;
+            float target = alerted[st] ? truth * share * (1 + 0.3f * w.media.social[st]) : 0;
             target = Math.max(target, calls[st] * (phones ? 1 : detectDown / detectUp));
             float lag = phones ? lagUp : lagDown;
+            // bad news travels faster than good: officials are slow to believe it's over
+            if (target < repZ[st]) lag *= clearLag;
             repZ[st] += (target - repZ[st]) * Math.min(1, dt / lag);
+            if (repZ[st] < 0.5f && target == 0) repZ[st] = 0;
             float sTarget = sectors[st] == 0 ? 0 : infected[st] / (float) sectors[st] * (phones ? 1 : 0.5f);
             repSectors[st] += (sTarget - repSectors[st]) * Math.min(1, dt / lag);
+            if (truth == 0 && repZ[st] == 0) alerted[st] = false;
+            calmT[st] = repZ[st] < 2 ? calmT[st] + dt : 0;
         }
     }
 
@@ -178,29 +205,31 @@ public final class Command extends Module {
         int st = s.id;
         float rz = repZ[st];
         float x = s.cx * 16f, y = s.cy * 16f;
-        if (rz < 2) calmT[st] += dt;
-        else calmT[st] = 0;
         if (!shelter[st] && rz > w.c.rule("shelterAt", 15)) {
             shelter[st] = true;
             decide(o, "everyone in " + s.name + " is to shelter in place, lock their doors and stay off the streets.", x, y, false);
-        } else if (shelter[st] && calmT[st] > 60) {
+        } else if (shelter[st] && calmT[st] > w.c.rule("shelterLiftAfter", 360)) {
             shelter[st] = false;
-            decide(o, "the shelter order in " + s.name + " is lifted.", x, y, false);
+            decide(o, "the shelter order in " + s.name + " is lifted. People can go out again.", x, y, false);
         }
-        boolean spiralling = rz > Math.max(w.c.rule("evacuateAt", 400), s.residents * 0.01f) || repSectors[st] > 0.25f;
+        // evacuate a town that's being lost; not a big city over a few streets (the capital last of all)
+        float evacAt = Math.max(w.c.rule("evacuateAt", 400), s.residents * (s.capital ? 0.05f : s.kind == Region.S_CITY ? 0.02f : 0.01f));
+        boolean spiralling = rz > evacAt || repSectors[st] > (s.capital ? 0.45f : 0.3f);
         if (!w.gov.evacuating(st) && !quarantine[st] && w.gov.level >= 2 && spiralling) {
             w.gov.setEvac(st, true);
             decide(o, "orders the evacuation of " + s.name + ".", x, y, false);
-        } else if (w.gov.evacuating(st) && calmT[st] > 240) {
+        } else if (w.gov.evacuating(st) && calmT[st] > w.c.rule("evacLiftAfter", 720) && !(w.scenario != null && "evaccoast".equals(w.scenario.goal) && w.roles.coastal(s))) {
             w.gov.setEvac(st, false);
-            decide(o, "people may return to " + s.name + ".", x, y, false);
+            decide(o, "it is safe again. People may return to " + s.name + ".", x, y, true);
         }
-        // calling for help: the state's Guard
-        if (!helpAsked[st] && rz > Math.max(150, policeAt(st) * 0.5f)) {
+        // calling for help: the state's Guard (again only if it gets much worse)
+        if (rz > Math.max(150, policeAt(st) * 0.5f) && (!helpAsked[st] || rz > o.asked * 2.5f)) {
             helpAsked[st] = true;
+            o.asked = rz;
             w.mil.guardT = Math.min(w.mil.guardT, 0);
             decide(o, "asks the governor for the National Guard.", x, y, false);
         }
+        if (helpAsked[st] && calmT[st] > 720) helpAsked[st] = false;
     }
 
     private int policeAt(int st) {
@@ -229,6 +258,17 @@ public final class Command extends Module {
         }
     }
 
+    /** With the player as President, governors still ask for help (they don't decide quarantines). */
+    private void governorAdvice(Official o) {
+        float stateZ = 0;
+        for (Region.Settlement s : w.r.settlements)
+            if ((s.state == o.where || o.where < 0) && (s.kind == Region.S_CITY || s.kind == Region.S_TOWN)) stateZ += repZ[s.id];
+        if (stateZ > 1500 && stateZ > o.asked * 2.5f) {
+            o.asked = stateZ;
+            decide(o, "asks the President for federal troops.", -1, -1, false);
+        } else if (stateZ < 50) o.asked = 0;
+    }
+
     private void governor(Official o) {
         float stateZ = 0;
         for (Region.Settlement s : w.r.settlements) {
@@ -241,7 +281,7 @@ public final class Command extends Module {
             // quarantine while it can still be contained; give up on it and evacuate once it can't
             float qAt = w.c.rule("quarantineAt", 250), giveUp = w.c.rule("quarantineGiveUp", 2500);
             if (!quarantine[st] && !w.gov.evacuating(st) && !s.capital && rz > qAt && rz < giveUp && w.gov.level >= 2) setQuarantine(st, true);
-            else if (quarantine[st] && (rz > giveUp || rz < 10)) {
+            else if (quarantine[st] && (rz > giveUp || (rz < 10 && calmT[st] > 240))) {
                 setQuarantine(st, false);
                 if (rz > giveUp) {
                     w.gov.setEvac(st, true);
@@ -249,26 +289,58 @@ public final class Command extends Module {
                 }
             }
         }
+        // the plan for the coast: get its people inland before the dead reach them, a town at a time
+        Content.Scenario sc = w.scenario;
+        if (sc != null && "evaccoast".equals(sc.goal) && w.gov.level >= 2 && !w.gov.playerDecides) {
+            Region.Settlement pick = null;
+            for (Region.Settlement s : w.r.settlements) {
+                if (s.state != o.where && o.where >= 0) continue;
+                if ((s.kind != Region.S_CITY && s.kind != Region.S_TOWN) || !w.roles.coastal(s) || w.gov.evacuating(s.id) || quarantine[s.id]) continue;
+                if (w.stats.popBySettlement[s.id] < 500) continue;
+                if (pick == null || repZ[s.id] > repZ[pick.id]) pick = s;
+            }
+            if (pick != null) {
+                w.gov.setEvac(pick.id, true);
+                decide(o, "orders " + pick.name + " evacuated inland before the dead get there.", pick.cx * 16f, pick.cy * 16f, false);
+            }
+        }
         if (!bridgesAuthorised && (w.gov.level >= 3 || w.strat.biggestHorde() != null && w.strat.biggestHorde().count > 400)) {
             bridgesAuthorised = true;
             decide(o, "engineers are authorised to blow bridges in front of the hordes.", -1, -1, false);
         }
-        if (stateZ > 1500 && fedT <= 0) {
-            fedT = 240;
+        if (stateZ > 1500 && stateZ > o.asked * 2.5f) {
+            o.asked = stateZ;
             w.mil.regularT = Math.min(w.mil.regularT, 0);
             decide(o, "requests federal troops.", -1, -1, false);
-        }
+        } else if (stateZ < 50) o.asked = 0;
     }
 
-    private void president(Official o) {
+    private void president(Official o, float dt) {
         float nat = nationalReported();
         Gov g = w.gov;
-        if (nat > 60 && g.level < 2 && g.reported) g.raise(2);
-        if (nat > w.c.rule("martialLawAt", 1200) && g.level < 3) g.raise(3);
-        if (nat > w.c.rule("mobiliseAt", 5000) && g.level < 4) g.raise(4);
-        if (g.level >= 2 && !g.curfew && !g.playerDecides) g.setCurfew(true);
-        // the capital is defended whatever else happens
-        if (capitalT > 0) return;
+        boolean player = w.roles.holds(Roles.PRESIDENT, -1);
+        if (!player) {
+            float mart = w.c.rule("martialLawAt", 1200), mob = w.c.rule("mobiliseAt", 5000);
+            if (nat > 60 && g.level < 2 && g.reported) g.raise(2);
+            if (nat > mart && g.level < 3) g.raise(3);
+            if (nat > mob && g.level < 4) g.raise(4);
+            // and down again, a step at a time, once the picture has stayed well below the mark for long enough
+            float[] mark = {0, 0, 25, mart * 0.15f, mob * 0.15f};
+            float hold = w.c.rule("lowerAfter", 720);
+            for (int lv = 1; lv < downT.length; lv++) downT[lv] = nat <= mark[lv] ? downT[lv] + dt : 0;
+            if (g.level >= 2 && downT[g.level] >= hold * (g.level == 2 ? 2 : 1)) {
+                g.lower(g.level - 1);
+                java.util.Arrays.fill(downT, 0);
+            } else if (g.level == 1 && nat == 0 && downT[2] >= hold * 3) {
+                g.lower(0);
+                java.util.Arrays.fill(downT, 0);
+            }
+            curfewCalmT = nat < 30 ? curfewCalmT + dt : 0;
+            if (g.level >= 2 && !g.curfew && curfewCalmT == 0 && !g.playerDecides) g.setCurfew(true);
+            if (g.curfew && !g.playerDecides && (g.level < 2 || curfewCalmT > w.c.rule("curfewLiftAfter", 480))) g.setCurfew(false);
+        }
+        // the capital is defended whatever else happens (the general does it if the player hands command over)
+        if (capitalT > 0 || !w.forces.aiCommands()) return;
         Region.Settlement c = w.r.city();
         boolean threat = repZ[c.id] > 300;
         Strategic.Horde h = w.strat.biggestHorde();
@@ -278,9 +350,13 @@ public final class Command extends Module {
         }
         if (!threat) return;
         capitalT = 120;
+        int have = 0;
+        for (Forces.Formation f : w.forces.formations) if (f.alive && f.task == c.id) have++;
+        if (have >= 2 + Math.min(4, repZ[c.id] / 5000)) return;
         for (Forces.Formation f : w.forces.formations) {
-            if (!f.alive || f.task != -1 || f.player || f.state == Forces.BROKEN || f.faction != Ents.SOLDIER) continue;
-            if (w.forces.order(f, c.cx * 16f, c.cy * 16f)) {
+            if (!f.alive || f.task != -1 || !w.forces.aiMay(f) || f.state == Forces.BROKEN || f.faction != Ents.SOLDIER) continue;
+            float[] p = w.forces.infectionCentre(c);
+            if (w.forces.order(f, p[0], p[1])) {
                 f.task = c.id;
                 decide(o, "orders the " + f.name + " to defend " + c.name + ".", c.cx * 16f, c.cy * 16f, false);
                 return;
@@ -345,8 +421,8 @@ public final class Command extends Module {
                     if (!w.gov.playerDecides && !w.roles.holds(Roles.INCIDENT, o.where)) mayor(o, 10);
                     break;
                 case CHIEF: chief(o); break;
-                case GOVERNOR: governor(o); break;
-                case PRESIDENT: president(o); break;
+                case GOVERNOR: if (!w.roles.holds(Roles.PRESIDENT, -1)) governor(o); else governorAdvice(o); break;
+                case PRESIDENT: president(o, 10); break;
                 default:
             }
         }
@@ -402,6 +478,7 @@ public final class Command extends Module {
             o.writeFloat(f.cool);
             o.writeUTF(f.last);
             o.writeDouble(f.lastT);
+            o.writeFloat(f.asked);
         }
         int n = repZ.length;
         o.writeInt(n);
@@ -419,6 +496,8 @@ public final class Command extends Module {
         o.writeFloat(hourT);
         o.writeFloat(capitalT);
         o.writeFloat(fedT);
+        for (float d : downT) o.writeFloat(d);
+        o.writeFloat(curfewCalmT);
     }
 
     @Override
@@ -432,6 +511,7 @@ public final class Command extends Module {
             f.cool = in.readFloat();
             f.last = in.readUTF();
             f.lastT = in.readDouble();
+            f.asked = in.readFloat();
         }
         int n = in.readInt();
         for (int i = 0; i < n; i++) {
@@ -452,5 +532,7 @@ public final class Command extends Module {
         hourT = in.readFloat();
         capitalT = in.readFloat();
         fedT = in.readFloat();
+        for (int i = 0; i < downT.length; i++) downT[i] = in.readFloat();
+        curfewCalmT = in.readFloat();
     }
 }

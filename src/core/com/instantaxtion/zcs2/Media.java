@@ -27,6 +27,7 @@ public final class Media extends Module {
         int n = w.r.settlements.size();
         social = new float[n];
         belief = new float[n];
+        java.util.Arrays.fill(lastRumour, -1e9f);
     }
 
     @Override
@@ -57,7 +58,7 @@ public final class Media extends Module {
         for (Region.Settlement s : w.r.settlements) {
             int st = s.id;
             if (s.kind != Region.S_CITY && s.kind != Region.S_TOWN && s.kind != Region.S_VILLAGE) continue;
-            float scale = s.residents * 0.002f + 20;
+            float scale = s.residents * 0.008f + 30;
             float seen = Math.min(1, w.stats.zBySettlement[st] / scale);
             float told = Math.min(1, cmd.repZ[st] / scale);
             float lost = !w.strat.lit(w.r.sectorOfPx(s.cx * 16f, s.cy * 16f)) ? 0.25f : 0;
@@ -71,10 +72,21 @@ public final class Media extends Module {
             if (f > fleeAt && !cmd.quarantined(st) && w.stats.zBySettlement[st] > 0) flee(st, (f - fleeAt) * fleeRate * dt);
         }
         if (biteRumour > 0) biteRumour = Math.max(0, biteRumour - dt / 1440f);
+        // rumours grow out of fear: where people are frightened and the dead are about, and not every hour
         rumourT -= dt;
-        if (rumourT <= 0 && w.gov.level >= 1) {
-            rumourT = 240 + w.rng.nextFloat() * 300;
-            rumour();
+        if (rumourT <= 0) {
+            int scared = -1;
+            float top = w.c.rule("rumourFear", 0.3f);
+            for (int st = 0; st < belief.length; st++)
+                if (fear(st) > top && w.stats.zBySettlement[st] + cmdRep(st) > 0 && w.time - lastRumour[st] > 1440 * 3) {
+                    top = fear(st);
+                    scared = st;
+                }
+            if (scared >= 0 && w.gov.level >= 1) {
+                rumourT = w.c.rule("rumourEvery", 720) * (0.7f + w.rng.nextFloat() * 0.6f);
+                lastRumour[scared] = (float) w.time;
+                rumour(scared);
+            } else rumourT = 60;
         }
         reportT -= dt;
         if (reportT <= 0) {
@@ -101,12 +113,20 @@ public final class Media extends Module {
             if (ci > 0) {
                 sec.inf[s] -= ci;
                 w.strat.pending[st] += ci;
-                w.strat.infectedPending += ci;
+                w.strat.infPending[st] += ci;
             }
         }
     }
 
-    private void rumour() {
+    /** When each town last had a rumour going round (one at a time, not every few hours). */
+    private final float[] lastRumour = new float[512];
+    private float lastFigure;
+
+    private float cmdRep(int st) {
+        return w.command.repZ[st];
+    }
+
+    private void rumour(int scared) {
         Rng r = w.rng;
         float trust = w.gov.trust;
         if (trust > 55 && r.chance(0.45f)) {
@@ -123,20 +143,18 @@ public final class Media extends Module {
         float stick = 1.1f - trust / 100f;
         switch (kind) {
             case R_BITE:
-                w.news.headline("RUMOUR: 'the bite isn't dangerous if you clean it'. Officials say this is false.", -1, -1);
+                w.news.headline("RUMOUR going round " + w.r.settlements.get(scared).name + ": 'the bite isn't dangerous if you clean it'. Officials say this is false.", -1, -1);
                 biteRumour = Math.min(1, biteRumour + 0.7f * stick);
                 break;
             case R_ARMY:
-                w.news.headline("RUMOUR: the army is pulling out tonight. The government denies it. Roads are filling.", -1, -1);
-                for (int i = 0; i < social.length; i++) social[i] = Math.min(1, social[i] + 0.35f * stick);
+                w.news.headline("RUMOUR in " + w.r.settlements.get(scared).name + ": the army is pulling out tonight. The government denies it. Roads are filling.", -1, -1);
+                social[scared] = Math.min(1, social[scared] + 0.5f * stick);
+                for (int i = 0; i < social.length; i++) social[i] = Math.min(1, social[i] + 0.1f * stick);
                 break;
             case R_WATER: {
-                // one town's water is said to be poisoned
-                int best = -1;
-                for (Region.Settlement s : w.r.settlements)
-                    if ((s.kind == Region.S_CITY || s.kind == Region.S_TOWN) && w.stats.popBySettlement[s.id] > 0
-                            && (best < 0 || r.chance(0.3f))) best = s.id;
-                if (best < 0) return;
+                // the most frightened town's water is said to be poisoned
+                int best = scared;
+                if (best < 0 || w.stats.popBySettlement[best] <= 0) return;
                 Region.Settlement s = w.r.settlements.get(best);
                 w.news.headline("RUMOUR: the water in " + s.name + " is poisoned. People are leaving on foot.", s.cx * 16f, s.cy * 16f);
                 social[best] = Math.min(1, social[best] + 0.8f * stick);
@@ -174,8 +192,11 @@ public final class Media extends Module {
         Region.Settlement s = w.r.settlements.get(worst);
         int truth = w.stats.zBySettlement[worst];
         String outlet = OUTLETS[(int) (w.time / 180) % OUTLETS.length];
-        String official = outlet + ": officials put the number of infected in " + s.name + " at " + round((int) wz) + ".";
-        if (worst != lastReported || w.rng.chance(0.3f)) {
+        String official = outlet + ": officials say about " + round((int) wz) + " of the dead are in " + s.name + ".";
+        // the news runs the figure when it's new: another town, or a number that has moved
+        boolean moved = Math.abs(wz - lastFigure) > Math.max(20, lastFigure * 0.25f);
+        if (worst != lastReported || moved) {
+            lastFigure = wz;
             w.news.radio(official, s.cx * 16f, s.cy * 16f, News.CALL);
             // online the number is bigger (and sometimes closer to the truth)
             int claim = (int) Math.max(truth * (0.8f + social[worst]), wz * 2);
@@ -201,6 +222,8 @@ public final class Media extends Module {
         o.writeFloat(rumourT);
         o.writeFloat(reportT);
         o.writeInt(lastReported);
+        o.writeFloat(lastFigure);
+        for (int i = 0; i < social.length; i++) o.writeFloat(lastRumour[i]);
     }
 
     @Override
@@ -217,5 +240,7 @@ public final class Media extends Module {
         rumourT = in.readFloat();
         reportT = in.readFloat();
         lastReported = in.readInt();
+        lastFigure = in.readFloat();
+        for (int i = 0; i < social.length; i++) lastRumour[i] = in.readFloat();
     }
 }

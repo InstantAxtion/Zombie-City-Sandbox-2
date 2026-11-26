@@ -35,6 +35,12 @@ public final class Forces extends Module {
         public float gx, gy, gunT;
         public int start, kills, losses, tanksOut, home = -1, task = -1;
         public boolean alive = true, outside, player;
+        /** Handed to the AI general by the player (when the general doesn't command everyone). */
+        public boolean released;
+        /** What the general sent it to do: JOB_* and which (a horde's id, a sector). */
+        public int job, jobId = -1;
+        /** Game seconds with nothing to do (it goes home after a while), and since it was last given a job. */
+        public float idleT, jobT;
 
         public int strength() {
             return hq.poolTotal() + deployed;
@@ -47,6 +53,12 @@ public final class Forces extends Module {
     private final List<Integer> freeSquads = new ArrayList<Integer>();
     private int nextFormationNo = 1;
     private float commandT;
+    public static final int JOB_NONE = 0, JOB_TOWN = 1, JOB_HORDE = 2, JOB_NEST = 3, JOB_HOME = 4;
+    /**
+     * Does the AI general command the army? Yes, unless the player is the President or the Military commander and
+     * hasn't handed it over; then the general commands only the formations the player released.
+     */
+    public boolean generalCommands = true;
     private final float[] tmp = new float[4];
 
     public Forces(World w) {
@@ -281,6 +293,7 @@ public final class Forces extends Module {
         float dx = x - f.hq.x, dy = y - f.hq.y;
         float over = w.c.rule("troopTrainOver", 4000);
         if (dx * dx + dy * dy < over * over) return false;
+        if (w.navy.airliftable(f, x, y)) return false; // flown instead (Navy)
         int a = rg.nearestNode(f.hq.x, f.hq.y, 700), b = rg.nearestNode(x, y, 2500);
         if (a < 0 || b < 0 || a == b) return false;
         int[] rt = rg.route(a, b);
@@ -293,7 +306,7 @@ public final class Forces extends Module {
         f.hq.y = rg.ny[a];
         f.state = RAIL;
         for (Squads.Squad s : w.sq.list) if (s.alive && s.home == f.hq.id && !s.player) standDown(s);
-        w.news.radio("The " + f.name + " is boarding a troop train", f.hq.x, f.hq.y, News.COMMAND);
+        w.news.count("trains", "The " + f.name + " is boarding a troop train|%d more formations boarded troop trains", 1, f.hq.x, f.hq.y);
         w.stats.troopTrains++;
         return true;
     }
@@ -415,6 +428,7 @@ public final class Forces extends Module {
             if (f.state == HOLDING || f.state == BROKEN) {
                 tanks(f);
                 artillery(f, dt);
+                resupply(f, dt);
             }
         }
         aggregate(dt);
@@ -423,6 +437,28 @@ public final class Forces extends Module {
             commandT = 30;
             command();
         }
+    }
+
+    /** A formation running low draws ammunition from a depot close behind it (a base, an armory, a forward base). */
+    private void resupply(Formation f, float dt) {
+        float want = Math.max(4000, f.start * 60f);
+        if (f.hq.ammo >= want * 0.6f) return;
+        Region.Facility best = null;
+        float bd = 3000 * 3000;
+        for (Region.Facility d : w.r.facilities) {
+            if (d.kind != Region.F_BASE && d.kind != Region.F_ARMORY && d.kind != Region.F_FOB && d.kind != Region.F_AIRBASE && d.kind != Region.F_PORT) continue;
+            if (d.ammo < 2000 || !w.strat.online(d.id)) continue;
+            float dx = d.x - f.hq.x, dy = d.y - f.hq.y, dd = dx * dx + dy * dy;
+            if (dd < bd) {
+                bd = dd;
+                best = d;
+            }
+        }
+        if (best == null) return;
+        float give = Math.min(best.ammo - 1000, Math.min(want - f.hq.ammo, 150 * dt));
+        if (give <= 0) return;
+        best.ammo -= give;
+        f.hq.ammo += give;
     }
 
     /** Tanks leave the formation for the biggest fight near it, and come back when it's over. */
@@ -455,9 +491,11 @@ public final class Forces extends Module {
         if (f.t.guns <= 0) return;
         f.gunT -= dt;
         if (f.gunT > 0) return;
-        f.gunT = 20;
+        f.gunT = w.c.rule("gunEvery", 60);
+        if (f.hq.ammo < f.t.guns * 20) return;
         float range = 7000;
-        int best = -1, bz = 0;
+        int best = -1;
+        float bscore = 0;
         Sectors sec = w.sec;
         float cs = Region.SECT * Tile.SIZE;
         int sx0 = Math.max(0, (int) ((f.hq.x - range) / cs)), sx1 = Math.min(sec.sw - 1, (int) ((f.hq.x + range) / cs));
@@ -466,15 +504,20 @@ public final class Forces extends Module {
             for (int sx = sx0; sx <= sx1; sx++) {
                 int s = sy * sec.sw + sx;
                 int z = sec.zIn[s] + w.sp.secZ[s];
-                if (z < 60 || sec.popIn[s] > 300 || w.sp.secCiv[s] + w.sp.secCop[s] + w.sp.secSol[s] > 0) continue;
-                if (z > bz) {
-                    bz = z;
+                if (z < 150 || w.sp.secCiv[s] + w.sp.secCop[s] + w.sp.secSol[s] > 0) continue;
+                // empty ground first; a street with people still sheltering only when the dead there far outnumber them
+                int people = sec.popIn[s];
+                if (people > 0 && z < people * 4) continue;
+                float score = z / (1f + people * 0.5f);
+                if (score > bscore) {
+                    bscore = score;
                     best = s;
                 }
             }
         if (best < 0) return;
         float tx = sec.cx(best), ty = sec.cy(best);
         Content.Weapon gun = w.c.weapon("tank_gun");
+        f.hq.ammo -= f.t.guns * 20;
         if (!w.strategic && (sec.hot[best] > 0 || sec.cam[best])) {
             for (int k = 0; k < f.t.guns; k++) {
                 float ox = (Rng.unit(w.seed, w.tick, k * 2L) - 0.5f) * 220, oy = (Rng.unit(w.seed, w.tick, k * 2L + 1) - 0.5f) * 220;
@@ -486,19 +529,41 @@ public final class Forces extends Module {
                 w.combat.blast(tx + ox, ty + oy, 70, gun != null ? gun.blastDmg : 400, -1, Ents.SOLDIER);
             }
         } else {
-            int kill = Math.min(sec.zIn[best], f.t.guns * 6);
+            int kill = Math.min(sec.zIn[best], f.t.guns * 12);
             sec.zIn[best] -= kill;
+            sec.bodies[best] += kill;
             w.stats.killsBySide[2] += kill;
             w.stats.zombieKills += kill;
             f.kills += kill;
+            shellCivilians(best, f.t.guns, f.name);
         }
         w.stats.artillery++;
-        if (w.stats.artillery <= 3) w.news.radio(f.name + ": fire mission on a mass of the dead", tx, ty, News.COMMAND);
+        int st = sec.settlement[best];
+        String where = st >= 0 ? " round " + w.r.settlements.get(st).name : " in open country";
+        w.news.count("guns:" + f.id, f.name + ": fire mission on a mass of the dead" + where + "|" + f.name + ": %d more fire missions" + where, 1, tx, ty);
+    }
+
+    /** Shells landing on a street where people are still sheltering kill some of them: said out loud, not hidden. */
+    private void shellCivilians(int s, int guns, String who) {
+        int people = w.sec.popIn[s];
+        if (people <= 0) return;
+        int lost = Math.min(people, stoch(guns * 1.5f * Math.min(1, people / 400f), s * 23L + 7));
+        if (lost <= 0) return;
+        w.sec.popIn[s] -= lost;
+        w.sec.bodies[s] += lost;
+        w.stats.civDeaths += lost;
+        w.stats.shelledCivilians += lost;
+        w.stats.lossBy[3] += lost;
+        int st = w.sec.settlement[s];
+        if (st >= 0) w.stats.lostBySettlement[st] += lost;
+        w.gov.trust -= lost * 0.02f;
+        w.news.count("shelled:" + st, "Shelling " + (st >= 0 ? "in " + w.r.settlements.get(st).name : "in the country") + " killed %d people sheltering in their homes", lost, w.sec.cx(s), w.sec.cy(s));
     }
 
     /** Fights nobody is watching: the people at each station and formation against the dead counted near it. */
     private void aggregate(float dt) {
         float kill = w.c.rule("aggregateKill", 0.02f), loss = w.c.rule("aggregateLoss", 0.0008f);
+        float rounds = w.c.rule("roundsPerKill", 4);
         Sectors sec = w.sec;
         for (Region.Facility f : w.r.facilities) {
             if (f.pool == null || !w.strat.online(f.id)) continue;
@@ -537,7 +602,7 @@ public final class Forces extends Module {
                     w.stats.killsBySide[faction == Ents.COP ? 1 : 2] += k;
                     w.stats.zombieKills += k;
                     if (fm != null) fm.kills += k;
-                    f.ammo = Math.max(0, f.ammo - k * 10);
+                    f.ammo = Math.max(0, f.ammo - k * rounds);
                     // and the cost: only the dead in contact (a few for each defender) can reach anyone
                     float contact = Math.min(z, share * 6);
                     int lost = Math.min(armed, stoch(contact * loss * dt / dist, s * 19L + f.id));
@@ -558,12 +623,14 @@ public final class Forces extends Module {
                 Content.VType tankT = w.c.vtype("tank");
                 if (tankT != null) armed += fm.hq.vpool[tankT.index] * 8;
                 if (armed <= 0) continue;
-                int k = Math.min(h.count, stoch(armed * kill * dt * (fm.hq.ammo > 0 ? 1 : 0.25f), h.id * 7L + fm.id));
+                // a horde in the open is a target, but only its front ranks are in reach at once
+                float reach = Math.min(armed, (float) Math.sqrt(h.count) * 12);
+                int k = Math.min(h.count, stoch(reach * kill * dt * (fm.hq.ammo > 0 ? 1 : 0.25f), h.id * 7L + fm.id));
                 h.count -= k;
                 fm.kills += k;
                 w.stats.killsBySide[2] += k;
                 w.stats.zombieKills += k;
-                fm.hq.ammo = Math.max(0, fm.hq.ammo - k * 10);
+                fm.hq.ammo = Math.max(0, fm.hq.ammo - k * rounds);
                 int lost = Math.min(armed, stoch(Math.min(h.count, armed * 6) * loss * dt * 0.5f, h.id * 11L + fm.id));
                 for (int l = 0; l < lost; l++) loseOne(fm.hq, fm.faction, w.r.sectorOfPx(fm.hq.x, fm.hq.y));
                 fm.losses += lost;
@@ -591,57 +658,225 @@ public final class Forces extends Module {
 
     // ------------------------------------------------------------------ the military command
 
-    /** Sends formations to the worst places, keeping one back for the capital. */
+    /** May the AI general move this formation? */
+    public boolean aiMay(Formation f) {
+        if (f.player) return false;
+        return generalCommands || f.released;
+    }
+
+    /** Is anything at all left to the AI general? */
+    public boolean aiCommands() {
+        if (generalCommands) return true;
+        for (Formation f : formations) if (f.alive && f.released && !f.player) return true;
+        return false;
+    }
+
+    /** The player hands the whole army to the general (or takes it back). */
+    public void setGeneralCommands(boolean on) {
+        if (generalCommands == on) return;
+        generalCommands = on;
+        w.news.radio(on ? "The general takes command of the army." : "The army waits for your orders.", -1, -1, News.COMMAND);
+    }
+
+    /** A job for the general: a town, a horde or a nest of the dead in the country. */
+    private static final class Job {
+        int kind, id, want, have;
+        float x, y, score;
+        String name;
+    }
+
+    /**
+     * The general's plan, every half minute: every place the dead are known to be (towns by what's reported,
+     * hordes and big nests in the country by air reconnaissance) gets formations in proportion to its size, the
+     * nearest free ones first, each to its own part of the fight; formations whose job is done look for another,
+     * and go home after a quiet while.
+     */
     private void command() {
-        if (w.roles.holds(Roles.PRESIDENT, -1) || w.roles.holds(Roles.MILITARY, -1)) {
-            // the player commands; idle formations only defend where they stand
-            return;
-        }
-        // the general plans with what's been reported, not the truth
         int[] z = w.command.reportedZ();
-        for (Formation f : formations) if (f.task == -2) f.task = -1; // couldn't get there last time: try again
-        List<Region.Settlement> threats = new ArrayList<Region.Settlement>();
-        for (Region.Settlement s : w.r.settlements)
-            if ((s.kind == Region.S_CITY || s.kind == Region.S_TOWN) && z[s.id] > 150 && !w.command.isAbandoned(s.id)) threats.add(s);
-        // the worst first: more of the dead, more people at stake
-        java.util.Collections.sort(threats, new java.util.Comparator<Region.Settlement>() {
-            public int compare(Region.Settlement a, Region.Settlement b) {
-                float sa = w.command.repZ[a.id] + w.stats.popBySettlement[a.id] * 0.002f + (a.capital ? 5000 : 0);
-                float sb = w.command.repZ[b.id] + w.stats.popBySettlement[b.id] * 0.002f + (b.capital ? 5000 : 0);
-                return Float.compare(sb, sa);
+        List<Job> jobs = new ArrayList<Job>();
+        float per = w.c.rule("deadPerFormation", 2500);
+        for (Region.Settlement s : w.r.settlements) {
+            if (s.kind != Region.S_CITY && s.kind != Region.S_TOWN && s.kind != Region.S_VILLAGE) continue;
+            if (z[s.id] < 15 || w.command.isAbandoned(s.id) && !s.capital) continue;
+            Job j = new Job();
+            j.kind = JOB_TOWN;
+            j.id = s.id;
+            j.want = Math.min(s.capital ? 10 : 6, 1 + (int) (z[s.id] / per));
+            j.x = s.cx * 16f;
+            j.y = s.cy * 16f;
+            j.score = z[s.id] + w.stats.popBySettlement[s.id] * 0.01f + (s.capital ? 20000 : 0);
+            j.name = s.name;
+            jobs.add(j);
+        }
+        for (Strategic.Horde h : w.strat.hordes) {
+            if (!h.alive || h.count < 400) continue;
+            Job j = new Job();
+            j.kind = JOB_HORDE;
+            j.id = h.id;
+            j.want = Math.min(6, 1 + (int) (h.count / (per * 1.5f)));
+            // meet it on its way, between it and where it's going
+            float tx = h.target >= 0 ? h.tx : h.x, ty = h.target >= 0 ? h.ty : h.y;
+            j.x = h.x + (tx - h.x) * 0.35f;
+            j.y = h.y + (ty - h.y) * 0.35f;
+            j.score = h.count * 1.2f;
+            j.name = "a horde of " + WorldView.fmt(h.count);
+            jobs.add(j);
+        }
+        // nests: the dead massed in the country, outside any town (the biggest few, not next to each other)
+        Sectors sec = w.sec;
+        int nestMin = jobs.size() > 4 ? 600 : jobs.isEmpty() ? 60 : 250;
+        for (int pass = 0; pass < 6; pass++) {
+            int best = -1, bz = nestMin;
+            for (int s = 0; s < sec.n; s++) {
+                if (sec.settlement[s] >= 0 || sec.zIn[s] <= bz) continue;
+                boolean taken = false;
+                for (Job j : jobs)
+                    if (j.kind == JOB_NEST && Math.abs(j.id % sec.sw - s % sec.sw) <= 3 && Math.abs(j.id / sec.sw - s / sec.sw) <= 3) taken = true;
+                if (taken) continue;
+                bz = sec.zIn[s];
+                best = s;
+            }
+            if (best < 0) break;
+            int around = 0;
+            for (int dy = -2; dy <= 2; dy++)
+                for (int dx = -2; dx <= 2; dx++) {
+                    int x = best % sec.sw + dx, y = best / sec.sw + dy;
+                    if (x >= 0 && y >= 0 && x < sec.sw && y < sec.sh && sec.settlement[y * sec.sw + x] < 0) around += sec.zIn[y * sec.sw + x];
+                }
+            Job j = new Job();
+            j.kind = JOB_NEST;
+            j.id = best;
+            j.want = Math.min(4, 1 + (int) (around / (per * 2)));
+            j.x = sec.cx(best);
+            j.y = sec.cy(best);
+            j.score = around * 0.8f;
+            j.name = "the dead massed in open country";
+            jobs.add(j);
+        }
+        // formations whose job is over are free again
+        for (Formation f : formations) {
+            if (!f.alive || !aiMay(f)) continue;
+            if (f.task == -2) f.task = -1;
+            f.jobT += 30;
+            boolean done = false;
+            if (f.job == JOB_TOWN && f.task >= 0) done = z[f.task] < 20 && f.jobT > 120;
+            else if (f.job == JOB_HORDE) {
+                done = true;
+                for (Job j : jobs) if (j.kind == JOB_HORDE && j.id == f.jobId) done = false;
+            } else if (f.job == JOB_NEST) {
+                done = f.jobId < 0 || f.jobId >= sec.n || sec.zIn[f.jobId] < 20 && f.state == HOLDING;
+            } else if (f.job == JOB_NONE && f.task >= 0) {
+                // sent somewhere by someone else (the president, the player before handing over)
+                done = z[f.task] < 20 && f.jobT > 120;
+            }
+            if (done) {
+                f.task = -1;
+                f.job = JOB_NONE;
+                f.jobId = -1;
+            }
+            for (Job j : jobs)
+                if (f.job == j.kind && f.jobId == j.id && f.state != BROKEN) j.have++;
+                else if (f.job == JOB_NONE && j.kind == JOB_TOWN && f.task == j.id && f.state != BROKEN) j.have++;
+        }
+        java.util.Collections.sort(jobs, new java.util.Comparator<Job>() {
+            public int compare(Job a, Job b) {
+                return Float.compare(b.score, a.score);
             }
         });
-        for (Region.Settlement s : threats) {
-            int want = 1 + z[s.id] / 1500;
-            int have = 0;
-            for (Formation f : formations) if (f.alive && f.task == s.id && f.state != BROKEN) have++;
-            while (have < want) {
+        for (Job j : jobs) {
+            int guard = 0;
+            while (j.have < j.want && guard++ < 8) {
                 Formation best = null;
                 float bd = Float.MAX_VALUE;
                 for (Formation f : formations) {
-                    if (!f.alive || f.task != -1 || f.state == BROKEN || f.player || f.faction != Ents.SOLDIER && z[s.id] > 600) continue;
-                    float dx = f.hq.x - s.cx * 16f, dy = f.hq.y - s.cy * 16f, d = dx * dx + dy * dy;
+                    if (!f.alive || f.task != -1 || f.job != JOB_NONE && f.job != JOB_HOME || f.state == BROKEN || !aiMay(f)) continue;
+                    if (f.faction != Ents.SOLDIER && j.kind != JOB_TOWN) continue;
+                    if (f.hq.ammo <= 0 && f.t.guns == 0) continue;
+                    float dx = f.hq.x - j.x, dy = f.hq.y - j.y, d = dx * dx + dy * dy;
                     if (d < bd) {
                         bd = d;
                         best = f;
                     }
                 }
-                if (best == null) return;
-                // hold between the infection and the rest of the town
-                float[] p = infectionCentre(s);
-                float tx = p[0], ty = p[1];
-                if (order(best, tx, ty)) {
-                    best.task = s.id;
-                    w.news.radio("Command: " + best.name + " ordered to " + s.name, tx, ty, News.COMMAND);
-                    have++;
+                if (best == null) break;
+                float[] p = j.kind == JOB_TOWN ? frontFor(w.r.settlements.get(j.id), j.have) : new float[]{j.x, j.y};
+                if (order(best, p[0], p[1])) {
+                    best.job = j.kind;
+                    best.jobId = j.id;
+                    best.task = j.kind == JOB_TOWN ? j.id : -3;
+                    best.jobT = 0;
+                    best.idleT = 0;
+                    w.news.count("ordered:" + j.kind + ":" + j.id, "Command: the " + best.name + " is sent against " + j.name + "|Command: %d more formations sent against " + j.name, 1, p[0], p[1]);
+                    j.have++;
                 } else best.task = -2;
             }
         }
-        // formations whose town is quiet again go back to waiting
-        for (Formation f : formations) {
-            if (!f.alive || f.task < 0 || f.player) continue;
-            if (z[f.task] < 30) f.task = -1;
+        // whoever is still free joins the biggest fights, each to a part of the line nobody holds yet
+        if (!jobs.isEmpty()) {
+            int ji = 0;
+            for (Formation f : formations) {
+                if (!f.alive || f.task != -1 || f.job != JOB_NONE || f.state == BROKEN || !aiMay(f) || travelling(f)) continue;
+                if (f.hq.ammo <= 0 && f.t.guns == 0) continue;
+                Job j = jobs.get(ji % Math.min(3, jobs.size()));
+                ji++;
+                if (j.have >= j.want * 3) continue;
+                if (f.faction != Ents.SOLDIER && j.kind != JOB_TOWN) continue;
+                float[] p = j.kind == JOB_TOWN ? frontFor(w.r.settlements.get(j.id), j.have) : new float[]{j.x, j.y};
+                if (order(f, p[0], p[1])) {
+                    f.job = j.kind;
+                    f.jobId = j.id;
+                    f.task = j.kind == JOB_TOWN ? j.id : -3;
+                    f.jobT = 0;
+                    j.have++;
+                }
+            }
         }
+        // a formation that stopped short (contact on the road) and has cleared the way pushes on to its place in the line
+        for (Formation f : formations) {
+            if (!f.alive || f.job != JOB_TOWN || f.task < 0 || f.state != HOLDING || !aiMay(f) || f.jobT < 60) continue;
+            int s = w.r.sectorOfPx(f.hq.x, f.hq.y);
+            if (sec.zIn[s] + w.sp.secZ[s] > 30 || sec.settlement[s] == f.task) continue;
+            int k = 0;
+            for (Formation g : formations) if (g != f && g.alive && g.task == f.task && g.id < f.id) k++;
+            float[] p = frontFor(w.r.settlements.get(f.task), k);
+            float dx = p[0] - f.hq.x, dy = p[1] - f.hq.y;
+            if (dx * dx + dy * dy > 1200 * 1200) order(f, p[0], p[1]);
+        }
+        // nothing to do for a long while: home to barracks (and outside units back over the border, see Recovery)
+        for (Formation f : formations) {
+            if (!f.alive || !aiMay(f)) continue;
+            boolean idle = f.task == -1 && (f.job == JOB_NONE || f.job == JOB_HOME);
+            f.idleT = idle ? f.idleT + 30 : 0;
+            if (idle && f.job == JOB_NONE && f.idleT > w.c.rule("goHomeAfter", 720) && f.home >= 0 && !f.outside && !travelling(f)) {
+                Region.Facility h = w.r.facilities.get(f.home);
+                float dx = h.x - f.hq.x, dy = h.y - f.hq.y;
+                if (dx * dx + dy * dy > 800 * 800 && order(f, h.x, h.y)) {
+                    f.job = JOB_HOME;
+                    w.news.count("home", "The " + f.name + " returns to barracks|%d more formations returned to barracks", 1, h.x, h.y);
+                }
+            }
+        }
+    }
+
+    /** Where the k-th formation sent to a town takes its place: the worst streets first, one formation to each. */
+    float[] frontFor(Region.Settlement s, int k) {
+        Sectors sec = w.sec;
+        int[] top = new int[k + 1];
+        java.util.Arrays.fill(top, -1);
+        for (int q = 0; q < sec.n; q++) {
+            if (sec.settlement[q] != s.id) continue;
+            int z = sec.zIn[q] + w.sp.secZ[q];
+            if (z <= 0) continue;
+            for (int i = 0; i <= k; i++) {
+                if (top[i] < 0 || z > sec.zIn[top[i]] + w.sp.secZ[top[i]]) {
+                    for (int m = k; m > i; m--) top[m] = top[m - 1];
+                    top[i] = q;
+                    break;
+                }
+            }
+        }
+        for (int i = k; i >= 0; i--) if (top[i] >= 0) return new float[]{sec.cx(top[i]), sec.cy(top[i])};
+        return infectionCentre(s);
     }
 
     /** A fire mission ordered by the player: the nearest battery in range shells (x, y). False if none can. */
@@ -671,9 +906,7 @@ public final class Forces extends Module {
             w.stats.zombieKills += kill;
             best.kills += kill;
             // and the people sheltering there
-            int lost = Math.min(w.sec.popIn[s], best.t.guns * 3);
-            w.sec.popIn[s] -= lost;
-            w.stats.civDeaths += lost;
+            shellCivilians(s, best.t.guns, best.name);
         }
         w.stats.artillery++;
         w.news.radio(best.name + ": fire mission, shot out", x, y, News.COMMAND);
@@ -876,9 +1109,15 @@ public final class Forces extends Module {
             o.writeBoolean(f.alive);
             o.writeBoolean(f.outside);
             o.writeBoolean(f.player);
+            o.writeBoolean(f.released);
+            o.writeInt(f.job);
+            o.writeInt(f.jobId);
+            o.writeFloat(f.idleT);
+            o.writeFloat(f.jobT);
         }
         o.writeInt(freeSquads.size());
         for (int id : freeSquads) o.writeInt(id);
+        o.writeBoolean(generalCommands);
     }
 
     @Override
@@ -913,10 +1152,16 @@ public final class Forces extends Module {
             f.alive = in.readBoolean();
             f.outside = in.readBoolean();
             f.player = in.readBoolean();
+            f.released = in.readBoolean();
+            f.job = in.readInt();
+            f.jobId = in.readInt();
+            f.idleT = in.readFloat();
+            f.jobT = in.readFloat();
             formations.add(f);
         }
         n = in.readInt();
         freeSquads.clear();
         for (int k = 0; k < n; k++) freeSquads.add(in.readInt());
+        generalCommands = in.readBoolean();
     }
 }

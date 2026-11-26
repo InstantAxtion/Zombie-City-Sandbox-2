@@ -71,9 +71,14 @@ public final class Engineers extends Module {
             holdT[i] = f.state == Forces.HOLDING ? holdT[i] + dt : 0;
             Region.Facility fob = fobNear(f.hq.x, f.hq.y, 2500);
             // a forward base: the engineers dig in once the line has held a while
-            if (fob == null && holdT[i] >= fobAfter && engineers(f) > 0) {
-                int n = w.r.roads.nearestNode(f.hq.x, f.hq.y, 600);
-                float x = n >= 0 ? w.r.roads.nx[n] : f.hq.x, y = n >= 0 ? w.r.roads.ny[n] : f.hq.y;
+            if (fobCool.length < fs.size()) fobCool = java.util.Arrays.copyOf(fobCool, fs.size());
+            if (fobCool[i] > 0) fobCool[i] -= dt;
+            // behind the line, not in the middle of the dead: back from the front towards home, on a road
+            float[] p = fob == null && holdT[i] >= fobAfter && engineers(f) > 0 && fobCool[i] <= 0 ? safeSpot(f) : null;
+            if (p != null) {
+                int n = w.r.roads.nearestNode(p[0], p[1], 600);
+                float x = n >= 0 ? w.r.roads.nx[n] : p[0], y = n >= 0 ? w.r.roads.ny[n] : p[1];
+                fobCool[i] = w.c.rule("fobCooldown", 1440);
                 fob = w.r.addFacility(Region.F_FOB, -1, x, y, "FOB " + Forces.shortName(f));
                 fob.node = n;
                 fob.ammo = 15000;
@@ -81,7 +86,7 @@ public final class Engineers extends Module {
                 fob.med = 500;
                 w.strat.extendFacilities();
                 fobs++;
-                w.news.radio(f.name + ": engineers have set up a forward base (ammunition, fuel, a field hospital)", x, y, News.COMMAND);
+                w.news.count("fob", f.name + ": engineers have set up a forward base (ammunition, fuel, a field hospital)|Engineers set up %d more forward bases", 1, x, y);
             }
             boolean care = fob != null || (f.home >= 0 && near(f, w.r.facilities.get(f.home), 2500));
             if (fob != null && f.hq.ammo < 20000 && fob.ammo > 0) {
@@ -107,6 +112,27 @@ public final class Engineers extends Module {
             wallT = 120;
             barricades();
         }
+    }
+
+    private float[] fobCool = new float[0];
+
+    /** A quiet place behind a formation: no dead in that sector or next to it. Null if there's none close. */
+    private float[] safeSpot(Forces.Formation f) {
+        Sectors sec = w.sec;
+        float hx = f.home >= 0 ? w.r.facilities.get(f.home).x : sec.cx(sec.n / 2), hy = f.home >= 0 ? w.r.facilities.get(f.home).y : sec.cy(sec.n / 2);
+        float dx = hx - f.hq.x, dy = hy - f.hq.y, d = (float) Math.sqrt(dx * dx + dy * dy) + 1;
+        for (int k = 1; k <= 4; k++) {
+            float x = f.hq.x + dx / d * 600 * k, y = f.hq.y + dy / d * 600 * k;
+            if (x < 0 || y < 0 || x >= w.r.px() || y >= w.r.px()) break;
+            int s = w.r.sectorOfPx(x, y);
+            boolean quiet = sec.zIn[s] + w.sp.secZ[s] == 0;
+            for (int q = 0; q < 8 && quiet; q++) {
+                int t = sec.neighbour(s, q);
+                if (t >= 0 && sec.zIn[t] + w.sp.secZ[t] > 20) quiet = false;
+            }
+            if (quiet && w.r.walkablePx(x, y)) return new float[]{x, y};
+        }
+        return null;
     }
 
     private boolean near(Forces.Formation f, Region.Facility g, float reach) {
@@ -176,6 +202,8 @@ public final class Engineers extends Module {
         for (long[] b : built) o.writeLong(b[0]);
         o.writeFloat(wallT);
         o.writeInt(fobs);
+        o.writeInt(fobCool.length);
+        for (float c : fobCool) o.writeFloat(c);
         o.writeInt(barricades);
         o.writeInt(recovered);
     }
@@ -196,6 +224,8 @@ public final class Engineers extends Module {
         for (int k = 0; k < n; k++) built.add(new long[]{in.readLong()});
         wallT = in.readFloat();
         fobs = in.readInt();
+        fobCool = new float[in.readInt()];
+        for (int i = 0; i < fobCool.length; i++) fobCool[i] = in.readFloat();
         barricades = in.readInt();
         recovered = in.readInt();
     }

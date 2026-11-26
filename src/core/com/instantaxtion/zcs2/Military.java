@@ -82,22 +82,26 @@ public final class Military {
             if (!armyCalled[st]) continue;
             if (!w.disp.perimeterMode(st)) armyCalled[st] = false;
         }
-        if (w.gov.level >= 3 && strikeT <= 0 && !w.strategic) autoStrike();
+        if (w.gov.level >= 3 && strikeT <= 0) autoStrike();
         // (supplies travel as convoys now: see Logistics)
-        // outside help, growing with the crisis
+        // outside help arrives as formations on the highways, as much as the reported picture calls for
         int dead = w.totalZombies();
-        // outside help arrives as formations on the highways, growing with the crisis
-        if (w.gov.level >= 2 && waveT <= 0 && dead > 40 && wavesArrived < 6) {
+        float nat = w.command.nationalReported();
+        int soldiers = w.forces.total(Ents.SOLDIER), police = w.forces.total(Ents.COP);
+        if (w.gov.level >= 2 && waveT <= 0 && dead > 40 && wavesArrived < 6 && police < 4000 + nat * 0.1f) {
             arrive("police_reserve", "State Police");
             waveT = 240;
         }
-        if (w.gov.level >= 3 && guardT <= 0 && guardsArrived < 10 && dead > 300) {
+        int alive = 0;
+        for (Forces.Formation f : w.forces.formations) if (f.alive) alive++;
+        boolean room = alive < w.c.rule("maxFormations", 45);
+        if (w.gov.level >= 3 && guardT <= 0 && room && dead > 100 && soldiers < 2000 + nat * 0.15f) {
             arrive("guard_brigade", "National Guard");
             guardsArrived++;
             guardT = w.c.rule("mobiliseEvery", 240) * 1.25f;
         }
-        // national mobilisation: a new formation every four game hours for as long as it takes
-        if (w.gov.level >= 4 && regularT <= 0 && regularsArrived < 60 && dead > 1500) {
+        // national mobilisation: a new formation every few game hours while the reported dead outnumber the army
+        if (w.gov.level >= 4 && regularT <= 0 && room && dead > 1500 && soldiers < nat * w.c.rule("soldiersPerDead", 0.08f)) {
             String[] kinds = {"infantry", "armour", "infantry", "artillery"};
             arrive(kinds[regularsArrived % kinds.length], "Army");
             regularsArrived++;
@@ -135,8 +139,9 @@ public final class Military {
         return f;
     }
 
-    /** Air strikes on big masses of the dead where no one living is close. */
+    /** Air strikes on big masses of the dead where no one living is close (jets from a working air base or airport). */
     private void autoStrike() {
+        if (!airfield()) return;
         int best = -1, bz = 0;
         for (int s = 0; s < w.sec.n; s++) {
             int z = w.sp.secZ[s] + w.sec.zIn[s];
@@ -148,18 +153,43 @@ public final class Military {
             }
         }
         float tx, ty;
-        if (best < 0) {
-            Strategic.Horde h = w.strat.biggestHorde();
-            if (h == null || h.count < 600) return;
+        Strategic.Horde h = w.strat.biggestHorde();
+        boolean horde = h != null && h.count >= 600 && h.count > bz;
+        if (horde) {
             tx = h.x;
             ty = h.y;
-        } else {
+        } else if (best >= 0) {
             tx = w.sec.cx(best);
             ty = w.sec.cy(best);
+        } else return;
+        strikeT = w.c.rule("strikeEvery", 180);
+        if (w.strategic) {
+            // in fast-forward the sortie is settled as numbers
+            int killed;
+            if (horde) {
+                killed = Math.min(h.count, (int) (h.count * 0.08f) + 150);
+                h.count -= killed;
+            } else {
+                killed = Math.min(w.sec.zIn[best], (int) (w.sec.zIn[best] * 0.25f) + 60);
+                w.sec.zIn[best] -= killed;
+                w.sec.bodies[best] += killed;
+            }
+            w.stats.killsBySide[2] += killed;
+            w.stats.zombieKills += killed;
+            w.stats.airStrikes++;
+            w.stats.strikeKills += killed;
+            w.news.tally("strikes", "Air strike on " + (horde ? "a horde" : "a mass of the dead") + ": about {m} destroyed|Air strikes since the last report: {n} sorties, about {m} of the dead destroyed", 1, killed, tx, ty, News.COMMAND);
+            return;
         }
         if (w.sp.livingNear(w.e, tx, ty, 260, 1) > 0) return;
         callStrike(tx, ty, false);
-        strikeT = 120;
+    }
+
+    /** Somewhere jets can fly from: the air base, or the airport, while it's ours. */
+    public boolean airfield() {
+        for (Region.Facility f : w.r.facilities)
+            if ((f.kind == Region.F_AIRBASE || f.kind == Region.F_AIRPORT || f.kind == Region.F_BASE) && w.strat.online(f.id)) return true;
+        return false;
     }
 
     /** An air strike on (x, y). Returns false if none can fly. */

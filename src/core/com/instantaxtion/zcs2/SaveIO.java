@@ -412,7 +412,7 @@ public final class SaveIO {
         o.writeInt(s.strain); o.writeFloat(s.strainClock); o.writeFloat(s.crashX); o.writeFloat(s.crashY);
         o.writeInt(s.evacuatedOut); o.writeInt(s.evacuatedArrived);
         ints(o, s.pending, s.pending.length);
-        o.writeFloat(s.columnT); o.writeInt(s.startTownPop); o.writeInt(s.startCityPop); o.writeInt(s.infectedPending);
+        o.writeFloat(s.columnT); o.writeInt(s.startTownPop); o.writeInt(s.startCityPop); o.writeInt(0);
         o.writeInt(s.nextHorde);
         o.writeFloat(s.playerJoyX); o.writeFloat(s.playerJoyY); o.writeBoolean(s.playerFire);
     }
@@ -443,7 +443,7 @@ public final class SaveIO {
         s.strain = in.readInt(); s.strainClock = in.readFloat(); s.crashX = in.readFloat(); s.crashY = in.readFloat();
         s.evacuatedOut = in.readInt(); s.evacuatedArrived = in.readInt();
         readInts(in, s.pending);
-        s.columnT = in.readFloat(); s.startTownPop = in.readInt(); s.startCityPop = in.readInt(); s.infectedPending = in.readInt();
+        s.columnT = in.readFloat(); s.startTownPop = in.readInt(); s.startCityPop = in.readInt(); in.readInt();
         s.nextHorde = in.readInt();
         s.playerJoyX = in.readFloat(); s.playerJoyY = in.readFloat(); s.playerFire = in.readBoolean();
     }

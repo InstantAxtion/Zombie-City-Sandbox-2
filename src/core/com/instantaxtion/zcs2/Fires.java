@@ -228,6 +228,7 @@ public final class Fires extends Module {
         int lost = Math.min(w.sec.popIn[s], Math.max(0, r.bres[b] / 4));
         w.sec.popIn[s] -= lost;
         w.stats.civDeaths += lost;
+        w.stats.lossBy[4] += lost;
         heat[b] = 0;
         burnT[b] = 0;
         recall(b);

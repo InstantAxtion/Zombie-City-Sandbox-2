@@ -51,6 +51,7 @@ public final class World {
     public final Engineers engineers;
     public final Roles roles;
     public final Director director;
+    public final Recovery recovery;
     /** Systems plugged in (updated, saved and drawn in this order). */
     public final List<Module> modules = new ArrayList<Module>();
     /** Strategic fast-forward: everything as numbers, ten game seconds a step. */
@@ -69,6 +70,8 @@ public final class World {
     public boolean ended;
     public String endTitle, endText;
     public boolean won;
+    /** The player chose to keep watching after the game ended: it runs on as a sandbox, with no goal. */
+    public boolean watching;
 
     // the camera, as an input: sectors in view are simulated in detail (recorded in replays)
     public float camX0, camY0, camX1, camY1;
@@ -131,6 +134,8 @@ public final class World {
         modules.add(engineers);
         roles = new Roles(this);
         modules.add(roles);
+        recovery = new Recovery(this);
+        modules.add(recovery);
         director = new Director(this);
         modules.add(director);
         zai = new ZombieAI(this);
@@ -215,7 +220,8 @@ public final class World {
     // ------------------------------------------------------------------ the step
 
     public void step() {
-        if (ended && mode != MODE_SANDBOX) return;
+        // an ended game waits on its report (God's campaigns too), unless the player chose to keep watching
+        if (ended && !watching && (mode != MODE_SANDBOX || scenario != null && scenario.goal != null && scenario.goal.length() > 0)) return;
         if (strategic) {
             strategicStep();
             return;
@@ -251,6 +257,7 @@ public final class World {
         strat.update(dt);
         gov.update(dt);
         for (int i = 0; i < modules.size(); i++) modules.get(i).update(dt);
+        news.update();
         stats.update();
         if (!strategic) sq.secondly();
     }

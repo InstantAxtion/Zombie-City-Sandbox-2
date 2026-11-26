@@ -133,6 +133,12 @@ public final class Logistics extends Module {
                     if (f.med < 200) request(f, G_MED, 600 - f.med);
                     break;
                 }
+                case Region.F_FOB:
+                    // forward bases are kept supplied from the rear
+                    if (f.ammo < 6000) request(f, G_AMMO, 15000 - f.ammo);
+                    if (f.fuel < 40) request(f, G_FUEL, 100 - f.fuel);
+                    if (f.med < 150) request(f, G_MED, 500 - f.med);
+                    break;
                 case Region.F_HOSPITAL:
                     if (f.med < 300) request(f, G_MED, 1500 - f.med);
                     break;
@@ -348,7 +354,7 @@ public final class Logistics extends Module {
         StringBuilder sb = new StringBuilder();
         if (c.ammo > 0) sb.append((int) c.ammo).append(" rounds");
         if (c.fuel > 0) sb.append(sb.length() > 0 ? ", " : "").append((int) c.fuel).append(" t of fuel");
-        if (c.food > 0) sb.append(sb.length() > 0 ? ", " : "").append(WorldView.fmt((int) c.food)).append(" days' food");
+        if (c.food > 0) sb.append(sb.length() > 0 ? ", " : "").append("a day's food for ").append(WorldView.fmt((int) c.food)).append(" people");
         if (c.med > 0) sb.append(sb.length() > 0 ? ", " : "").append((int) c.med).append(" doses of medicine");
         return sb.length() == 0 ? "nothing left" : sb.toString();
     }
@@ -370,7 +376,7 @@ public final class Logistics extends Module {
             for (Region.Settlement d : r.settlements) {
                 if (d.id == st || d.kind != Region.S_CITY) continue;
                 Region.Facility to = station(d.id);
-                if (to == null || w.gov.evacuating(d.id)) continue;
+                if (to == null || w.gov.evacuating(d.id) || w.strat.full(d.id) || w.command.quarantined(d.id)) continue;
                 float score = w.stats.zBySettlement[d.id] * 10f / (d.residents + 100);
                 if (w.stats.zBySettlement[d.id] > 100) continue;
                 if (score < bs) {
@@ -392,11 +398,11 @@ public final class Logistics extends Module {
             c.y = from.y;
             c.refugees = Math.min(w.strat.pending[st], 2000);
             w.strat.pending[st] -= c.refugees;
-            int inf = totalPending > 0 ? Math.min(w.strat.infectedPending, (int) ((long) w.strat.infectedPending * c.refugees / totalPending)) : 0;
+            int inf = Math.min(w.strat.infPending[st], (int) ((long) w.strat.infPending[st] * c.refugees / Math.max(1, w.strat.pending[st] + c.refugees)));
             c.infected = inf;
-            w.strat.infectedPending -= inf;
+            w.strat.infPending[st] -= inf;
             convoys.add(c);
-            w.news.radio("Evacuation train leaves " + s.name + " with " + c.refugees + " people", c.x, c.y, News.CALL);
+            w.news.tally("trainOut:" + st, "Evacuation train leaves " + s.name + " with " + c.refugees + " people|Evacuation trains out of " + s.name + ": {n} more, {m} people", 1, c.refugees, c.x, c.y, News.CALL);
         }
     }
 
@@ -448,17 +454,22 @@ public final class Logistics extends Module {
         int s = r.sectorOfPx(c.x, c.y);
         int z = w.sp.secZ[s] + w.sec.zIn[s];
         if (z >= 15 && c.refugees == 0) {
-            float frac = Math.min(0.6f, z / 500f) * Math.min(1, dt / 2f) * (c.mode == TRAIN ? 0.3f : 1f);
+            // army supply runs travel escorted: far harder for the dead to stop
+            int dk = r.facilities.get(c.to).kind;
+            float risk = (c.mode == TRAIN ? 0.3f : 1f) * (dk == Region.F_HQ || dk == Region.F_FOB || dk == Region.F_BASE ? 0.2f : 1f);
+            float frac = Math.min(0.6f, z / 500f) * Math.min(1, dt / 2f) * risk;
             c.ammo *= 1 - frac;
             c.fuel *= 1 - frac;
             c.food *= 1 - frac;
             c.med *= 1 - frac;
-            if (z >= 80 && Rng.unit(w.seed, w.tick, c.id * 7L + 1) < 0.04f * dt * (c.mode == TRAIN ? 0.3f : 1f)) {
+            if (z >= 80 && Rng.unit(w.seed, w.tick, c.id * 7L + 1) < 0.04f * dt * risk) {
                 c.alive = false;
                 lost++;
                 onWay[c.to] &= ~c.goods;
                 w.stats.vehiclesLost += c.size();
-                w.news.radio(MODES[c.mode] + " overrun by the dead on the way to " + r.facilities.get(c.to).name, c.x, c.y, News.LOSS);
+                int st = r.facilities.get(c.to).settlement;
+                w.news.tally("convoyLost:" + st, MODES[c.mode] + " overrun by the dead on the way to " + r.facilities.get(c.to).name
+                        + "|Supply runs lost to the dead" + (st >= 0 ? " round " + r.settlements.get(st).name : "") + ": {n} more", 1, 0, c.x, c.y, News.LOSS);
                 return;
             }
         }
@@ -496,9 +507,10 @@ public final class Logistics extends Module {
         onWay[c.to] &= ~c.goods;
         if (c.refugees > 0) {
             settle(c.toSettlement, c.refugees - c.infected, c.infected);
-            w.strat.evacuatedArrived += c.refugees;
-            w.news.radio("Evacuation train arrives in " + w.r.settlements.get(c.toSettlement).name + " with " + c.refugees + " people"
-                    + (c.infected > 20 ? ". Some of them have been bitten." : ""), f.x, f.y, News.CALL);
+            int origin = c.from >= 0 ? w.r.facilities.get(c.from).settlement : -1;
+            w.strat.arrivedFrom(origin, c.toSettlement, c.refugees - c.infected, c.infected);
+            w.news.tally("train:" + c.toSettlement, "Evacuation train arrives in " + w.r.settlements.get(c.toSettlement).name + " with " + c.refugees + " people"
+                    + (c.infected > 20 ? ". Some of them have been bitten." : "") + "|Evacuation trains into " + w.r.settlements.get(c.toSettlement).name + ": {n} more, {m} people", 1, c.refugees, f.x, f.y, News.CALL);
             return;
         }
         f.ammo += c.ammo;
@@ -536,7 +548,7 @@ public final class Logistics extends Module {
         List<Integer> homes = new ArrayList<Integer>();
         for (int s = 0; s < sec.n; s++) if (sec.settlement[s] == st && sec.home[s] > 0 && sec.zIn[s] == 0) homes.add(s);
         if (homes.isEmpty()) {
-            w.strat.evacuatedOut += healthy + infected;
+            w.strat.leftCountry(-1, healthy + infected);
             return;
         }
         int per = healthy / homes.size(), extra = healthy % homes.size();

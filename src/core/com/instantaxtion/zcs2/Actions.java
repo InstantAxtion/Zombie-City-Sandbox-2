@@ -11,7 +11,7 @@ public final class Actions {
     public static final int PAINT = 1, HORDE = 2, SQUAD = 3, VEHICLE = 4, ERASE = 5, STRIKE = 6, BRIDGE = 7, ORDER = 8,
             RELEASE = 9, HOME = 10, FORM_ORDER = 11, FORM_RELEASE = 12, CURFEW = 13, EVAC = 14, LEVEL = 15, QUARANTINE = 16,
             DEPLOY = 17, ARTILLERY = 18, REQUEST_ARMY = 19, CAMERA = 20, STRATEGIC = 21, JOY = 22, FIRE = 23, MAX_IND = 24,
-            WATCH = 25, ADD_PLAYER = 26, SWITCH_PLAYER = 27;
+            WATCH = 25, ADD_PLAYER = 26, SWITCH_PLAYER = 27, GENERAL = 28;
 
     public static Object exec(World w, int kind, float[] f, int[] i, String s) {
         w.director.record(kind, f, i, s);
@@ -60,7 +60,9 @@ public final class Actions {
                 Forces.Formation fm = formation(w, i[0]);
                 if (fm != null) {
                     fm.player = false;
+                    fm.released = true;
                     fm.task = -1;
+                    fm.job = Forces.JOB_NONE;
                 }
                 return null;
             }
@@ -130,10 +132,13 @@ public final class Actions {
             case ADD_PLAYER: return w.roles.addPlayer(i[0], f[0], f[1]);
             case SWITCH_PLAYER: w.roles.switchTo(i[0]); return null;
             case WATCH:
-                if (w.mode != World.MODE_SANDBOX) {
-                    w.mode = World.MODE_SANDBOX;
-                    w.ended = false;
-                }
+                // the game goes on as a sandbox with no goal (a campaign played as God too)
+                w.watching = true;
+                w.ended = false;
+                w.mode = World.MODE_SANDBOX;
+                return null;
+            case GENERAL:
+                w.forces.setGeneralCommands(i[0] != 0);
                 return null;
             default:
                 return null;
@@ -256,6 +261,11 @@ public final class Actions {
 
     public static void maxIndividuals(World w, int n) {
         if (w.maxIndividuals != n) exec(w, MAX_IND, null, new int[]{n}, null);
+    }
+
+    /** The President or Military commander hands the whole army to the AI general (or takes it back). */
+    public static void generalCommands(World w, boolean on) {
+        exec(w, GENERAL, null, new int[]{on ? 1 : 0}, null);
     }
 
     public static void watch(World w) {

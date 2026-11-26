@@ -203,7 +203,7 @@ public final class Navy extends Module {
             int k = Math.min(sec.popIn[s], (int) m + (Rng.unit(w.seed, w.tick, s * 3L + 99) < m % 1f ? 1 : 0));
             if (k <= 0) continue;
             sec.popIn[s] -= k;
-            w.strat.evacuatedOut += k;
+            w.strat.leftCountry(st, k);
             rescued += k;
             if (!coastNews[st]) {
                 coastNews[st] = true;
@@ -228,6 +228,15 @@ public final class Navy extends Module {
         return best;
     }
 
+    /** Would a formation going to (x, y) be flown (far, with working airfields at both ends)? */
+    public boolean airliftable(Forces.Formation f, float x, float y) {
+        float far = w.c.rule("airliftDistance", 9000);
+        float dx = x - f.hq.x, dy = y - f.hq.y;
+        if (dx * dx + dy * dy < far * far) return false;
+        Region.Facility a = airfieldNear(f.hq.x, f.hq.y, 2500, null);
+        return a != null && airfieldNear(x, y, 4000, a) != null;
+    }
+
     /** Formations sent far go by air when there are working airfields at both ends. */
     private void airlift(float dt) {
         float far = w.c.rule("airliftDistance", 9000);
@@ -248,7 +257,7 @@ public final class Navy extends Module {
             flights.add(fl);
             f.state = Forces.AIRLIFT;
             airlifts++;
-            w.news.radio("Airlift: the " + f.name + " is being flown to " + b.name, b.x, b.y, News.COMMAND);
+            w.news.count("airlift", "Airlift: the " + f.name + " is being flown to " + b.name + "|Airlift: %d more formations flown across the country", 1, b.x, b.y);
         }
         Content.VType pl = w.c.vtype("transport_plane");
         float speed = pl != null ? pl.speed : 420;

@@ -38,6 +38,12 @@ public final class Roles extends Module {
     public boolean hadDead;
     /** Days the goal's condition has held (protect: the capital stayed clear). */
     public float heldFor;
+    /** The campaign's starting figure (taken once the first count is in), and how long its losing condition has held. */
+    public int baseline = -1;
+    public float lowT;
+    /** The goal's progress for the HUD: 0..1 towards winning, and a line saying where things stand. */
+    public float progress;
+    public String progressText = "";
 
     public Roles(World w) {
         super(w);
@@ -93,6 +99,7 @@ public final class Roles extends Module {
         if (r == PRESIDENT || r == MILITARY) w.mil.strikesLeft = Math.max(savedStrikes, 6);
         else w.mil.strikesLeft = savedStrikes;
         w.gov.playerDecides = holds(PRESIDENT, -1);
+        if (r == PRESIDENT || r == MILITARY) w.forces.generalCommands = false;
         w.news.radio("Player " + players + " joins as " + labelOf(players - 1), ox, oy, News.COMMAND);
         return true;
     }
@@ -182,6 +189,8 @@ public final class Roles extends Module {
         target = -1;
         w.mode = modeFor(r);
         w.gov.playerDecides = r == PRESIDENT;
+        // the player commands the army until they hand it to the general (Actions.generalCommands)
+        w.forces.generalCommands = !(r == PRESIDENT || r == MILITARY);
         if (w.mode == World.MODE_COMMANDER && (r == PRESIDENT || r == MILITARY)) w.mil.strikesLeft = 6;
         Region.Settlement near = w.r.settlementAt(ox, oy);
         switch (r) {
@@ -275,30 +284,75 @@ public final class Roles extends Module {
 
     private void goals(float dt) {
         Content.Scenario sc = w.scenario;
-        if (sc == null || w.ended || sc.goal == null) return;
+        if (sc == null || w.ended || w.watching || sc.goal == null || w.mode == World.MODE_SANDBOX && w.watching) return;
+        // nothing is judged before the first count of everyone is in
+        if (w.time < 60) return;
         float deadline = sc.days * 1440f;
         boolean late = sc.days > 0 && w.time >= deadline;
         String g = sc.goal;
+        Region.Settlement cap = w.r.city();
         if (g.equals("holdcity")) {
-            int alive = w.strat.cityAlive();
-            if (alive < w.strat.startCityPop * 0.5f) end(false, "The capital has fallen", "Fewer than half its people are left, " + days() + " in.");
-            else if (late) end(true, "The capital held", WorldView.fmt(alive) + " of " + WorldView.fmt(w.strat.startCityPop) + " people lived through " + sc.days + " days.");
+            // the capital's own people alive: at home, or safe somewhere else (evacuated, sheltering in another town)
+            int alive = Math.max(0, w.strat.cityAlive() - w.strat.hosted(cap.id)) + w.strat.awayFrom(cap.id);
+            if (baseline < 0) baseline = Math.max(1, alive);
+            progress = alive / (float) baseline;
+            progressText = WorldView.fmt(alive) + " of " + WorldView.fmt(baseline) + " of the capital's people alive (half must live)";
+            lowT = alive < baseline * 0.5f ? lowT + dt : 0;
+            if (lowT >= 360) end(false, "The capital has fallen", "Fewer than half its people are left, " + days() + " in.");
+            else if (late) end(true, "The capital held", WorldView.fmt(alive) + " of " + WorldView.fmt(baseline) + " of its people lived through " + sc.days + " days.");
         } else if (g.equals("evaccoast")) {
-            int start = coastalStart(), now = coastalNow();
-            int out = start - now;
-            if (start > 0 && out >= start * 0.6f) end(true, "The coast is evacuated", WorldView.fmt(out) + " people got away from the coast.");
-            else if (late) end(false, "Too many were left behind", WorldView.fmt(Math.max(0, out)) + " of the " + WorldView.fmt((int) (start * 0.6f)) + " needed got out.");
+            if (baseline < 0) baseline = Math.max(1, coastalNow());
+            int safe = coastalSafe(), need = (int) (baseline * w.c.rule("evacNeed", 0.5f));
+            int lost = 0;
+            for (Region.Settlement s : w.r.settlements) if (coastal(s)) lost += w.stats.lostBySettlement[s.id];
+            progress = safe / (float) Math.max(1, need);
+            progressText = WorldView.fmt(safe) + " of the " + WorldView.fmt(need) + " needed are safe inland";
+            if (safe >= need) end(true, "The coast is evacuated", WorldView.fmt(safe) + " people from the coast reached safety inland, " + days() + " in.");
+            else if (lost > baseline * 0.4f) end(false, "The coast is lost", WorldView.fmt(lost) + " of the coast's people were caught before they could get away.");
+            else if (late) end(false, "Too many were left behind", WorldView.fmt(safe) + " of the " + WorldView.fmt(need) + " needed got out in time.");
         } else if (g.equals("retakestate")) {
             int zs = deadInState(campaignState);
+            if (baseline < 0) baseline = Math.max(1, zs);
+            int goal = Math.max(300, baseline / 100);
             String name = campaignState >= 0 && campaignState < w.r.states.size() ? w.r.states.get(campaignState).name : "the state";
-            if (zs < 200 && w.time > 120) end(true, name + " is retaken", "The dead there are down to " + zs + ", " + days() + " in.");
+            progress = 1 - Math.min(1, zs / (float) baseline);
+            progressText = WorldView.fmt(zs) + " of the dead left in " + name + " (bring them below " + WorldView.fmt(goal) + ")";
+            lowT = zs < goal ? lowT + dt : 0;
+            if (lowT >= 120) end(true, name + " is retaken", "The dead there are down to " + WorldView.fmt(zs) + ", " + days() + " in.");
             else if (late) end(false, "Out of time", WorldView.fmt(zs) + " of the dead still walk " + name + ".");
         } else if (g.equals("protectcap")) {
-            Region.Settlement c = w.r.city();
-            int zc = w.stats.zBySettlement[c.id];
-            if (zc > 2000) end(false, c.name + " is overrun", "More than 2,000 of the dead got into the capital.");
-            else if (late) end(true, c.name + " stands", "The capital held for " + sc.days + " days.");
+            float share = infestedShare(cap.id);
+            int zc = w.stats.zBySettlement[cap.id];
+            if (baseline < 0) baseline = Math.max(1, w.stats.popBySettlement[cap.id]);
+            boolean bad = share > 0.2f || zc > baseline * 0.03f;
+            lowT = bad ? lowT + dt : Math.max(0, lowT - dt * 0.5f);
+            progress = late ? 1 : (float) (w.time / Math.max(1, deadline));
+            progressText = (int) (share * 100) + "% of the capital's streets have the dead in them" + (bad ? " (too many: clear them within " + (int) Math.max(0, (720 - lowT) / 60) + " hours)" : "");
+            if (lowT >= 720) end(false, cap.name + " is overrun", "The dead held a fifth of the capital's streets for half a day, " + days() + " in.");
+            else if (late) end(true, cap.name + " stands", "The capital held for " + sc.days + " days.");
         }
+    }
+
+    /** The share of a settlement's streets (sectors) with a real number of the dead in them. */
+    public float infestedShare(int st) {
+        int all = 0, bad = 0;
+        for (int s = 0; s < w.sec.n; s++) {
+            if (w.sec.settlement[s] != st || w.sec.home[s] == 0) continue;
+            all++;
+            if (w.sec.zIn[s] + w.sp.secZ[s] >= 20) bad++;
+        }
+        return all == 0 ? 0 : bad / (float) all;
+    }
+
+    /** People of the coast who are safe inland (or out of the country). */
+    public int coastalSafe() {
+        int n = 0;
+        for (Region.Settlement a : w.r.settlements) {
+            if (!coastal(a)) continue;
+            n += w.strat.outBy[a.id];
+            for (Region.Settlement b : w.r.settlements) if (!coastal(b)) n += w.strat.refuge[a.id][b.id];
+        }
+        return n;
     }
 
     private String days() {
@@ -316,7 +370,17 @@ public final class Roles extends Module {
     }
 
     /** Settlements on the coast (a lot of open water close by). */
+    private boolean[] coastalCache;
+
     public boolean coastal(Region.Settlement s) {
+        if (coastalCache == null) {
+            coastalCache = new boolean[w.r.settlements.size()];
+            for (Region.Settlement t : w.r.settlements) coastalCache[t.id] = coastalNow(t);
+        }
+        return coastalCache[s.id];
+    }
+
+    private boolean coastalNow(Region.Settlement s) {
         if (s.kind != Region.S_CITY && s.kind != Region.S_TOWN && s.kind != Region.S_VILLAGE) return false;
         int water = 0, all = 0;
         int rad = s.radius + 40;
@@ -400,6 +464,8 @@ public final class Roles extends Module {
             o.writeInt(pRole[k]);
             o.writeInt(pTarget[k]);
         }
+        o.writeInt(baseline);
+        o.writeFloat(lowT);
     }
 
     @Override
@@ -422,6 +488,10 @@ public final class Roles extends Module {
             for (int k = 0; k < MAX_PLAYERS; k++) {
                 pRole[k] = in.readInt();
                 pTarget[k] = in.readInt();
+            }
+            if (in.available() > 0) {
+                baseline = in.readInt();
+                lowT = in.readFloat();
             }
         } else {
             players = 1;

@@ -42,22 +42,37 @@ public final class Sectors {
         cam = new boolean[n];
         alerted = new boolean[n];
         java.util.Arrays.fill(firstZ, -1);
-        for (int s = 0; s < n; s++) {
-            float cx = (s % sw + 0.5f) * cs, cy = (s / sw + 0.5f) * cs;
-            Region.Settlement st = r.settlementAt(cx, cy);
-            // a sector near a settlement's edge still belongs to it if it holds its buildings
-            settlement[s] = (short) (st == null ? -1 : st.id);
-            grid[s] = (byte) (st == null ? -1 : st.grid);
-        }
+        // a sector belongs to the settlement whose residents live in it (most of them), not the one whose
+        // circle happens to cover its middle: the towns' numbers then add up to their own people
+        int ns = r.settlements.size();
+        java.util.Map<Long, Integer> share = new java.util.HashMap<Long, Integer>();
         for (int b = 0; b < r.bCount; b++) {
             if (w.doorX[b] < 0) continue;
             int s = r.sectorOfPx(w.doorX[b], w.doorY[b]);
             popIn[s] += r.bres[b];
             home[s] += r.bres[b];
-            if (settlement[s] < 0 && r.bset[b] >= 0) {
-                settlement[s] = r.bset[b];
-                grid[s] = (byte) r.settlements.get(r.bset[b]).grid;
+            if (r.bset[b] >= 0 && r.bres[b] > 0) {
+                long key = (long) s * ns + r.bset[b];
+                Integer v = share.get(key);
+                share.put(key, (v == null ? 0 : v) + r.bres[b]);
             }
+        }
+        int[] bestN = new int[n];
+        java.util.Arrays.fill(settlement, (short) -1);
+        for (java.util.Map.Entry<Long, Integer> en : share.entrySet()) {
+            int s = (int) (en.getKey() / ns), st = (int) (en.getKey() % ns);
+            if (en.getValue() > bestN[s] || (en.getValue() == bestN[s] && st < settlement[s])) {
+                bestN[s] = en.getValue();
+                settlement[s] = (short) st;
+            }
+        }
+        for (int s = 0; s < n; s++) {
+            if (settlement[s] < 0) {
+                // nobody lives here: the settlement whose ground it is (bases, parks), if any
+                Region.Settlement st = r.settlementAt((s % sw + 0.5f) * cs, (s / sw + 0.5f) * cs);
+                if (st != null && home[s] == 0) settlement[s] = (short) st.id;
+            }
+            grid[s] = (byte) (settlement[s] < 0 ? -1 : r.settlements.get(settlement[s]).grid);
         }
         connectivity();
     }
@@ -147,7 +162,9 @@ public final class Sectors {
     }
 
     public void update(float dt) {
-        float bite = w.c.rule("indoorBite", 0.006f), dens = w.c.rule("indoorDensity", 40), turnTime = w.c.rule("turnTime", 40), clear = w.c.rule("clearRate", 0.015f);
+        float bite = w.c.rule("indoorBite", 0.003f), dens = w.c.rule("indoorDensity", 10000), turnTime = w.c.rule("turnTime", 180), clear = w.c.rule("clearRate", 0.015f);
+        maxBite = w.c.rule("maxBitePerHour", 0.05f);
+        float spillAt = w.c.rule("sectorSpill", 3000);
         Ents e = w.e;
         Spatial sp = w.sp;
         int individuals = e.live;
@@ -176,10 +193,14 @@ public final class Sectors {
                     }
                 }
             }
-            // indoors: the dead get at the people sheltering
+            // indoors: the dead get at the people sheltering. Only so many can reach anyone at once (doors,
+            // stairs, barricades), and a street can only fall so fast however many are outside it.
             if (zIn[s] > 0 && popIn[s] > 0) {
-                float rate = zIn[s] * bite * dt * (w.strat.lit(s) ? 1f : 1.35f) * (holdout(s) ? 0.3f : 1f);
-                float bites = Math.min(popIn[s], rate * popIn[s] / (popIn[s] + dens));
+                float attackers = Math.min(zIn[s], popIn[s] * 0.5f + 20);
+                float k = (w.strat.lit(s) ? 1f : 1.35f) * (holdout(s) ? 0.3f : 1f) * w.gov.compliance(settlement[s]);
+                float rate = attackers * bite * dt * k * popIn[s] / (popIn[s] + dens);
+                float cap = popIn[s] * maxBite * dt / 60f + 0.5f * dt / 10f;
+                float bites = Math.min(popIn[s], Math.min(rate, cap));
                 int b = stoch(bites, s * 7L + 1);
                 popIn[s] -= b;
                 w.ecology.fed(s, b);
@@ -188,10 +209,13 @@ public final class Sectors {
                 inf[s] += b - killed;
                 w.stats.civDeaths += killed;
                 w.stats.infectedTotal += b - killed;
+                if (settlement[s] >= 0) w.stats.lostBySettlement[settlement[s]] += b;
+                w.stats.lossBy[0] += b;
                 panic[s] = Math.min(1, panic[s] + 0.1f * Math.min(1, dt));
             }
             if (inf[s] > 0) {
-                float turn = Math.max(0.2f * dt, inf[s] / (turnTime * w.infra.turnSlow(settlement[s])) * dt);
+                // turning takes hours: a share of the bitten turn each second
+                float turn = Math.max(Math.min(inf[s], 0.05f * dt), inf[s] / (turnTime * w.infra.turnSlow(settlement[s])) * dt);
                 int t = Math.min((int) Math.ceil(inf[s]), stoch(turn, s * 7L + 3));
                 inf[s] -= t;
                 if (inf[s] < 0) inf[s] = 0;
@@ -207,6 +231,18 @@ public final class Sectors {
                     inf[hs] += m;
                 }
             }
+            // people fight back: a few of the dead where there are many of the living are put down by residents
+            // (farmers, hunters, neighbours with a gun); a holdout street is ready for them
+            if (zIn[s] > 0 && popIn[s] > 0) {
+                float k = 0.0002f * dt * Math.min(zIn[s], popIn[s] / 100f) * (holdout(s) ? 2 : 1);
+                int kill = Math.min(zIn[s], stoch(k, s * 7L + 6));
+                if (kill > 0) {
+                    zIn[s] -= kill;
+                    bodies[s] += kill;
+                    w.stats.killsBySide[0] += kill;
+                    w.stats.zombieKills += kill;
+                }
+            }
             // armed units clearing buildings, one room at a time
             if (arm >= 2 && zIn[s] > 0) {
                 int k = Math.min(zIn[s], stoch(arm * clear * dt, s * 7L + 5));
@@ -218,6 +254,7 @@ public final class Sectors {
             if (panic[s] > 0) panic[s] = Math.max(0, panic[s] - 0.01f * dt);
             // the unwatched dead wander towards people and lights
             if (zIn[s] > 0 && popIn[s] == 0 && hot[s] <= 0) migrate(s, dt);
+            else if (zIn[s] > spillAt && hot[s] <= 0) spill(s, dt, spillAt);
             if (hot[s] > 0) hot[s] -= dt;
         }
         drift();
@@ -355,6 +392,29 @@ public final class Sectors {
         w.ecology.carry(s, t, m, zIn[t]);
         zIn[s] -= m;
         zIn[t] += m;
+    }
+
+    private float maxBite = 0.05f;
+
+    /** Too many of the dead for one sector's streets: the crush spreads into the neighbours with people. */
+    private void spill(int s, float dt, float at) {
+        int bd = -1;
+        float best = -1;
+        for (int d = 0; d < 8; d++) {
+            if ((connect[s] & (1 << d)) == 0) continue;
+            int t = neighbour(s, d);
+            if (zIn[t] >= zIn[s]) continue;
+            float a = attraction(t) / (1 + zIn[t]);
+            if (a > best) {
+                best = a;
+                bd = t;
+            }
+        }
+        if (bd < 0) return;
+        int m = Math.min(zIn[s] - (int) at, stoch((zIn[s] - at) * 0.02f * dt, s * 29L));
+        if (m <= 0) return;
+        zIn[s] -= m;
+        zIn[bd] += m;
     }
 
     private void drift() {

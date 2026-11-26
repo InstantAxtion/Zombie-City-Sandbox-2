@@ -15,6 +15,15 @@ public final class Stats {
     public final int[] killsBySide = new int[3]; // civilians, police, army
     public final int[] armedDeaths = new int[4];
     public final int[] zBySettlement, popBySettlement;
+    /** People of each settlement bitten or killed there (counted as it happens). */
+    public final int[] lostBySettlement;
+    /** Civilians killed by our own guns (artillery on sheltering streets), and the dead put down by air. */
+    public int shelledCivilians, strikeKills, returnedHome, containedTowns;
+    /** Where people were lost (bitten or killed): indoors, on the roads, to hordes passing through, to our guns, to fire. */
+    public final int[] lossBy = new int[5];
+    public static final String[] LOSS_CAUSES = {"in their homes", "on the roads", "to hordes passing through", "to our own guns", "in fires"};
+    /** Seconds between timeline samples: doubles when the timeline is full, so a month still fits. */
+    public float tEvery = 10;
     public int startPolice, startSoldiers, startCivilians;
 
     // timeline: every 10 s
@@ -48,6 +57,7 @@ public final class Stats {
         this.w = w;
         zBySettlement = new int[w.r.settlements.size()];
         popBySettlement = new int[w.r.settlements.size()];
+        lostBySettlement = new int[w.r.settlements.size()];
     }
 
     public void event(String text, float x, float y) {
@@ -93,7 +103,20 @@ public final class Stats {
         int z = w.totalZombies();
         if (z > peakZombies) peakZombies = z;
         recount();
-        if (w.tick % 200 == 0 && tN < MAXT) {
+        if (tN >= MAXT) {
+            // full: keep every other sample and sample half as often
+            int k = 0;
+            for (int i = 0; i < tN; i += 2, k++) {
+                tTime[k] = tTime[i];
+                tZombies[k] = tZombies[i];
+                tAlive[k] = tAlive[i];
+                tPolice[k] = tPolice[i];
+                tArmy[k] = tArmy[i];
+            }
+            tN = k;
+            tEvery *= 2;
+        }
+        if (tN == 0 || w.time - tTime[tN - 1] >= tEvery - 0.01f) {
             tTime[tN] = (float) w.time;
             tZombies[tN] = z;
             tAlive[tN] = w.livingCivilians();
