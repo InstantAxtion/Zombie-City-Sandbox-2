@@ -20,6 +20,8 @@ public final class Flow implements ActiveSet.Paged {
     /** The page table (ActiveSet.slotOf) and its row length. */
     private final int[] slotOf;
     private final int ppw;
+    /** Every page active with slot == page: an index needs no table load. */
+    private final boolean dense;
     short[] dist;
     short[] stamp; // which build each cell's distance belongs to (16 bits: reset when it wraps)
     /** Each cell's downhill step, worked out once a build: (build & 0xFFF) << 4 | step (1 + 3 * (dy + 1) + dx + 1). */
@@ -38,6 +40,7 @@ public final class Flow implements ActiveSet.Paged {
         h = r.navH;
         slotOf = act.slotOf;
         ppw = act.pw;
+        dense = !act.sparse;
         q = new int[4096];
         q2 = new int[4096];
         act.register(this);
@@ -66,7 +69,7 @@ public final class Flow implements ActiveSet.Paged {
 
     /** The index of cell (cx, cy), which must be on the map, or -1 if its page isn't active. */
     int index(int cx, int cy) {
-        int s = slotOf[(cy >> 5) * ppw + (cx >> 5)];
+        int s = dense ? (cy >> 5) * ppw + (cx >> 5) : slotOf[(cy >> 5) * ppw + (cx >> 5)];
         return s < 0 ? -1 : s << 10 | (cy & 31) << 5 | (cx & 31);
     }
 
@@ -206,15 +209,34 @@ public final class Flow implements ActiveSet.Paged {
     public int downhill(float px, float py, float[] out) {
         float cs = Tile.SIZE * Region.NAV;
         int cx = (int) (px / cs), cy = (int) (py / cs);
-        short here = atCell(cx, cy);
-        if (here == INF) return INF;
+        if (cx < 0 || cy < 0 || cx >= w || cy >= h) return INF;
+        int ci = index(cx, cy);
+        if (ci < 0 || stamp[ci] != cur) return INF;
+        short here = dist[ci];
         int bx = 0, by = 0;
-        int ci = index(cx, cy), tag = (cur & 0xFFF) << 4;
+        int tag = (cur & 0xFFF) << 4;
         short cached = step[ci];
         if ((cached & 0xFFF0) == tag && cached != 0) {
             int k = (cached & 15) - 1;
             bx = k % 3 - 1;
             by = k / 3 - 1;
+        } else if ((cx & 31) > 0 && (cx & 31) < 31 && (cy & 31) > 0 && (cy & 31) < 31) {
+            // all eight neighbours on this cell's page
+            int best = here, l = ci & 1023;
+            byte[] nv = navS[ci >>> 10];
+            for (int dy = -1; dy <= 1; dy++)
+                for (int dx = -1; dx <= 1; dx++) {
+                    if (dx == 0 && dy == 0) continue;
+                    int ni = ci + dy * 32 + dx;
+                    short v = stamp[ni] == cur ? dist[ni] : INF;
+                    if (v < best) {
+                        if (dx != 0 && dy != 0 && (nv[l + dx] == 0 || nv[l + dy * 32] == 0)) continue;
+                        best = v;
+                        bx = dx;
+                        by = dy;
+                    }
+                }
+            step[ci] = (short) (tag | (1 + 3 * (by + 1) + bx + 1));
         } else {
             int best = here;
             for (int dy = -1; dy <= 1; dy++)

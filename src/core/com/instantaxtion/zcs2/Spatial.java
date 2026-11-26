@@ -39,6 +39,9 @@ public final class Spatial implements ActiveSet.Paged {
     // cell (and block) every page that isn't active shares; page cells start at cellOff (blocks at blkOff)
     private final int[] slotOf;
     private final int ppw, ex, ey, bex, bey, edgeW, edgeH, bedgeW, bedgeH, cellOff, blkOff;
+    /** Every page active, always (today's maps): the cells and blocks are laid out row by row (1 + cy * cw + cx,
+     *  1 + by * bw + bx), exactly the old dense grid, and never paged. */
+    private final boolean dense;
 
     public Spatial(Region r, ActiveSet act) {
         cw = r.px() / CELL + 1;
@@ -48,10 +51,12 @@ public final class Spatial implements ActiveSet.Paged {
         secCiv = new int[ns];
         secCop = new int[ns];
         secSol = new int[ns];
+        secBuild = new int[ns];
         bw = cw / BLK + 1;
         this.r = r;
         slotOf = act.slotOf;
         ppw = act.pw;
+        dense = !act.sparse;
         ex = Math.min(cw, act.pw * PS);
         ey = Math.min(ch, act.ph * PS);
         edgeW = cw - ex;
@@ -67,7 +72,7 @@ public final class Spatial implements ActiveSet.Paged {
 
     @Override
     public void slotsGrown(int cap) {
-        int n = cellOff + cap * PS * PS, nb = blkOff + cap * (PS / BLK) * (PS / BLK);
+        int n = dense ? 1 + cw * ch : cellOff + cap * PS * PS, nb = dense ? 1 + bw * bw : blkOff + cap * (PS / BLK) * (PS / BLK);
         zStart = zStart == null ? new int[n] : Arrays.copyOf(zStart, n);
         zEnd = zEnd == null ? new int[n] : Arrays.copyOf(zEnd, n);
         lStart = lStart == null ? new int[n] : Arrays.copyOf(lStart, n);
@@ -78,6 +83,7 @@ public final class Spatial implements ActiveSet.Paged {
 
     @Override
     public void slotAssigned(int s, int p) {
+        if (dense) return;
         int a = cellOff + s * PS * PS, b = blkOff + s * (PS / BLK) * (PS / BLK);
         Arrays.fill(zStart, a, a + PS * PS, 0);
         Arrays.fill(zEnd, a, a + PS * PS, 0);
@@ -91,14 +97,25 @@ public final class Spatial implements ActiveSet.Paged {
      *  or on a page that isn't active). */
     public int cell(int cx, int cy) {
         if (cx < 0 || cy < 0 || cx >= cw || cy >= ch) return 0;
+        return cellIn(cx, cy);
+    }
+
+    /** cell() for a cell known to be on the grid. */
+    private int cellIn(int cx, int cy) {
+        if (dense) return 1 + cy * cw + cx;
+        if (cx < ex && cy < ey) {
+            int s = slotOf[(cy >> 4) * ppw + (cx >> 4)];
+            return s < 0 ? 0 : cellOff + (s << 8 | (cy & 15) << 4 | (cx & 15));
+        }
         if (cx >= ex) return 1 + (cx - ex) * ch + cy;
         if (cy >= ey) return 1 + edgeW * ch + (cy - ey) * ex + cx;
-        int s = slotOf[(cy >> 4) * ppw + (cx >> 4)];
+        int s = dense ? (cy >> 4) * ppw + (cx >> 4) : slotOf[(cy >> 4) * ppw + (cx >> 4)];
         return s < 0 ? 0 : cellOff + (s << 8 | (cy & 15) << 4 | (cx & 15));
     }
 
     /** The block (bx, by) (0 .. bw - 1 each way): an index into lBlk / zBlk. */
     private int block(int bx, int by) {
+        if (dense) return 1 + by * bw + bx;
         if (bx >= bex) return 1 + (bx - bex) * bw + by;
         if (by >= bey) return 1 + bedgeW * bw + (by - bey) * bex + bx;
         int s = slotOf[(by >> 2) * ppw + (bx >> 2)];
@@ -110,6 +127,14 @@ public final class Spatial implements ActiveSet.Paged {
         float bs = CELL * BLK;
         int x0 = Math.max(0, (int) ((x - rad) / bs)), x1 = Math.min(bw - 1, (int) ((x + rad) / bs));
         int y0 = Math.max(0, (int) ((y - rad) / bs)), y1 = Math.min(bw - 1, (int) ((y + rad) / bs));
+        if (dense) {
+            for (int by = y0; by <= y1; by++) {
+                int row = 1 + by * bw;
+                for (int bx = x0; bx <= x1; bx++)
+                    if (blk[row + bx] > 0) return true;
+            }
+            return false;
+        }
         for (int by = y0; by <= y1; by++)
             for (int bx = x0; bx <= x1; bx++)
                 if (blk[block(bx, by)] > 0) return true;
@@ -131,7 +156,7 @@ public final class Spatial implements ActiveSet.Paged {
     }
 
     public int cellOf(float x, float y) {
-        return cell(cellX(x), cellY(y));
+        return cellIn(cellX(x), cellY(y));
     }
 
     public void build(Ents e) {
@@ -150,14 +175,19 @@ public final class Spatial implements ActiveSet.Paged {
             secZ[s] = secCiv[s] = secCop[s] = secSol[s] = 0;
         }
         secTouchedN = 0;
+        if (++builds == 0) {
+            Arrays.fill(secBuild, 0);
+            builds = 1;
+        }
         // count (in zEnd / lEnd), noting each cell the first time it's used
         int nz = 0, nl = 0, nc = 0;
         for (int i = 0; i < e.top; i++) {
             if (e.loc[i] != Ents.FREE) continue;
             int cx = cellX(e.x[i]), cy = cellY(e.y[i]);
-            int c = cell(cx, cy);
+            int c = cellIn(cx, cy);
             int s = r.sectorOfPx(e.x[i], e.y[i]);
-            if (secZ[s] == 0 && secCiv[s] == 0 && secCop[s] == 0 && secSol[s] == 0) {
+            if (secBuild[s] != builds) {
+                secBuild[s] = builds;
                 if (secTouchedN == secTouched.length) secTouched = Arrays.copyOf(secTouched, secTouchedN * 2);
                 secTouched[secTouchedN++] = s;
             }
@@ -171,20 +201,21 @@ public final class Spatial implements ActiveSet.Paged {
             // someone on a page that isn't active (only for a moment, if ever: the active set follows everyone)
             // is counted but in no cell
             if (c == 0) continue;
+            int b = block(cx / BLK, cy / BLK);
             if (zEnd[c] == 0 && lEnd[c] == 0) {
                 if (touchedN == touched.length) {
                     touched = Arrays.copyOf(touched, touchedN * 2);
                     touchedBlk = Arrays.copyOf(touchedBlk, touchedN * 2);
                 }
-                touchedBlk[touchedN] = block(cx / BLK, cy / BLK);
+                touchedBlk[touchedN] = b;
                 touched[touchedN++] = c;
             }
             if (z) {
                 zEnd[c]++;
-                zBlk[block(cx / BLK, cy / BLK)]++;
+                zBlk[b]++;
             } else {
                 lEnd[c]++;
-                lBlk[block(cx / BLK, cy / BLK)]++;
+                lBlk[b]++;
             }
         }
         if (zList.length < nz) zList = new int[nz * 2];
@@ -212,6 +243,10 @@ public final class Spatial implements ActiveSet.Paged {
         lCount = nl;
         civCount = nc;
     }
+
+    /** The build each sector was last counted in (so its counts are cleared once, and only if used). */
+    private int[] secBuild;
+    private int builds;
 
     /** The block of each cell in touched (cleared with it). */
     private int[] touchedBlk = new int[1024];
@@ -247,7 +282,7 @@ public final class Spatial implements ActiveSet.Paged {
                 boolean edgeRow = yy == cy - k || yy == cy + k;
                 for (int xx = cx - k; xx <= cx + k; xx += edgeRow ? 1 : 2 * k) {
                     if (xx >= 0 && xx < cw) {
-                        int c = cell(xx, yy);
+                        int c = cellIn(xx, yy);
                         for (int j = start[c]; j < end[c]; j++) {
                             int o = list[j];
                             if (o == self || ((skipMask >> e.kind[o]) & 1) != 0) continue;
@@ -283,7 +318,7 @@ public final class Spatial implements ActiveSet.Paged {
         int n = 0;
         for (int cy = y0; cy <= y1; cy++)
             for (int cx = x0; cx <= x1; cx++) {
-                int c = cell(cx, cy);
+                int c = cellIn(cx, cy);
                 for (int j = start[c]; j < end[c]; j++) {
                     int o = list[j];
                     float dx = e.x[o] - x, dy = e.y[o] - y;
@@ -301,7 +336,7 @@ public final class Spatial implements ActiveSet.Paged {
         int n = 0;
         for (int cy = y0; cy <= y1; cy++)
             for (int cx = x0; cx <= x1; cx++) {
-                int c = cell(cx, cy);
+                int c = cellIn(cx, cy);
                 for (int j = zStart[c]; j < zEnd[c]; j++) {
                     int o = zList[j];
                     float dx = e.x[o] - x, dy = e.y[o] - y;

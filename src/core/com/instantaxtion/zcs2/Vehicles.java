@@ -38,6 +38,7 @@ public final class Vehicles implements ActiveSet.Paged {
     private int gTouchedN;
     private final int[] slotOf;
     private final int gpw, gex, gey, gedgeW, gOff;
+    private final boolean gdense;
     /** Ground vehicles in transit move at this speed along their routes (25 km/h, px/s; a content rule in P9). */
     static final float TRANSIT_SPEED = 1667f;
     /** Vehicle-steps spent in transit so far (for tests and probes). */
@@ -52,6 +53,7 @@ public final class Vehicles implements ActiveSet.Paged {
         ActiveSet act = w.act;
         slotOf = act.slotOf;
         gpw = act.pw;
+        gdense = !act.sparse;
         gex = Math.min(gw, act.pw * GPS);
         gey = Math.min(gw, act.ph * GPS);
         gedgeW = gw - gex;
@@ -61,13 +63,15 @@ public final class Vehicles implements ActiveSet.Paged {
 
     @Override
     public void slotsGrown(int cap) {
-        int n = gOff + cap * GPS * GPS;
+        // every page active, always (today's maps): the old grid, row by row (1 + cy * gw + cx), never paged
+        int n = gdense ? 1 + gw * gw : gOff + cap * GPS * GPS;
         gStart = gStart == null ? new int[n] : Arrays.copyOf(gStart, n);
         gEnd = gEnd == null ? new int[n] : Arrays.copyOf(gEnd, n);
     }
 
     @Override
     public void slotAssigned(int s, int p) {
+        if (gdense) return;
         int a = gOff + s * GPS * GPS;
         Arrays.fill(gStart, a, a + GPS * GPS, 0);
         Arrays.fill(gEnd, a, a + GPS * GPS, 0);
@@ -76,9 +80,14 @@ public final class Vehicles implements ActiveSet.Paged {
     /** Grid cell (cx, cy): an index into gStart / gEnd (0, always empty, off the grid or on a page that isn't active). */
     private int gcell(int cx, int cy) {
         if (cx < 0 || cy < 0 || cx >= gw || cy >= gw) return 0;
+        if (gdense) return 1 + cy * gw + cx;
+        if (cx < gex && cy < gey) {
+            int s = slotOf[(cy >> 3) * gpw + (cx >> 3)];
+            return s < 0 ? 0 : gOff + (s << 6 | (cy & 7) << 3 | (cx & 7));
+        }
         if (cx >= gex) return 1 + (cx - gex) * gw + cy;
         if (cy >= gey) return 1 + gedgeW * gw + (cy - gey) * gex + cx;
-        int s = slotOf[(cy >> 3) * gpw + (cx >> 3)];
+        int s = gdense ? (cy >> 3) * gpw + (cx >> 3) : slotOf[(cy >> 3) * gpw + (cx >> 3)];
         return s < 0 ? 0 : gOff + (s << 6 | (cy & 7) << 3 | (cx & 7));
     }
 

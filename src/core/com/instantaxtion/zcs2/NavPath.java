@@ -14,6 +14,7 @@ public final class NavPath implements ActiveSet.Paged {
     private final int w, h;
     private final int[] slotOf;
     private final int ppw;
+    private final boolean dense;
     private float[] g;
     /** stamp: cur = seen in this search, cur + 1 = closed in this search (one array instead of two). */
     private int[] prev, stamp;
@@ -31,6 +32,7 @@ public final class NavPath implements ActiveSet.Paged {
         h = r.navH;
         slotOf = act.slotOf;
         ppw = act.pw;
+        dense = !act.sparse;
         act.register(this);
     }
 
@@ -55,7 +57,7 @@ public final class NavPath implements ActiveSet.Paged {
 
     /** The index of cell (cx, cy), which must be on the map, or -1 if its page isn't active. */
     private int index(int cx, int cy) {
-        int s = slotOf[(cy >> 5) * ppw + (cx >> 5)];
+        int s = dense ? (cy >> 5) * ppw + (cx >> 5) : slotOf[(cy >> 5) * ppw + (cx >> 5)];
         return s < 0 ? -1 : s << 10 | (cy & 31) << 5 | (cx & 31);
     }
 
@@ -66,7 +68,7 @@ public final class NavPath implements ActiveSet.Paged {
     /** Cell (cx, cy) open, as the search sees it (off the map or on a page that isn't active: blocked). */
     private boolean open(int cx, int cy) {
         if (!in(cx, cy)) return false;
-        int s = slotOf[(cy >> 5) * ppw + (cx >> 5)];
+        int s = dense ? (cy >> 5) * ppw + (cx >> 5) : slotOf[(cy >> 5) * ppw + (cx >> 5)];
         return s >= 0 && navS[s][(cy & 31) << 5 | (cx & 31)] != 0;
     }
 
