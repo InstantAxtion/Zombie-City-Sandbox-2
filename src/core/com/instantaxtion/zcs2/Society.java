@@ -122,6 +122,9 @@ public final class Society extends Module {
         Sectors sec = w.sec;
         float after = w.c.rule("holdoutAfter", 1440);
         int announced = 0;
+        // the list is made again once, after the pass (the pass walks the list as it was at its start; remaking it
+        // for every change was a pass over every sector each time: hundreds of them at once in a national capital)
+        boolean relist = false;
         // (the awake sectors and the holdouts, in map order: a threat wakes a district and the ring round it, so a
         // sleeping sector's hold timer stands still; only a holdout can change while its district sleeps)
         int[] hl = holdoutList;
@@ -140,7 +143,7 @@ public final class Society extends Module {
                 if (sec.popIn[s] < sec.home[s] * 0.08f) {
                     sec.holdout[s] = false;
                     holdT[s] = 0;
-                    listHoldouts();
+                    relist = true;
                 }
                 continue;
             }
@@ -152,7 +155,7 @@ public final class Society extends Module {
             if (threatened && sec.popIn[s] >= sec.home[s] * 0.3f) holdT[s] += dt;
             if (holdT[s] >= after) {
                 sec.holdout[s] = true;
-                listHoldouts();
+                relist = true;
                 w.stats.holdouts++;
                 if (announced++ == 0 && w.stats.holdouts <= 6) {
                     int st = sec.settlement[s];
@@ -161,6 +164,7 @@ public final class Society extends Module {
                 }
             }
         }
+        if (relist) listHoldouts();
     }
 
     // ------------------------------------------------------------------ families
