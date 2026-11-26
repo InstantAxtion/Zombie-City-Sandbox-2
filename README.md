@@ -1,12 +1,14 @@
 # Zombie City Sandbox 2
 
 The sequel to Zombie City Sandbox. The first game was one city and one outbreak, watched from above. This one is
-a country: a capital of about a million people, three to five other cities, dozens of towns and villages, farms,
-forests, rivers, a coast, interstates, railways and bridges, army bases, an air base, an airport, a naval
-station and prisons, divided into states. About two million people live in it (a "one state" map has about one
-million, a large country more). Start an outbreak anywhere and watch every part of the country respond, or take a
-place in the response at any level, from the President down to one police officer, or try to live through it as
-one person.
+a country at its real size: on the default Country map, 115 km across at 4 m a tile, a capital of about 1.2 million
+people in 16-19 km of streets, five other cities of 150-450 thousand, fifty towns and two hundred and fifty villages,
+farms, forests, rivers, a coast, interstates, railways and bridges, army bases, an air base, an airport, a naval
+station and prisons, divided into states. Over four million people live in it (the State map, 82 km, about three
+million; the Large country, 147 km, over five million, offered where the phone has the memory). Every street, block
+and building is there, made as the camera or the simulation comes close. Start an outbreak anywhere and watch every
+part of it respond, or take a place in the response at any level, from the President down to one police officer, or
+try to live through it as one person.
 
 **Download:** [`release/ZombieCitySandbox2.apk`](release/ZombieCitySandbox2.apk) (Android 5.0 and newer, about
 320 KB: every picture and sound is made by code). It installs alongside the first game.
@@ -20,9 +22,10 @@ one person.
 - **Map layers** (the Map tool): infection, utilities (power, water and phones for every town), supplies
   (ammunition, food and fuel at each depot and station), public trust and fear, forces and fronts, where people
   died, and the peak of the infection.
-- **Millions of people, simulated two ways.** Everyone indoors is counted by the sector (512 px squares). Where
+- **Millions of people, simulated two ways.** Everyone indoors is counted by the sector (256 m squares). Where
   something is happening (the dead near the living, police and soldiers, or the camera), the counts come out as
-  individuals; when it's quiet they fold back in. Every sector is simulated every second, watched or not.
+  individuals; when it's quiet they fold back in. Every sector with anything going on is simulated every second,
+  watched or not; quiet districts sleep until something comes near.
 - **A normal day.** By day a town's people are at work, school and in the centre, at night at home, so an outbreak
   at 3 pm hits the offices and one at 3 am the homes. Wherever you look at street level the city is going about its
   day: cars driving between buildings and through (busiest in the centre and at the rush hours), parked cars along
@@ -142,6 +145,9 @@ The game is plain Java with no libraries and no game engine.
 ./play.sh              # the game in a desktop window
 ```
 
+The suite takes four to five minutes on two cores. `ScaleProbe` measures the real-scale maps (memory, new-game
+time, the step, the active set, fast-forward), `NationView` draws one at every zoom and flies across it.
+
 `build.sh` needs the Android command-line tools: on Ubuntu or Debian,
 `sudo apt-get install aapt dalvik-exchange zipalign apksigner android-sdk-platform-23`.
 The tests and `play.sh` only need Java 8 or newer. CI (`.github/workflows/build-apk.yml`) runs the tests and
@@ -156,14 +162,13 @@ to the general, the timelapse and replays; `UiShot dir 1080 2400 2.75 survival` 
 building, a car and companions; `director14` the editor's tabs, a scripted game, the replay's scrubber, camera
 keyframes and path, a director's cut and a content.ini import).
 
-`tools/balance.sh 5000,50000,100000,250000 8 2304 30 4` plays each outbreak size on many seeds in fast-forward
-and prints the spread of outcomes (days to contain or fall, share of the country lost, losses); every run goes to
-`build/balance.csv` (a run counts as lost when a third of the country's people are gone). At the time of writing
-(6 seeds each, the default map, 30 days): 5,000 dead are put down in about a day; 20,000 in three to five days
-(2% of the country bitten or killed); 50,000 become wars of six to twelve days, all won, with 4-9% of the
-country lost; 100,000 take about three weeks (one in six lost, about a fifth of the country gone); 250,000 are
-still being fought after a month as often as they are won (2 won, 1 lost, 3 still going, a quarter of the country
-gone). The army answers every size with the same mix of formations, sized to what is reported, up to what the
+`tools/balance.sh 5000,20000,50000,100000,250000 8 28672 30 2` plays each outbreak size on many seeds in
+fast-forward and prints the spread of outcomes (days to contain or fall, share of the country lost, losses); every
+run goes to `build/balance.csv` (a run counts as lost when a third of the country's people are gone). At the time of
+writing (8 seeds each, the Country map, 30 days): 5,000 dead are put down in about two days; 20,000 in five to nine
+days (1% of the country lost); 50,000 become wars of about two weeks, all won, with about 5% lost; 100,000 take
+about three weeks (10% lost); 250,000 are fought for most of the month (15% lost) and are not always over by its
+end. The test suite checks the bands on the State map (3,000, 50,000 and 200,000 dead). The army answers every size with the same mix of formations, sized to what is reported, up to what the
 country can field, so a bigger outbreak is always longer, costlier and more often lost. Once it's over the alert,
 curfews, shelter orders and evacuations come down, outside units go home and people return to their towns.
 

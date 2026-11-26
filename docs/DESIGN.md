@@ -7,8 +7,8 @@ How the sequel works, and how it answers the lessons written down in the first g
 
 | | First game | Sequel |
 |---|---|---|
-| Map | One city, 424-752 tiles | A country, 1536-3072 tiles: a capital, cities, dozens of towns and villages, states, bases, rail, ports (768-1024 tile regions still build, for tests) |
-| People | ~3,000 individuals | ~1-3 million residents counted by the sector (about 2 million on the default map), plus up to 60,000 (setting) individuals where it matters |
+| Map | One city, 424-752 tiles | A country at its real size, 4 m tiles: State 20,480 tiles (82 km), Country 28,672 (115 km, the default), Large 36,864 (147 km). A capital of about 1.2 million in 16-19 km of streets, cities, towns, villages, states, bases, rail, ports. The older 768-3,072 tile maps (`RegionGen`) still build, as fast test maps and through challenge codes |
+| People | ~3,000 individuals | 3-5.5 million residents (about 4.3 million on the Country map) counted by the 256 m sector, plus up to 60,000 (setting) individuals where it matters |
 | Forces | Every officer an entity | Pools at stations and bases, formations on the national map; individuals only when deployed |
 | Player | A sandbox god | Eight roles from God and the President down to one officer or survivor; replays, challenge codes, an editor |
 | Crowds | Each zombie steers, pairwise separation | One scent field (breadth-first search) twice a second; the dead walk downhill on it |
@@ -16,7 +16,7 @@ How the sequel works, and how it answers the lessons written down in the first g
 | Entity state | Booleans (dead, removed, listed), lazy sweeps | One location per slot, changed only by four methods |
 | Behaviour versions | `if (civic >= N)` everywhere | None: saves are versioned, the rules aren't |
 | Content | Code (40,000 lines of landmark drawing) | `assets/content.ini` for every type and scenario |
-| Tests | 25, about 12 minutes, Android stubs | About fifty, a minute or two, no stubs (the core has no Android code) |
+| Tests | 25, about 12 minutes, Android stubs | About 130, four to five minutes on two cores, no stubs (the core has no Android code); the main promises on national maps, today's maps kept as quick regressions and a golden record |
 
 ## Code map
 
@@ -25,7 +25,8 @@ All in one package, `com.instantaxtion.zcs2`. The core (`src/core`) never touche
 | Area | Files | What they do |
 |---|---|---|
 | Content | `Content`, `Data`, `assets/content.ini` | Weapons, units, zombie types, vehicles, scenarios; names, buildings, presets, origins, outside help |
-| The region | `RegionGen`, `Region`, `RoadGraph`, `Tile`, `Noise`, `Names` | Terrain, rivers, settlements, street grids, blocks and lots, facilities, the army base and prison, highways (A* over the terrain, smoothed, bridged), farms; the road graph and its routing |
+| The nation | `Nation`, `NationGen`, `ChunkGen`, `ChunkCache`, `ChunkStore`, `Overlay`, `ActiveSet`, `SectorIndex` | The real-scale map: a coarse national layer (land cover and height every 64 m, rivers, settlements and their districts, residents per sector, facilities with their buildings and doors, sites, every street of the lattice, highways and railways); 64-tile chunks made from it on demand (a pure function of the seed), cached, paged in where the simulation needs them; the edits saved over them; districts of sectors that sleep when nothing happens |
+| The region | `RegionGen`, `Region`, `RoadGraph`, `Tile`, `Noise`, `Names` | Today's smaller maps (terrain, rivers, settlements, street grids, blocks and lots, facilities, highways, farms), the region every game runs on (backed by chunks on a national map), the road graph and its routing (two levels on national maps, long routes kept until the roads change) |
 | The world | `World`, `Ents`, `Spatial`, `Flow`, `NavPath`, `Parallel`, `Rng` | Entity storage, the spatial grid, the scent field, foot paths, the worker pool, deterministic randomness, and the order of a step |
 | Two tiers | `Sectors` | The counted population and dead, indoor infection, coming out onto the streets and going back in, migration |
 | Behaviour | `ZombieAI`, `Undead`, `CivAI`, `ArmedAI`, `Combat` | Thinking (in parallel) and carrying it out (in order): bites, shots, blasts, deaths, rising; the dead smashing, feeding, leading, lunging |
@@ -34,7 +35,7 @@ All in one package, `com.instantaxtion.zcs2`. The core (`src/core`) never touche
 | Player | `Tools`, `Setup`, `Actions`, `Roles`, `Defences`, `Orders`, `Rules`, `Survival` | Everything the player can do (every change goes through `Actions`, which records it); building a new game, its scenario and the player's role; the country-scale campaign goals; what the player builds, lasting orders, driving and possession, and the rules sheet; living through it as one person (hiding, scavenging, needs, weapons, melee, cars, companions) |
 | Director | `Director`, `Replay`, `DirectorScreens` | The record of inputs, replays from a game's start, the timelapse, heatmaps; the replay list, timelapse and scenario editor screens |
 | Checking | `Audit`, `SaveIO` | Invariants and state hashes; saves |
-| Presentation | `Gfx`, `GImage`, `Platform`, `Camera`, `MapPainter`, `WorldView`, `Ui`, `Icons`, `Game`, `Settings`, `Texts` | Drawing at every zoom, the interface, the screens |
+| Presentation | `Gfx`, `GImage`, `Platform`, `Camera`, `MapPainter`, `NationPainter`, `WorldView`, `Ui`, `Icons`, `Game`, `Settings`, `Texts` | Drawing at every zoom (the country picture, district and town pictures, street pictures), the interface, the screens |
 | Sound | `Synth`, `Mixer`, `AudioDirector` | Every effect, bed and score stem, synthesised once; mixing with priorities and a limiter; what to play, where, and the captions, vibration and shake that go with it |
 | Android | `MainActivity`, `GameView`, `GLGameView`, `AndroidGfx`, `GLGfx`, `AndroidImage`, `AndroidPlatform` | The shell: Canvas by default, the GPU renderer if chosen |
 | Desktop | `DesktopMain`, `DesktopGfx`, `DesktopPlatform`, `Tests`, `Probe`, `Shot`, `UiShot` | Window, tests and tools |
@@ -55,7 +56,7 @@ The test `sim: the same game on 1 and 4 threads` checks a state hash every 10 se
 
 ## Two tiers: counted and individual
 
-Each 512 px sector holds `popIn` (people sheltering), `inf` (the bitten who haven't turned), and `zIn` (the dead not
+Each sector (256 m, 1,024 px, on a national map; 512 px on today's) holds `popIn` (people sheltering), `inf` (the bitten who haven't turned), and `zIn` (the dead not
 walking the streets as individuals). Every second, in every sector: the dead indoors bite the people sheltering
 (slowly: they barricade), the infected turn, some of the infected go to the town's hospital, armed units present
 clear buildings room by room, and the unwatched dead migrate towards people and light, or form a horde.
@@ -191,7 +192,8 @@ out only for tiles with another kind of ground within four tiles, the spline sep
 on it and the trees, anti-aliased by coverage; only the lane markings are drawn on the canvas. A picture the cache
 lets go of is painted over for the next chunk rather than made anew.
 Soft things are small pictures scaled up with smoothing: glow sprites (street lights, fire, sirens, smoke), the
-infection's bleed and the heatmaps (two pixels a sector, blurred), the glow of crowds (the 64 px grid round the
+infection's bleed and the heatmaps (two pixels a sector, blurred; on a national map a window of 160 x 160 sectors round
+the camera, or the whole country at a pixel per 4 x 4 sectors from further out, about 1.6 MB instead of 13), the glow of crowds (the 64 px grid round the
 view). The interface's bars cover the screen's edges, and the camera knows it (`Camera.setInsets`), so "the whole
 country" fits the map area between them; on a tall screen it fits the map's height instead when that puts more
 land on the screen (a coarse land mask scores each zoom), and the rest is a pan away. Sideways, the tools become a
@@ -276,8 +278,8 @@ companions' (`CivAI` hands anyone flagged `F_COMPANION` to `Survival.companionTh
   what you carry goes into its stores.
 
 `SurvivalBot` (desktop) plays a survivor through Actions alone: it eats and drinks, searches, fights off what comes
-close, hides and barricades when too many come, takes a car and drives the roads to the nearest safe place. On the
-default map (2304, the survivor scenario, two days, seeds 1-6) it reached safety 6 times in 6, in 23-117 game
+close, hides and barricades when too many come, takes a car and drives the roads to the nearest safe place. On
+today's 2304 map (measured before the switch to real scale; the survivor scenario, two days, seeds 1-6) it reached safety 6 times in 6, in 23-117 game
 seconds (always by car); standing still, the idle survivor reached safety 0 times in 6 (alive at the end in all
 six: the survivor starts well away from the outbreak). Walking only (`BOTNOCAR=1`), it still reached safety 6 of 6,
 in 135-1,339 game seconds. On the small test map (768, one day, seeds 1-8): 8 of 8 against 0 of 8. The scenario is
@@ -318,7 +320,8 @@ update; so are the stick, fast-forward and the people-in-detail setting. A repla
 seed, scenario as text, role) plus those events: `Replay` rebuilds the world and feeds the events back before
 each step, and the test `director: a replay rebuilds the same outbreak` checks the state hash matches after a
 session with painting, orders, strikes, panning and fast-forward. The timelapse stores the dead and the people of
-every sector once a game hour as log-scale bytes (about 10 KB an hour on the default map, inside the save).
+every sector once a game hour as log-scale bytes (about 10 KB an hour on a 2304 map; by district on a national map,
+every 3 game hours after day 3, inside the save).
 
 **Seeking.** While a replay plays, `Replay` keeps snapshots: a save's bytes (`SaveIO.snapshot`, compressed), the
 tick and the next input, at the start and every 30 game minutes, up to 48 MB; past the cap every other one is
@@ -477,6 +480,37 @@ the desktop `AudioDump` writes it all, and a captured game, to WAV files.
 
 The simulation steps inside the frame within a 28 ms budget; when a fast-forward speed is more than the phone can
 do, the rest is dropped rather than queued, and the speed button shows the rate actually reached.
+
+## At real scale
+
+The country is built in two layers. `NationGen` makes the coarse national layer in about a second: land cover and
+height every 16 tiles, rivers, the coast, settlements placed and given districts (centre, dense, mixed, suburb,
+industrial, park, campus) sector by sector, the residents of every sector (authoritative: they become `Sectors.home`),
+police stations, hospitals and fire stations in proportion to the people (a 1.2 million capital has about 30 police
+stations), the large sites, every street of the lattice as graph edges, highways and railways, and the doors of the
+national buildings (worked out from what the chunk generator will paint round them, so a new game makes six chunks,
+not 650). Everything per tile comes later: `ChunkGen.generate(nation, cx, cy)` makes a 64-tile chunk (tiles,
+blocks and buildings, doors, navigation, its sector's residents shared among its buildings) as a pure function, the
+same on any thread in any order; `ChunkCache` keeps them, a background thread prefetches round the camera, and the
+simulation's `ActiveSet` pages in only the chunks round people, fights, fires and the camera (a deterministic
+function of the simulation's state, so replays and saves stay exact). Edits (barricades, rubble, blown bridges) are
+an `Overlay` over the generated chunks, which is what a save holds. Sectors are grouped into 8 x 8 districts that
+sleep while nothing happens in them (`SectorIndex`), so a quiet country of 200,000 sectors costs well under a
+millisecond a second. Long road trips use a two-level search (highways and avenues, then the streets at each end)
+and are kept until the roads change.
+
+Timing follows real distances (`@national` rules in content.ini): hordes march at 2 km/h, refugees walk and drive,
+convoys, trains, ships and planes go at their real speeds, and vehicles far from the active chunks drive in transit
+at 25 km/h. The per-sector numbers follow the real densities. Dispatch sends police from the nearest of a city's
+stations, each counting as further away the more of its officers are already out, so the calls of a district are
+shared by load. "Hold the capital" also asks that two in five of the capital's people stay in it, since a real
+capital's five highways can empty half of it in days whatever the war.
+
+Drawing goes country picture (a pixel per 64 m) -> district pictures (512 tiles at 8, 4 and 2 tiles a pixel) -> town
+pictures (128-tile squares at a tile a pixel from zoom 0.075, so the streets stay sharp at 0.08-0.2) -> street pictures
+of cached chunks from 0.16. Diagonal roads are anti-aliased in the street pictures, highways have interchanges where
+they meet a city's streets, and downtown blocks come in one, two and four lattice cells with towers, slabs and plazas.
+The New Game screen offers the three national sizes; the Large country only where the heap is 400 MB or more.
 
 ## What's next
 
