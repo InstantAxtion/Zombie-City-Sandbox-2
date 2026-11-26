@@ -120,6 +120,7 @@ public final class SaveIO {
         readModules(in, w);
         if (in.readInt() != MAGIC) throw new IOException("save is damaged");
         w.veh.rebuildGrid();
+        w.sp.build(w.e);
         if (rules != c.rulesHash) w.news.radio("(This save was made with different game rules; it may play a little differently.)", -1, -1, News.COMMAND);
         return w;
     }
@@ -207,6 +208,7 @@ public final class SaveIO {
         bytes(o, e.kind, n); bytes(o, e.loc, n); bytes(o, e.state, n);
         shorts(o, e.type, n); shorts(o, e.ammo, n); shorts(o, e.kills, n); shorts(o, e.rank, n);
         ints(o, e.flags, n); ints(o, e.target, n); ints(o, e.squad, n); ints(o, e.vehicle, n); ints(o, e.uid, n); ints(o, e.home, n);
+        intArr(o, e.freeOrder());
     }
 
     private static void readEnts(DataInputStream in, Ents e) throws IOException {
@@ -221,6 +223,8 @@ public final class SaveIO {
         readShorts(in, e.type); readShorts(in, e.ammo); readShorts(in, e.kills); readShorts(in, e.rank);
         readInts(in, e.flags); readInts(in, e.target); readInts(in, e.squad); readInts(in, e.vehicle); readInts(in, e.uid); readInts(in, e.home);
         e.rebuildFree();
+        int[] order = readIntArr(in);
+        if (order != null) e.setFreeOrder(order);
     }
 
     // ------------------------------------------------------------------ vehicles
@@ -476,6 +480,8 @@ public final class SaveIO {
         ints(o, v, v.length);
         ints(o, s.killsBySide, 3);
         ints(o, s.armedDeaths, 4);
+        ints(o, s.zBySettlement, s.zBySettlement.length);
+        ints(o, s.popBySettlement, s.popBySettlement.length);
         o.writeInt(s.tN);
         floats(o, s.tTime, s.tN); ints(o, s.tZombies, s.tN); ints(o, s.tAlive, s.tN); ints(o, s.tPolice, s.tN); ints(o, s.tArmy, s.tN);
         o.writeInt(s.events.size());
@@ -498,6 +504,8 @@ public final class SaveIO {
         s.startPolice = v[15]; s.startSoldiers = v[16]; s.startCivilians = v[17];
         readInts(in, s.killsBySide);
         readInts(in, s.armedDeaths);
+        readInts(in, s.zBySettlement);
+        readInts(in, s.popBySettlement);
         s.tN = in.readInt();
         readFloats(in, s.tTime); readInts(in, s.tZombies); readInts(in, s.tAlive); readInts(in, s.tPolice); readInts(in, s.tArmy);
         int n = in.readInt();

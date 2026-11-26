@@ -89,9 +89,9 @@ public final class Strategic {
     public boolean fuelOk(int facility) {
         if (facility < 0) return true;
         Region.Facility f = w.r.facilities.get(facility);
-        if (f.kind == Region.F_BASE) return online[f.id];
+        if (f.kind == Region.F_BASE) return online[f.id] && f.fuel > 0;
         for (Region.Facility d : w.r.facilities)
-            if (d.kind == Region.F_FUEL && d.settlement == f.settlement) return online[d.id];
+            if (d.kind == Region.F_FUEL && d.settlement == f.settlement) return online[d.id] && d.fuel > 0;
         return true;
     }
 

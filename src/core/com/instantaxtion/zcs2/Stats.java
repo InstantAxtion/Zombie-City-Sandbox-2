@@ -76,9 +76,8 @@ public final class Stats {
         fallen.add(w.clock() + "  " + w.nameOf(i) + " (" + w.unitOf(i).name + ", " + w.e.kills[i] + " kills), " + how[Math.min(5, cause)]);
     }
 
-    void update() {
-        int z = w.totalZombies();
-        if (z > peakZombies) peakZombies = z;
+    /** The people and the dead in each settlement (also after loading a save, where they aren't stored). */
+    public void recount() {
         java.util.Arrays.fill(zBySettlement, 0);
         java.util.Arrays.fill(popBySettlement, 0);
         for (int s = 0; s < w.sec.n; s++) {
@@ -87,6 +86,12 @@ public final class Stats {
             zBySettlement[st] += w.sp.secZ[s] + w.sec.zIn[s];
             popBySettlement[st] += w.sec.popIn[s] + w.sp.secCiv[s];
         }
+    }
+
+    void update() {
+        int z = w.totalZombies();
+        if (z > peakZombies) peakZombies = z;
+        recount();
         if (w.tick % 200 == 0 && tN < MAXT) {
             tTime[tN] = (float) w.time;
             tZombies[tN] = z;

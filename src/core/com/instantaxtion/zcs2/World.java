@@ -40,6 +40,8 @@ public final class World {
     public final Stats stats;
     public final Forces forces;
     public final Weather weather;
+    public final Infrastructure infra;
+    public final Logistics logistics;
     /** Systems plugged in (updated, saved and drawn in this order). */
     public final List<Module> modules = new ArrayList<Module>();
     /** Strategic fast-forward: everything as numbers, ten game seconds a step. */
@@ -100,6 +102,10 @@ public final class World {
         weather = new Weather(this);
         modules.add(weather);
         modules.add(forces);
+        infra = new Infrastructure(this);
+        logistics = new Logistics(this);
+        modules.add(infra);
+        modules.add(logistics);
         zai = new ZombieAI(this);
         cai = new CivAI(this);
         aai = new ArmedAI(this);

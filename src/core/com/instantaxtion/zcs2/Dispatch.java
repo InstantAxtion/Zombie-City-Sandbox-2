@@ -60,6 +60,7 @@ public final class Dispatch {
             float delay = sp.secCop[s] + sp.secSol[s] > 0 ? 2 : w.strat.lit(s) ? 18 : 35;
             // the dead only indoors: people hide and hope before anyone calls
             if (sp.secZ[s] == 0) delay += 100;
+            delay *= w.infra.callDelay(s); // the phones are down: calls take far longer
             if (sec.firstZ[s] < 0 || now - sec.firstZ[s] < delay) continue;
             int id = secIncident[s];
             if (id < 0 || !incidents.get(id).open) {
