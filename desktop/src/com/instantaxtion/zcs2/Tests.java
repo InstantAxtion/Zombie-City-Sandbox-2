@@ -371,6 +371,55 @@ public final class Tests {
                 check(threw, "an unknown section is refused");
             }
         });
+        test("content: national rules override only on national maps, and today's values are the old literals", new T() {
+            public void run() throws Exception {
+                // every rule with an @national value, and what the code used before it was a rule (P9a)
+                Object[] old = {
+                        "hordeSpeed", 11f, "refugeeSpeed", 28f, "refugeeCarSpeed", 28f, "convoySpeed", 35f, "trainSpeed", 90f,
+                        "planeSpeed", 500f, "shipSpeed", 25f, "transitSpeed", 1667f,
+                        "trainOver", 2500f, "troopTrainOver", 4000f, "airliftDistance", 7000f, "hordeSense", 24f * 512, "hordeMerge", 200f,
+                        "indoorDensity", 10000f, "sectorSpill", 3000f, "hordeSize", 300f, "nestMin", 400f, "biteFloor", 0.5f,
+                        "emergeDead", 40f, "emergeFleeing", 12f, "emergeStreet", 28f, "migrateRate", 0.02f, "shambleRate", 0.003f};
+                // national only: today the code uses the type's own speed ([formation] speed, the destroyer's, the
+                // transport plane's), or has no such rule yet (tactical moves, evacuation per highway exit)
+                List<String> only = java.util.Arrays.asList("formationSpeed", "formationTactical", "warshipSpeed", "airliftSpeed", "evacPerHourPerExit");
+                java.util.Map<String, Float> was = new java.util.HashMap<String, Float>();
+                for (int k = 0; k < old.length; k += 2) was.put((String) old[k], (Float) old[k + 1]);
+                List<String> keys = content.nationalRuleKeys();
+                check(keys.size() == was.size() + only.size(), keys.size() + " national rules");
+                for (String k : keys) {
+                    float nat = content.rule(k, -1, true);
+                    if (only.contains(k)) {
+                        check(content.plainRule(k) == null, k + " has a plain value");
+                        check(content.rule(k, -7, false) == -7, k + ": today's maps keep the code's own value");
+                        check(nat > 0, k + " national");
+                        continue;
+                    }
+                    check(was.containsKey(k), k + " is not in the table");
+                    Float plain = content.plainRule(k);
+                    check(plain != null && plain.floatValue() == was.get(k), k + " = " + plain + ", was " + was.get(k));
+                    check(content.rule(k, -1) == plain && content.rule(k, -1, false) == plain, k + " plain lookup");
+                    check(nat != plain, k + " national is the same as today's");
+                }
+                for (String k : was.keySet()) check(keys.contains(k), k + " has no national value");
+                // the units, at 4 m tiles and 60 game seconds a game hour
+                check(Math.abs(Content.kmh(1) - 66.667f) < 0.01f && Content.km(1) == 4000, "km/h and km");
+                check(Math.abs(content.rule("hordeSpeed", 0, true) - 133.33f) < 0.01f, "a horde walks 2 km/h");
+                check(content.rule("trainOver", 0, true) == 80000 && content.rule("hordeMerge", 0, true) == 2000, "km and m");
+                check(Math.abs(content.rule("convoySpeed", 0, true) - 2000) < 0.01f, "convoys 30 km/h");
+                check(content.rule("indoorDensity", 0, true) == 4 * content.rule("indoorDensity", 0), "per-sector x4");
+                // a key with any other @ is refused; today's maps aren't national
+                boolean threw = false;
+                try {
+                    Content.load(new ByteArrayInputStream("[rules x]\nhordeSpeed@moon = 1\n".getBytes("UTF-8")));
+                } catch (java.io.IOException e) {
+                    threw = true;
+                }
+                check(threw, "an unknown @ suffix is refused");
+                World w = new World(content, RegionGen.generate(768, RegionGen.COAST, 3), 3, 1);
+                check(!w.national && w.rule("hordeSpeed", 0) == 11 && w.rule("formationSpeed", 32) == 32, "today's maps use today's rules");
+            }
+        });
         test("region: every preset and size builds", new T() {
             public void run() {
                 for (int size : new int[]{768, 1024}) {
@@ -3166,6 +3215,49 @@ public final class Tests {
                 for (int b = 0; b < m.bCount; b++)
                     check(m.bx(b) == m.bx[b] && m.bkind(b) == m.bkind[b] && m.building(m.bx[b], m.by[b]) == b && m.building(m.by[b] * m.W + m.bx[b]) == b, "building " + b);
                 System.out.printf("        9 chunks attached as pages, %d buildings read through Region%n", buildings);
+            }
+        });
+        test("drawing: a real-scale map at every zoom, from the coarse layer and cached chunks", new T() {
+            public void run() {
+                Nation n = country();
+                ChunkCache cache = new ChunkCache(n, 512);
+                DesktopPlatform pf = new DesktopPlatform(new java.io.File("build/test-data"));
+                WorldView v = new WorldView(NationPainter.source(n, cache), pf);
+                NationPainter np = v.np;
+                check(np.countryImage.width() == n.cw / np.countryStep && np.tintImage.width() == n.sw, "country picture and tint sized");
+                // district pictures are pure, and painting them makes no chunk
+                int dx = n.capital().cx / NationPainter.DISTRICT, dy = n.capital().cy / NationPainter.DISTRICT;
+                for (int lvl = 0; lvl < NationPainter.DTPP.length; lvl++) {
+                    int tpp = NationPainter.DTPP[lvl], side = NationPainter.DISTRICT / tpp;
+                    int[] a = np.paint(dx * 512, dy * 512, tpp, side), b = np.paint(dx * 512, dy * 512, tpp, side);
+                    check(java.util.Arrays.equals(a, b), "district picture " + lvl + " the same twice");
+                }
+                check(cache.generated == 0, "district pictures generated chunks");
+                Camera cam = new Camera();
+                cam.dp = 2;
+                cam.setScreen(360, 640, n.px());
+                check(cam.minZoom < 0.002f && cam.minZoom > 0.0005f, "minZoom from the map's size: " + cam.minZoom);
+                java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(360, 640, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+                float[] zooms = {cam.minZoom, 0.006f, 0.035f, 0.1f, 0.5f};
+                for (float z : zooms) {
+                    cam.zoom = z;
+                    cam.cx = n.capital().cx * 16f;
+                    cam.cy = n.capital().cy * 16f;
+                    cam.update(0, n.px());
+                    for (int f = 0; f < 30; f++) {
+                        java.awt.Graphics2D g = img.createGraphics();
+                        v.draw(new DesktopGfx(g, 360, 640), cam, 0.016f);
+                        g.dispose();
+                        cache.drain();
+                    }
+                }
+                check(np.painted > 0 && v.map.painted > 0, "pictures painted: district " + np.painted + ", street " + v.map.painted);
+                check(cache.generated > 0 && cache.generated < 200, "chunks made for the street view: " + cache.generated);
+                // the middle of the screen at street zoom is a street picture of the capital, not the sea
+                int c = img.getRGB(180, 320);
+                check(c != (NationPainter.WATER_DEEP | 0) , "street view drew nothing");
+                cache.shutdown();
+                System.out.printf("        %d district and %d street pictures painted, %d chunks made in the background%n", np.painted, v.map.painted, cache.generated);
             }
         });
     }

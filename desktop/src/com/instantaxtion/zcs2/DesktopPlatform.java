@@ -22,6 +22,9 @@ public final class DesktopPlatform implements Platform {
 
     public GImage newImage(int w, int h) { return new DesktopGfx.Img(w, h); }
     public float density() { return density; }
+    /** The heap allowed (tests may pretend to be a phone). */
+    public long maxMemory = Runtime.getRuntime().maxMemory();
+    public long maxMemory() { return maxMemory; }
     public InputStream openAsset(String name) throws IOException { return new FileInputStream(new File("assets", name)); }
     public InputStream openRead(String name) throws IOException { return new FileInputStream(new File(dir, name)); }
     public OutputStream openWrite(String name) throws IOException { return new FileOutputStream(new File(dir, name)); }

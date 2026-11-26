@@ -11,6 +11,9 @@ public final class WorldView {
     private final World w;
     private final Platform pf;
     public final MapPainter map;
+    /** On a real-scale map: the country and district pictures (null on today's maps). */
+    public final NationPainter np;
+    private final Nation nat;
     public boolean lean3d = true, blood = true, healthBars = true, names = true;
     /** No words on the map at all (the menu's backdrop). */
     public boolean noLabels;
@@ -68,6 +71,25 @@ public final class WorldView {
         this.w = w;
         this.pf = pf;
         map = new MapPainter(w.r, pf, 64);
+        np = null;
+        nat = null;
+        sprites();
+    }
+
+    /**
+     * A view of a real-scale map with no world on it yet: the ground at every zoom (the country picture, district
+     * pictures, street pictures from cached chunks), rivers, roads and railways, buildings, places and facilities.
+     */
+    public WorldView(NationPainter.Source src, Platform pf) {
+        this.w = null;
+        this.pf = pf;
+        np = new NationPainter(src, pf);
+        nat = src.nation();
+        map = new MapPainter(src, pf, np.countryImage);
+        sprites();
+    }
+
+    private void sprites() {
         glowWarm = sprite(0xFFC070, 1.6f);
         glowRed = sprite(0xFF3030, 1.6f);
         glowBlue = sprite(0x4080FF, 1.6f);
@@ -192,6 +214,10 @@ public final class WorldView {
     }
 
     public void draw(Gfx g, Camera cam, float dt) {
+        if (w == null) {
+            drawNation(g, cam, dt);
+            return;
+        }
         time += dt;
         dp = cam.dp;
         map.refresh();
@@ -252,6 +278,10 @@ public final class WorldView {
     private int framesDrawn;
 
     private void ground(Gfx g, Camera cam) {
+        if (np != null) {
+            groundNation(g, cam);
+            return;
+        }
         float z = cam.zoom;
         float worldPx = w.r.px();
         // the whole-region picture underneath everything (and on its own when far out)
@@ -383,28 +413,72 @@ public final class WorldView {
 
     private int visN;
 
+    // the buildings drawn this frame: tiles, floors, roof colour, kind and an id (which picks the roof's details)
+    private int[] dbx = new int[1024], dby = new int[1024], dbw = new int[1024], dbh = new int[1024], dbf = new int[1024],
+            dbr = new int[1024], dbk = new int[1024], dbid = new int[1024];
+
+    private void growDrawn(int n) {
+        if (n <= dbx.length) return;
+        int m = Math.max(n, dbx.length * 2);
+        dbx = java.util.Arrays.copyOf(dbx, m);
+        dby = java.util.Arrays.copyOf(dby, m);
+        dbw = java.util.Arrays.copyOf(dbw, m);
+        dbh = java.util.Arrays.copyOf(dbh, m);
+        dbf = java.util.Arrays.copyOf(dbf, m);
+        dbr = java.util.Arrays.copyOf(dbr, m);
+        dbk = java.util.Arrays.copyOf(dbk, m);
+        dbid = java.util.Arrays.copyOf(dbid, m);
+    }
+
     private void buildings(Gfx g, Camera cam, float x0, float y0, float x1, float y1) {
-        Region r = w.r;
+        int n;
+        if (np != null) n = nationBuildings(x0, y0, x1, y1);
+        else {
+            Region r = w.r;
+            n = visN = visible(x0, y0, x1, y1);
+            for (int k = 0; k < n; k++) {
+                int b = vis[k];
+                if (w.fires.heat[b] > 0) scorched[b] = true;
+            }
+            growDrawn(n);
+            for (int k = 0; k < n; k++) {
+                int b = vis[k];
+                dbx[k] = r.bx(b);
+                dby[k] = r.by(b);
+                dbw[k] = r.bw(b);
+                dbh[k] = r.bh(b);
+                dbf[k] = r.bfloors(b);
+                int roof = r.broof(b);
+                if (scorched[b]) roof = MapPainter.mix(roof, 0xFF201A16, 0.7f);
+                dbr[k] = roof;
+                dbk[k] = r.bkind(b);
+                dbid[k] = b;
+            }
+        }
+        drawBuildings(g, cam, n);
+    }
+
+    /** Buildings standing up: soft shadows, walls leaning away from the screen's middle, roofs. */
+    private void drawBuildings(Gfx g, Camera cam, int n) {
         float z = cam.zoom;
         float ccx = cam.cx, ccy = cam.cy;
-        int n = visN = visible(x0, y0, x1, y1);
-        float lk = lean3d ? 0.0016f : 0;
-        float maxLean = 60;
+        // on a real-scale map the buildings rise out of the street pictures' roofs as the zoom grows, so nothing
+        // jumps where they start being drawn (today's maps keep drawing them standing from the start)
+        float rise = np != null ? clamp01((z - 0.22f) / 0.12f) : 1;
+        float lk = lean3d ? 0.0016f * rise : 0;
+        float maxLean = 60 * rise;
         boolean detail = z > 0.45f;
-        for (int k = 0; k < n; k++) {
-            int b = vis[k];
-            if (w.fires.heat[b] > 0) scorched[b] = true;
-        }
         // pass 0: soft shadows (the sun in the south-west... from the top left), pass 1: walls, pass 2: roofs
         for (int pass = 0; pass < 3; pass++) {
             for (int k = 0; k < n; k++) {
-                int b = vis[k];
-                int floors = r.bfloors(b);
-                float wx = r.bx(b) * 16f, wy = r.by(b) * 16f, ww = r.bw(b) * 16f, wh = r.bh(b) * 16f;
+                int b = dbid[k];
+                int floors = dbf[k];
+                float wx = dbx[k] * 16f, wy = dby[k] * 16f, ww = dbw[k] * 16f, wh = dbh[k] * 16f;
                 float sx = cam.toScreenX(wx), sy = cam.toScreenY(wy), sw = ww * z, sh = wh * z;
                 float height = Math.min(40, floors) * 3.2f + 4;
                 if (pass == 0) {
-                    float off = height * 0.32f * z;
+                    if (rise <= 0) continue;
+                    float off = height * 0.32f * z * rise;
                     g.color(0x22000000);
                     g.fillRect(sx + off * 0.5f, sy + off * 0.65f, sw + off * 0.5f, sh + off * 0.5f);
                     g.color(0x26000000);
@@ -417,10 +491,9 @@ public final class WorldView {
                     lx *= maxLean * z * 2 / ll;
                     ly *= maxLean * z * 2 / ll;
                 }
-                int roof = r.broof(b);
-                if (scorched[b]) roof = MapPainter.mix(roof, 0xFF201A16, 0.7f);
+                int roof = dbr[k];
                 if (pass == 1) {
-                    if (!lean3d) continue;
+                    if (!lean3d || rise <= 0) continue;
                     int wall = MapPainter.mix(MapPainter.shade(roof, 0.58f), 0xFF3C3E44, 0.35f);
                     if (ly < 0) face(g, sx, sy, sx + sw, sy, lx, ly, MapPainter.shade(wall, 1.12f), floors, -ly, detail);
                     if (lx > 0) face(g, sx + sw, sy, sx + sw, sy + sh, lx, ly, MapPainter.shade(wall, 0.86f), floors, lx, detail);
@@ -428,7 +501,7 @@ public final class WorldView {
                     if (lx < 0) face(g, sx, sy, sx, sy + sh, lx, ly, MapPainter.shade(wall, 1.0f), floors, -lx, detail);
                 } else {
                     float rx = sx + lx, ry = sy + ly;
-                    roof(g, b, rx, ry, sw, sh, z, roof, detail);
+                    roof(g, b, dbk[k], rx, ry, sw, sh, z, roof, detail);
                 }
             }
         }
@@ -463,9 +536,7 @@ public final class WorldView {
 
     private static final int SHAPE_FLAT = 0, SHAPE_PITCHED = 1;
 
-    private void roof(Gfx g, int b, float x, float y, float rw, float rh, float z, int roof, boolean detail) {
-        Region r = w.r;
-        int kind = r.bkind(b);
+    private void roof(Gfx g, int b, int kind, float x, float y, float rw, float rh, float z, int roof, boolean detail) {
         int shape = kind == Region.B_HOUSE || kind == Region.B_FARMHOUSE || kind == Region.B_BARN || kind == Region.B_CHURCH ? SHAPE_PITCHED : SHAPE_FLAT;
         if (shape == SHAPE_PITCHED) {
             // two slopes either side of the ridge, one in the sun
@@ -1268,6 +1339,10 @@ public final class WorldView {
      * highway in asphalt with a darker edge (a blown bridge is left out).
      */
     private void smoothLines(Gfx g, Camera cam, float x0, float y0, float x1, float y1) {
+        if (np != null) {
+            nationLines(g, cam, x0, y0, x1, y1);
+            return;
+        }
         float z = cam.zoom;
         if (z >= 0.45f) return;
         RoadGraph rail = w.r.rails;
@@ -1370,6 +1445,328 @@ public final class WorldView {
         poly[5] -= dp * 0.6f;
         g.color(color);
         g.fillPoly(poly, 3);
+    }
+
+    // ------------------------------------------------------------------ a real-scale map
+
+    private static float clamp01(float v) {
+        return v < 0 ? 0 : v > 1 ? 1 : v;
+    }
+
+    /** How far the district pictures have faded in over the country picture at a zoom (0..1). */
+    static float districtFade(float z) {
+        return clamp01((z / NationPainter.Z_DISTRICT - 0.85f) / 0.3f);
+    }
+
+    /** How far the street pictures have faded in over the district pictures at a zoom (0..1). */
+    static float streetFade(float z) {
+        return clamp01((z / NationPainter.Z_STREET - 1) / 0.25f);
+    }
+
+    /** A real-scale map with no world on it: the ground, the lines, the buildings and the names. */
+    private void drawNation(Gfx g, Camera cam, float dt) {
+        time += dt;
+        dp = cam.dp;
+        float z = cam.zoom;
+        g.color(NationPainter.WATER_DEEP);
+        g.fillRect(0, 0, g.width(), g.height());
+        groundNation(g, cam);
+        float x0 = cam.x0() - 80, y0 = cam.y0() - 80, x1 = cam.x1() + 80, y1 = cam.y1() + 80;
+        nationLines(g, cam, x0, y0, x1, y1);
+        if (z >= 0.22f) buildings(g, cam, x0, y0, x1, y1);
+        lqN = 0;
+        deferLabels = true;
+        for (int i = 0; i < keepN * 4; i++) placed[i] = keep[i];
+        placedN = keepN;
+        keepN = 0;
+        nationLabels(g, cam);
+        flushLabels(g);
+        areaX0 = areaY0 = -1e9f;
+        areaX1 = areaY1 = 1e9f;
+        g.image(vignette, 0, 0, g.width(), g.height());
+    }
+
+    /**
+     * The ground of a real-scale map: the country picture under everything; district pictures fading in over it from
+     * zoom 0.012; street pictures from cached chunks fading in over those from 0.2 (where a chunk isn't in memory the
+     * district picture shows, and the chunk is asked for); the density tint over the country view, fading out as the
+     * districts come in.
+     */
+    private void groundNation(Gfx g, Camera cam) {
+        float z = cam.zoom, worldPx = nat.px();
+        framesDrawn++;
+        boolean still = Math.abs(cam.cx - lastCx) * z < 1 && Math.abs(cam.cy - lastCy) * z < 1 && Math.abs(z - lastZ) < 0.0005f;
+        stillT = still ? stillT + 0.016f : 0;
+        lastCx = cam.cx;
+        lastCy = cam.cy;
+        lastZ = z;
+        long budget = framesDrawn < 20 ? 40_000_000L : stillT > 0.25f ? 14_000_000L : paintBudgetNs;
+        float ox = cam.toScreenX(0), oy = cam.toScreenY(0);
+        float da = districtFade(z), sa = streetFade(z);
+        float dpx = NationPainter.DISTRICT * Tile.SIZE;
+        int dx0 = Math.max(0, (int) (cam.x0() / dpx)), dy0 = Math.max(0, (int) (cam.y0() / dpx));
+        int dx1 = Math.min(np.dw - 1, (int) (cam.x1() / dpx)), dy1 = Math.min(np.dw - 1, (int) (cam.y1() / dpx));
+        float pcPx = MapPainter.CHUNK * Tile.SIZE;
+        int pn = nat.size / MapPainter.CHUNK;
+        int px0 = Math.max(0, (int) (cam.x0() / pcPx)), py0 = Math.max(0, (int) (cam.y0() / pcPx));
+        int px1 = Math.min(pn - 1, (int) (cam.x1() / pcPx)), py1 = Math.min(pn - 1, (int) (cam.y1() / pcPx));
+        // a level fully covered by the one over it isn't drawn (scaling a big picture costs, on a desktop above all)
+        boolean streetsCover = sa >= 1, districtsCover = da >= 1;
+        int slvl = MapPainter.levelFor(z), dlvl = NationPainter.levelFor(z);
+        for (int cy = py0; cy <= py1 && streetsCover; cy++)
+            for (int cx = px0; cx <= px1 && streetsCover; cx++) {
+                boolean any = false;
+                for (int l = slvl; l >= 0 && !any; l--) any = map.has(cx, cy, l);
+                streetsCover = any;
+            }
+        for (int dy = dy0; dy <= dy1 && districtsCover && !streetsCover; dy++)
+            for (int dx = dx0; dx <= dx1 && districtsCover; dx++) {
+                boolean any = false;
+                for (int l = 0; l < NationPainter.DTPP.length && !any; l++) any = np.has(dx, dy, l);
+                districtsCover = any;
+            }
+        if (!districtsCover && !streetsCover) g.image(np.countryImage, ox, oy, worldPx * z, worldPx * z);
+        long p0 = np.paintNs + map.paintNs; // the budget is for painting
+        if (da > 0 && !streetsCover) {
+            int lvl = dlvl;
+            float mx = (dx0 + dx1) / 2f, my = (dy0 + dy1) / 2f;
+            int rings = Math.max(dx1 - dx0, dy1 - dy0);
+            for (int ring = 0; ring <= rings; ring++)
+                for (int dy = dy0; dy <= dy1; dy++)
+                    for (int dx = dx0; dx <= dx1; dx++) {
+                        if ((int) Math.max(Math.abs(dx - mx), Math.abs(dy - my)) != ring) continue;
+                        boolean may = (np.paintNs + map.paintNs - p0) < budget;
+                        GImage img = np.district(dx, dy, lvl, may);
+                        if (img == null) {
+                            // another level stands in (coarser first); else a coarse one is cheap enough to paint now
+                            for (int l = lvl - 1; l >= 0 && img == null; l--) img = np.district(dx, dy, l, false);
+                            for (int l = lvl + 1; l < NationPainter.DTPP.length && img == null; l++) img = np.district(dx, dy, l, false);
+                            if (img == null && (np.paintNs + map.paintNs - p0) < budget + 4_000_000L) img = np.district(dx, dy, 0, true);
+                        }
+                        if (img == null) continue;
+                        float sx = cam.toScreenX(dx * dpx), sy = cam.toScreenY(dy * dpx), side = dpx * z;
+                        if (da >= 1) g.image(img, sx, sy, side + 0.75f, side + 0.75f);
+                        else g.image(img, sx, sy, side, side, da);
+                    }
+        }
+        float chunkPx = Chunk.SIZE * Tile.SIZE;
+        if (z >= NationPainter.Z_STREET * 0.6f) {
+            // close to the streets: the chunks in view are made in the background, the nearest first
+            int cx0 = Math.max(0, (int) (cam.x0() / chunkPx)), cy0 = Math.max(0, (int) (cam.y0() / chunkPx));
+            int cx1 = Math.min(nat.sw - 1, (int) (cam.x1() / chunkPx)), cy1 = Math.min(nat.sw - 1, (int) (cam.y1() / chunkPx));
+            int ccx = (int) (cam.cx / chunkPx), ccy = (int) (cam.cy / chunkPx);
+            int rings = Math.max(Math.max(ccx - cx0, cx1 - ccx), Math.max(ccy - cy0, cy1 - ccy)) + (sa > 0 && stillT > 0.5f ? 1 : 0);
+            for (int ring = rings; ring >= 0; ring--)
+                for (int cy = ccy - ring; cy <= ccy + ring; cy++)
+                    for (int cx = ccx - ring; cx <= ccx + ring; cx++) {
+                        if (Math.max(Math.abs(cx - ccx), Math.abs(cy - ccy)) != ring) continue;
+                        if (cx < 0 || cy < 0 || cx >= nat.sw || cy >= nat.sw) continue;
+                        if (ring < rings - (sa > 0 && stillT > 0.5f ? 1 : 0) && (cx < cx0 || cx > cx1 || cy < cy0 || cy > cy1)) continue;
+                        if (np.src.chunk(cx, cy) == null) np.src.want(cx, cy);
+                    }
+        }
+        if (sa > 0) {
+            int lvl = slvl;
+            int cx0 = px0, cy0 = py0, cx1 = px1, cy1 = py1;
+            float mx = (cx0 + cx1) / 2f, my = (cy0 + cy1) / 2f;
+            int rings = Math.max(cx1 - cx0, cy1 - cy0);
+            for (int ring = 0; ring <= rings; ring++)
+                for (int cy = cy0; cy <= cy1; cy++)
+                    for (int cx = cx0; cx <= cx1; cx++) {
+                        if ((int) Math.max(Math.abs(cx - mx), Math.abs(cy - my)) != ring) continue;
+                        boolean may = (np.paintNs + map.paintNs - p0) < budget;
+                        GImage img = map.chunk(cx, cy, lvl, may);
+                        if (img == null) {
+                            for (int l = lvl - 1; l >= 0 && img == null; l--) img = map.chunk(cx, cy, l, false);
+                            if ((img == null || !map.has(cx, cy, Math.min(1, lvl))) && lvl >= 1 && (np.paintNs + map.paintNs - p0) < budget + 4_000_000L)
+                                img = map.chunk(cx, cy, 1, true);
+                            if (img == null && (np.paintNs + map.paintNs - p0) < budget + 4_000_000L) img = map.chunk(cx, cy, 0, true);
+                        }
+                        if (img == null) continue;
+                        float sx = cam.toScreenX(cx * pcPx), sy = cam.toScreenY(cy * pcPx), side = pcPx * z;
+                        if (sa >= 1) g.image(img, sx, sy, side + 0.75f, side + 0.75f);
+                        else g.image(img, sx, sy, side, side, sa);
+                    }
+        }
+        float ta = clamp01((NationPainter.Z_DISTRICT * 1.4f - z) / (NationPainter.Z_DISTRICT * 0.6f));
+        if (ta > 0) g.image(np.tintImage, ox, oy, worldPx * z, worldPx * z, ta);
+    }
+
+    /**
+     * Rivers and the roads between places as lines while the country picture shows (they fade as the district
+     * pictures, which paint them, come in); railways and highways as smooth lines until the streets are close.
+     */
+    private void nationLines(Gfx g, Camera cam, float x0, float y0, float x1, float y1) {
+        float z = cam.zoom;
+        float fade = 1 - districtFade(z);
+        if (fade > 0) {
+            g.color(MapPainter.alpha(NationPainter.RIVER, fade));
+            for (int r = 0; r < nat.rivers.size(); r++) {
+                float[] p = nat.rivers.get(r);
+                float lw = Math.max(1.1f * dp, nat.riverWidth.get(r) * 16 * z);
+                for (int i = 0; i + 3 < p.length; i += 2) {
+                    float ax = p[i] * 16, ay = p[i + 1] * 16, bx = p[i + 2] * 16, by = p[i + 3] * 16;
+                    if (Math.max(ax, bx) < x0 || Math.min(ax, bx) > x1 || Math.max(ay, by) < y0 || Math.min(ay, by) > y1) continue;
+                    g.line(cam.toScreenX(ax), cam.toScreenY(ay), cam.toScreenX(bx), cam.toScreenY(by), lw);
+                }
+            }
+            RoadGraph rg = nat.roads;
+            g.color(MapPainter.alpha(MapPainter.GROUND[Tile.ROAD], fade * 0.9f));
+            for (int e : np.countryRoads) {
+                float ax = rg.nx[rg.ea[e]], ay = rg.ny[rg.ea[e]], bx = rg.nx[rg.eb[e]], by = rg.ny[rg.eb[e]];
+                if (Math.max(ax, bx) < x0 || Math.min(ax, bx) > x1 || Math.max(ay, by) < y0 || Math.min(ay, by) > y1) continue;
+                g.line(cam.toScreenX(ax), cam.toScreenY(ay), cam.toScreenX(bx), cam.toScreenY(by), Math.max(0.8f * dp, rg.ehalf[e] * 2 * z));
+            }
+        }
+        if (z >= 0.45f) return;
+        RoadGraph rail = nat.rails;
+        if (rail.edgeCount > 0) {
+            float lw = Math.max(1.2f * dp, 24 * z);
+            for (int pass = 0; pass < 2; pass++) {
+                g.color(pass == 0 ? 0xC0201C18 : 0xFF6A6258);
+                for (int e = 0; e < rail.edgeCount; e++) {
+                    if (!rail.ealive[e]) continue;
+                    float ax = rail.nx[rail.ea[e]], ay = rail.ny[rail.ea[e]], bx = rail.nx[rail.eb[e]], by = rail.ny[rail.eb[e]];
+                    if (Math.max(ax, bx) < x0 || Math.min(ax, bx) > x1 || Math.max(ay, by) < y0 || Math.min(ay, by) > y1) continue;
+                    g.line(cam.toScreenX(ax), cam.toScreenY(ay), cam.toScreenX(bx), cam.toScreenY(by), pass == 0 ? lw + dp : lw * 0.5f);
+                }
+            }
+        }
+        RoadGraph rg = nat.roads;
+        for (int pass = 0; pass < 2; pass++) {
+            g.color(pass == 0 ? 0xFF2A2C30 : MapPainter.GROUND[Tile.HIGHWAY]);
+            for (int e : np.highways) {
+                if (!rg.ealive[e]) continue;
+                float ax = rg.nx[rg.ea[e]], ay = rg.ny[rg.ea[e]], bx = rg.nx[rg.eb[e]], by = rg.ny[rg.eb[e]];
+                if (Math.max(ax, bx) < x0 || Math.min(ax, bx) > x1 || Math.max(ay, by) < y0 || Math.min(ay, by) > y1) continue;
+                float lw = Math.max(1.6f * dp, rg.ehalf[e] * 2 * z);
+                g.line(cam.toScreenX(ax), cam.toScreenY(ay), cam.toScreenX(bx), cam.toScreenY(by), pass == 0 ? lw + 1.2f * dp : lw);
+            }
+        }
+    }
+
+    private int[] natStamp;
+    private int natStampN;
+
+    /** The buildings of the cached chunks near the view (and the national buildings in them) into the drawn arrays. */
+    private int nationBuildings(float x0, float y0, float x1, float y1) {
+        int tx0 = Math.max(0, (int) (x0 / 16) - 40), ty0 = Math.max(0, (int) (y0 / 16) - 40);
+        int tx1 = Math.min(nat.size - 1, (int) (x1 / 16) + 4), ty1 = Math.min(nat.size - 1, (int) (y1 / 16) + 4);
+        if (natStamp == null || natStamp.length < nat.bCount) natStamp = new int[Math.max(1, nat.bCount)];
+        natStampN++;
+        long[] nb = ChunkGen.index(nat).nats;
+        int n = 0;
+        for (int cy = ty0 >> 6; cy <= ty1 >> 6; cy++)
+            for (int cx = tx0 >> 6; cx <= tx1 >> 6; cx++) {
+                Chunk c = np.src.chunk(cx, cy);
+                if (c == null) continue;
+                int X0 = cx * Chunk.SIZE, Y0 = cy * Chunk.SIZE;
+                growDrawn(n + c.bCount);
+                for (int i = 0; i < c.bCount; i++) {
+                    int bx = X0 + c.bx[i], by = Y0 + c.by[i], bw = c.bw[i], bh = c.bh[i];
+                    if (c.bfloors[i] <= 0 || bx > tx1 || by > ty1 || bx + bw < tx0 + 36 || by + bh < ty0 + 36) continue;
+                    dbx[n] = bx;
+                    dby[n] = by;
+                    dbw[n] = bw;
+                    dbh[n] = bh;
+                    dbf[n] = c.bfloors[i];
+                    dbr[n] = c.broof[i];
+                    dbk[n] = c.bkind[i];
+                    dbid[n] = c.id(i);
+                    n++;
+                }
+                // the national buildings standing in it (facilities and sites), once each
+                long key = (long) c.index << 32;
+                int lo = 0, hi = nb.length;
+                while (lo < hi) {
+                    int mid = (lo + hi) >>> 1;
+                    if (nb[mid] < key) lo = mid + 1;
+                    else hi = mid;
+                }
+                for (int p = lo; p < nb.length && (int) (nb[p] >>> 32) == c.index; p++) {
+                    int b = (int) nb[p];
+                    if (natStamp[b] == natStampN) continue;
+                    natStamp[b] = natStampN;
+                    int bx = nat.bx[b], by = nat.by[b], bw = nat.bw[b], bh = nat.bh[b];
+                    if (nat.bfloors[b] <= 0 || bx > tx1 || by > ty1 || bx + bw < tx0 + 36 || by + bh < ty0 + 36) continue;
+                    growDrawn(n + 1);
+                    dbx[n] = bx;
+                    dby[n] = by;
+                    dbw[n] = bw;
+                    dbh[n] = bh;
+                    dbf[n] = nat.bfloors[b];
+                    dbr[n] = nat.broof[b];
+                    dbk[n] = nat.bkind[b];
+                    dbid[n] = b;
+                    n++;
+                }
+            }
+        return n;
+    }
+
+    /**
+     * A real-scale map's names and symbols through the same collision pass as today's maps: the capital and cities
+     * from the whole country, the bigger towns and the sites (bases, prisons, airfields) from the country view, all
+     * towns a little closer, villages from the district view; facilities by importance as the zoom grows.
+     */
+    private void nationLabels(Gfx g, Camera cam) {
+        float z = cam.zoom;
+        if (names) {
+            for (int pass = 0; pass < 4; pass++)
+                for (Region.Settlement s : nat.settlements) {
+                    boolean town = s.kind == Region.S_TOWN, village = s.kind == Region.S_VILLAGE, city = s.kind == Region.S_CITY;
+                    if (s.kind == Region.S_HOLDOUT || s.kind == Region.S_CAMP) continue;
+                    int rank = s.capital ? 0 : city ? 1 : village ? 3 : 2;
+                    if (rank != pass) continue;
+                    float size;
+                    if (city) size = z < 0.5f ? (s.capital ? 16 : 14.5f) : 0;
+                    else if (town) size = z < 0.4f && (z > 0.0045f || s.residents >= 15000) ? 12 : 0;
+                    else if (village) size = z < 0.4f && z > 0.022f ? 10.5f : 0;
+                    else size = z < 0.4f && z > 0.0035f ? 11 : 0;
+                    if (size == 0) continue;
+                    float sx = cam.toScreenX(s.cx * 16f), sy = cam.toScreenY(s.cy * 16f);
+                    if (sx < -150 * dp || sy < -40 * dp || sx > cam.sw + 150 * dp || sy > cam.sh + 40 * dp) continue;
+                    String label = s.capital ? "★ " + s.name : s.name;
+                    boolean twoWant = (city || town) && z < 0.2f && (city || z > 0.009f);
+                    boolean two = twoWant;
+                    float tw = g.textWidth(label, size * dp, true);
+                    float sy0 = sy;
+                    boolean ok = false;
+                    int tries = rank <= 1 ? 5 : 1;
+                    for (int k = 0; k < tries && !ok; k++) {
+                        sy = sy0 + (k == 0 ? 0 : (k % 2 == 1 ? -1 : 1) * ((k + 1) / 2) * (size + 18) * dp);
+                        two = twoWant;
+                        if (place(sx - tw / 2 - 2 * dp, sy - size * dp, sx + tw / 2 + 2 * dp, sy + (two ? (size * 0.4f + 14) * dp : 3 * dp))) ok = true;
+                        else if (two && place(sx - tw / 2 - 2 * dp, sy - size * dp, sx + tw / 2 + 2 * dp, sy + 3 * dp)) {
+                            two = false;
+                            ok = true;
+                        }
+                    }
+                    if (!ok) continue;
+                    labelAlways(g, label, sx, sy, size, city ? 0xFFFFFFFF : rank == 2 && !town ? 0xFFFFD8B0 : 0xFFE8E8E8, Gfx.ALIGN_CENTER, true);
+                    if (two) labelAlways(g, people(s.residents), sx, sy + (size * 0.4f + 11) * dp, 10, 0xFFE0E0E0, Gfx.ALIGN_CENTER, false);
+                }
+        }
+        if (z >= 1.2f) return;
+        for (Region.Facility f : nat.facilities) {
+            int k = f.kind;
+            if (k == Region.F_HELIPAD || k == Region.F_PARK) continue;
+            boolean major = k == Region.F_POWER || k == Region.F_BASE || k == Region.F_PRISON || k == Region.F_AIRBASE || k == Region.F_PORT || k == Region.F_AIRPORT;
+            boolean emergency = k == Region.F_POLICE || k == Region.F_HOSPITAL;
+            if (z < 0.025f && !major) continue;
+            if (z < 0.045f && !major && !emergency) continue;
+            if (z < 0.06f && (k == Region.F_FIRE || k == Region.F_FUEL || k == Region.F_WATER || k == Region.F_PHONE || k == Region.F_FOODW
+                    || k == Region.F_DEPOT || k == Region.F_LAB)) continue;
+            float sx = cam.toScreenX(f.x), sy = cam.toScreenY(f.y);
+            if (sx < -30 * dp || sy < -30 * dp || sx > cam.sw + 30 * dp || sy > cam.sh + 30 * dp) continue;
+            float s = (z < 0.03f ? 6.5f : z < 0.12f ? 7.5f : 9.5f) * dp;
+            if (!place(sx - s - dp, sy - s - dp, sx + s + dp, sy + s + dp)) continue;
+            facilityIcon(g, k, sx, sy, true, s);
+            if (z > 0.35f && names && f.name != null) {
+                float tw = g.textWidth(f.name, 10.5f * dp, false), ly = sy + s + 12 * dp;
+                if (place(sx - tw / 2, ly - 10 * dp, sx + tw / 2, ly + 3 * dp)) labelAlways(g, f.name, sx, ly, 10.5f, 0xFFFFFFFF, Gfx.ALIGN_CENTER, false);
+            }
+        }
     }
 
     // ------------------------------------------------------------------ the national map's layers

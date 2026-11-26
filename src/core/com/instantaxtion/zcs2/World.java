@@ -23,6 +23,11 @@ public final class World {
 
     public final Content c;
     public final Region r;
+    /**
+     * A national (real-scale) map: its sectors are chunk-sized, not Region.SECT. Rules read through rule() then take
+     * their key@national values from content.ini (km/h speeds, km distances, per-sector numbers x4).
+     */
+    public final boolean national;
     public final long seed;
     public final Ents e;
     /** The chunks the street-level simulation reads (all of them on today's maps). */
@@ -105,6 +110,7 @@ public final class World {
         this.c = c;
         this.r = r;
         r.recordEdits(); // from here on, changes to the map go into its overlay (saves hold that, not the tiles)
+        national = r.sect != Region.SECT;
         this.seed = seed;
         rng = new Rng(seed ^ 0x5EEDL);
         e = new Ents(8192);
@@ -227,6 +233,11 @@ public final class World {
 
     public boolean night() {
         return daylight() < 0.35f;
+    }
+
+    /** A rule from content.ini for this map: its key@national value on a national map, else the plain one, else def. */
+    public float rule(String key, float def) {
+        return c.rule(key, def, national);
     }
 
     public String clock() {

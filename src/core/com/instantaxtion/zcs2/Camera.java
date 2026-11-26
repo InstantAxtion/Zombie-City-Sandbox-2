@@ -156,27 +156,98 @@ public final class Camera {
         cx = wx - (sx - sw / 2f) / zoom;
         cy = wy - (sy - sh / 2f) / zoom;
         flyT = 0;
+        arc = false;
     }
 
     public void pan(float dxScreen, float dyScreen) {
         cx -= dxScreen / zoom;
         cy -= dyScreen / zoom;
         flyT = 0;
+        arc = false;
         follow = -1;
         followVehicle = -1;
     }
 
-    /** Glides to a place (and zoom) over about a second. */
+    /** Maps at least this wide (px; 8,192 tiles) are real-scale: their long flights rise and come down again. */
+    public static final float ARC_PX = 8192 * 16f;
+    // an arc flight: from (arcX0, arcY0, arcZ0), rising to arcZm half way, over arcDur seconds
+    private float arcX0, arcY0, arcZ0, arcZm, arcU, arcDur;
+    private boolean arc;
+
+    /**
+     * Glides to a place (and zoom) over about a second. On a real-scale map a flight further than the screen shows
+     * rises (zooms out) so that both ends are in view half way, then comes down, taking longer the further it goes:
+     * across the country from a street corner is about three seconds, and the ground passing under is always one
+     * the far pictures can show.
+     */
     public void flyTo(float x, float y, float z) {
         flyX = x;
         flyY = y;
         flyZ = Math.max(minZoom, Math.min(maxZoom, z));
         flyT = 2;
+        arc = false;
+        if (worldPx < ARC_PX) return;
+        float dist = (float) Math.sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy));
+        float zLow = Math.min(zoom, flyZ), span = Math.min(sw, sh) * 0.8f;
+        float zMid = Math.max(minZoom, Math.min(zLow, span / Math.max(1, dist)));
+        float rise = (float) Math.log(zLow / zMid), change = Math.abs((float) Math.log(flyZ / zoom));
+        if (rise < 0.7f && change < 2.5f) return; // a short hop: the usual glide
+        arc = true;
+        arcX0 = cx;
+        arcY0 = cy;
+        arcZ0 = zoom;
+        arcZm = zMid;
+        arcU = 0;
+        arcDur = Math.min(3.2f, 0.8f + 0.28f * (rise * 2 + change));
+        arcTable();
+        flyT = arcDur + 0.5f;
+    }
+
+    /** The arc's zoom at u (0..1): log-zoom straight from end to end, minus a bump down to the low point half way. */
+    private float arcZoom(float u) {
+        float s = u * u * (3 - 2 * u);
+        float l0 = (float) Math.log(arcZ0), l1 = (float) Math.log(flyZ), lm = (float) Math.log(arcZm);
+        float mid = (l0 + l1) / 2, bump = Math.max(0, mid - lm) * 4 * s * (1 - s);
+        return (float) Math.exp(l0 + (l1 - l0) * s - bump);
+    }
+
+    /** The share of the way covered by u: the ground moves at an even pace on the screen (fast high, slow low). */
+    private final float[] arcWay = new float[33];
+
+    private void arcTable() {
+        float sum = 0;
+        arcWay[0] = 0;
+        for (int i = 1; i <= 32; i++) {
+            float u = (i - 0.5f) / 32;
+            sum += 1 / arcZoom(u);
+            arcWay[i] = sum;
+        }
+        for (int i = 1; i <= 32; i++) arcWay[i] /= sum;
+    }
+
+    private void arcAt(float u) {
+        zoom = arcZoom(u);
+        float f = u * 32;
+        int i = Math.min(31, (int) f);
+        float k = arcWay[i] + (arcWay[i + 1] - arcWay[i]) * (f - i);
+        cx = arcX0 + (flyX - arcX0) * k;
+        cy = arcY0 + (flyY - arcY0) * k;
     }
 
     public void update(float dt, float worldPx) {
         this.worldPx = worldPx;
-        if (flyT > 0) {
+        if (flyT > 0 && arc) {
+            arcU = Math.min(1, arcU + dt / arcDur);
+            arcAt(arcU);
+            flyT -= dt;
+            if (arcU >= 1 || flyT <= 0) {
+                cx = flyX;
+                cy = flyY;
+                zoom = flyZ;
+                flyT = 0;
+                arc = false;
+            }
+        } else if (flyT > 0) {
             // ease in log-zoom (a long zoom feels as quick at the far end as the near one), and land exactly
             float k = Math.min(1, dt * 4.5f);
             cx += (flyX - cx) * k;

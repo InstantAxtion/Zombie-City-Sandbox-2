@@ -218,7 +218,7 @@ public final class Logistics extends Module {
         float dx = best.x - dst.x, dy = best.y - dst.y;
         Region.Facility headA = railHead(best), headB = station(dst.settlement);
         if (headA != null && headB != null && headA != headB
-                && dx * dx + dy * dy > w.c.rule("trainOver", 2500) * w.c.rule("trainOver", 2500)) mode = TRAIN;
+                && dx * dx + dy * dy > w.rule("trainOver", 2500) * w.rule("trainOver", 2500)) mode = TRAIN;
         send(best.id, dst, good, give, mode);
     }
 
@@ -411,7 +411,7 @@ public final class Logistics extends Module {
     private void move(Convoy c, float dt) {
         Region r = w.r;
         if (c.mode == PLANE || c.mode == SHIP) {
-            float sp = (c.mode == PLANE ? w.c.rule("planeSpeed", 500) : w.c.rule("shipSpeed", 25)) * dt;
+            float sp = (c.mode == PLANE ? w.rule("planeSpeed", 500) : w.rule("shipSpeed", 25)) * dt;
             float dx = c.tx - c.x, dy = c.ty - c.y, d = (float) Math.sqrt(dx * dx + dy * dy);
             if (d <= sp) {
                 arrive(c);
@@ -422,7 +422,7 @@ public final class Logistics extends Module {
             return;
         }
         RoadGraph g = c.mode == TRAIN ? r.rails : r.roads;
-        float budget = (c.mode == TRAIN ? w.c.rule("trainSpeed", 90) : w.c.rule("convoySpeed", 35)) * dt;
+        float budget = (c.mode == TRAIN ? w.rule("trainSpeed", 90) : w.rule("convoySpeed", 35)) * dt;
         while (budget > 0 && c.route != null && c.ri < c.route.length - 1) {
             int nn = c.route[c.ri + 1];
             int e = g.edgeBetween(c.route[c.ri], nn);
