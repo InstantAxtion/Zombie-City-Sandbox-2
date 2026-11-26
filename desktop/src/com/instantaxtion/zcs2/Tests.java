@@ -2129,14 +2129,17 @@ public final class Tests {
                 frames(g, 1);
                 check(pf.pref("info.autosave", "").length() > 0, "the autosave isn't described in the list");
                 // the game's thread does only the snapshot: well under the whole save's time
-                long t0 = System.nanoTime();
-                SaveIO.save(w, new ByteArrayOutputStream());
-                float whole = (System.nanoTime() - t0) / 1e6f;
-                for (int k = 0; k < 3; k++) {
+                // timings on a busy machine are noisy: the best of a few tries of each
+                float whole = Float.MAX_VALUE, snap = Float.MAX_VALUE;
+                for (int k = 0; k < 5; k++) {
+                    long t0 = System.nanoTime();
+                    SaveIO.save(w, new ByteArrayOutputStream());
+                    whole = Math.min(whole, (System.nanoTime() - t0) / 1e6f);
                     g.autosave();
                     g.waitForSave();
+                    snap = Math.min(snap, g.lastAutosaveMs);
                 }
-                check(g.lastAutosaveMs < whole, "the snapshot took " + g.lastAutosaveMs + " ms, the whole save " + whole);
+                check(snap < whole, "the snapshot took " + snap + " ms, the whole save " + whole);
                 w.shutdown();
             }
         });
