@@ -354,7 +354,8 @@ final class ArmedAI {
         // the player's "hold fire": only when the dead are on them
         if (sq != null && sq.stance == Squads.STANCE_HOLD && zd > 22) holdFire = true;
         if (z >= 0 && loaded && !holdFire && e.aimT[i] <= 0 && zd <= range && (perched || seen(i, z, zd))) {
-            if (u.grenade != null && gcool[i] <= 0 && zd > 60 && w.sp.zombiesNear(e, e.x[z], e.y[z], 40, 6) >= 6
+            int pack = w.services.grenadePack(x, y);
+            if (u.grenade != null && gcool[i] <= 0 && zd > 60 && w.sp.zombiesNear(e, e.x[z], e.y[z], 40, pack) >= pack
                     && w.sp.livingNear(e, e.x[z], e.y[z], u.grenade.blast + 10, 1) == 0) {
                 e.intent[i] = I_GRENADE;
             } else e.intent[i] = Combat.I_SHOOT;
@@ -610,7 +611,7 @@ final class ArmedAI {
                     lastT[i] = 5;
                 }
             }
-            if (lastT[i] < 20 && near(lastX[i], lastY[i], sq.gx, sq.gy, 220) && 0.45f > best && clearLine(x, y, lastX[i], lastY[i])) {
+            if (lastT[i] < 20 && near(lastX[i], lastY[i], sq.gx, sq.gy, 220) && 0.45f > best && clearLine(x, y, lastX[i], lastY[i]) && !w.services.nightCaution(x, y)) {
                 best = 0.45f;
                 pick = A_SEARCH;
                 bx = lastX[i];

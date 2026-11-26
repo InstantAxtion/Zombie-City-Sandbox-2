@@ -75,6 +75,8 @@ public final class World {
      * their saves are exactly as before.
      */
     public final Survival surv;
+    /** Helicopters, ambulances, checkpoints, corridors, rescues, aid, seizures, strains, flights (Services). */
+    public final Services services;
     /** Systems plugged in (updated, saved and drawn in this order). */
     public final List<Module> modules = new ArrayList<Module>();
     /** Strategic fast-forward: everything as numbers, ten game seconds a step. */
@@ -178,6 +180,8 @@ public final class World {
         modules.add(fires);
         modules.add(navy);
         modules.add(engineers);
+        services = new Services(this);
+        modules.add(services);
         roles = new Roles(this);
         modules.add(roles);
         recovery = new Recovery(this);
@@ -443,6 +447,8 @@ public final class World {
         if (on) {
             if (playerEnt >= 0) return; // someone you play as can't be fast-forwarded past
             if (life.on) life.foldAll(); // (the city's traffic and the people in it, first)
+            services.enterStrategic(); // (and whoever the services carry, and their crews)
+            fires.enterStrategic();
             forces.enterStrategic();
             sec.demoteAll();
             sp.build(e);

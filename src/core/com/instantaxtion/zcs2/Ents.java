@@ -20,6 +20,8 @@ public final class Ents {
             F_AMBIENT = 64, F_PLACED = 128, F_WOUNDED = 256, F_LEADER = 512;
     /** One of the survivor's companions (Survival): never folded into the counts, thinks by the survivor's orders. */
     public static final int F_COMPANION = 1 << 20;
+    /** One of a service's crew on foot (a firefighter, a paramedic): not one of the people, never folded into the counts. */
+    public static final int F_CREW = 1 << 21;
 
     public int cap, top, live;
     public float[] x, y, vx, vy, hp, maxHp, face, timer, aimT, infT, gx, gy, dvx, dvy;

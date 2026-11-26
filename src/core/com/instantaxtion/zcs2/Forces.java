@@ -655,7 +655,7 @@ public final class Forces extends Module {
                     float dist = 1 + Math.max(Math.abs(dx), Math.abs(dy)) * 0.5f;
                     // (the dead are harder to find where they're few: the last of them take the longest)
                     float find = z / (z + findHalf);
-                    int k = Math.min(z, stoch(share * kill * w.orders.killMul(fm) * dt * ammoK * find / dist, s * 17L + f.id));
+                    int k = Math.min(z, stoch(share * kill * w.orders.killMul(fm) * w.services.strainKill(s) * dt * ammoK * find / dist, s * 17L + f.id));
                     sec.zIn[s] -= k;
                     sec.bodies[s] += k;
                     w.stats.killsBySide[faction == Ents.COP ? 1 : 2] += k;
@@ -664,7 +664,7 @@ public final class Forces extends Module {
                     f.ammo = Math.max(0, f.ammo - k * rounds);
                     // and the cost: only the dead in contact (a few for each defender) can reach anyone
                     float contact = Math.min(z, share * 6);
-                    int lost = Math.min(armed, stoch(contact * loss * w.orders.lossMul(fm) * dt / dist, s * 19L + f.id));
+                    int lost = Math.min(armed, stoch(contact * loss * w.orders.lossMul(fm) * w.services.strainLoss(s) * dt / dist, s * 19L + f.id));
                     for (int l = 0; l < lost; l++) loseOne(f, faction, s);
                     armed -= lost;
                     if (fm != null) fm.losses += lost;
@@ -1006,7 +1006,8 @@ public final class Forces extends Module {
             float dx = f.hq.x - x, dy = f.hq.y - y;
             if (dx * dx + dy * dy < reach * reach) return true;
         }
-        return false;
+        // police holding an evacuation corridor (Services)
+        return w.services.escorted(x, y);
     }
 
     /** The dead in the sectors within rad sectors of (x, y). */

@@ -129,6 +129,22 @@ public final class Tests {
      * them the old GOLDEN too. GOLDEN was recorded again in P9b (content.ini's new rules and national values; GOLDEN_STATE
      * unchanged).
      */
+    /** The air and emergency services' switches (content.ini [rules services]). */
+    static final String[] SERVICE_RULES = {"airAssault", "ambulances", "fireCrewsOnFoot", "coastBoats", "aidConvoys", "checkpoints", "corridors",
+            "rescues", "engineersOnSite", "vehicleSeizure", "strainEffects", "civilianFlights"};
+    /** GOLDEN_STATE before the air and emergency services (the game with their rules off must still give these). */
+    static final long[][] GOLDEN_STATE_PRE = {
+            {-9048877486888558763L, -5074671415040436397L, -7091719996387695111L, 5514597120603307591L, -9060996376688164900L, -2464322849719482128L,
+                    -8806496574989025427L},
+            {-4612109667781531387L, 8148228355577481168L, -3789379237918480937L, -8720357643317598861L, 7805403087932392722L, 9087861142141795830L,
+                    5601821122340862675L, -8178928060073826903L, -3450227958994545031L},
+            {-5352660960698400984L, 3856382757349242375L, 2892717960740663617L, 5948764704801302308L, 8017571868137675746L, -4595630069377124760L,
+                    -2206240929984095807L, 4309460876284602727L, 6493276397047788789L, -4999354706653124132L, -2101736541442976444L},
+            {7100082239672412198L, -3056807817964742206L, -5404289687014696788L, -8864410598376162752L, 7293556389757909732L, 6872087061174453523L,
+                    -3238728496210034461L, 1023340059064900564L, -490721386234721005L, -490721386234721005L, -490721386234721005L},
+            {-8002621144123268477L, -6845613328155906658L, -1866830996085695085L, 53101970365605354L, -8553037998629933908L, -125097791475767827L,
+                    6495605104087188105L, 779923143005276946L, -7816591287606685377L},
+    };
     static final long[][] GOLDEN_STATE = {
             {-9048877486888558763L, -5074671415040436397L, -7091719996387695111L, 5514597120603307591L, -9060996376688164900L, -2464322849719482128L,
                     -8806496574989025427L},
@@ -1415,8 +1431,18 @@ public final class Tests {
                 // and districts must not change a single outcome on today's maps
                 StringBuilder bad = new StringBuilder();
                 SectorIndex.paranoid = true;
+                // SERVICES_OFF=1: with the air and emergency services' rules off, the state is exactly what it was
+                // before them (GOLDEN_STATE_PRE); the save hash isn't compared (content.ini and the save have grown)
+                boolean off = System.getenv("SERVICES_OFF") != null;
+                if (off) for (String k : SERVICE_RULES) content.setRule(k, 0);
                 for (int k = 0; k < GOLDEN.length; k++) {
                     long[][] got = golden(k);
+                    if (off) {
+                        StringBuilder b = new StringBuilder();
+                        for (long v : got[1]) b.append(b.length() > 0 ? ", " : "").append(v).append('L');
+                        if (!java.util.Arrays.equals(got[1], GOLDEN_STATE_PRE[k])) bad.append("\n  scenario ").append(k).append(" state (services off) now {").append(b).append('}');
+                        continue;
+                    }
                     String[] sb = new String[2];
                     for (int j = 0; j < 2; j++) {
                         StringBuilder b = new StringBuilder();
@@ -1428,6 +1454,7 @@ public final class Tests {
                     if (!java.util.Arrays.equals(got[1], GOLDEN_STATE[k])) bad.append("\n  scenario ").append(k).append(" state now {").append(sb[1]).append('}');
                 }
                 SectorIndex.paranoid = false;
+                if (off) for (String k : SERVICE_RULES) content.setRule(k, 1);
                 check(bad.length() == 0, "outcomes changed:" + bad);
             }
         });

@@ -18,7 +18,14 @@ public final class Fires extends Module {
     private static final class Fire {
         float heat, burnT, eta;
         int crews, crewFrom = -1, engine = -1;
+        /** Fire crews on foot (fireCrewsOnFoot): the firefighters down from the engine, by entity and uid. */
+        int[] foot = new int[0], footUid = new int[0];
+        boolean unloaded, retreat;
+        float retreatT;
     }
+
+    /** Fire crews get down from the engine near the camera and fight the fire as people (rule fireCrewsOnFoot). */
+    private final boolean footOn;
 
     /**
      * The fires by building id (Region's or a chunk's encoded ids). Only looked up by key: everything that walks
@@ -61,6 +68,7 @@ public final class Fires extends Module {
     public Fires(World w) {
         super(w);
         secFires = new int[w.sec.n];
+        footOn = w.rule("fireCrewsOnFoot", 0) > 0;
         Content.Unit ff = w.c.unit("firefighter");
         Content.VType fe = w.c.vtype("fire_engine");
         if (ff != null) unitFF = ff.index;
@@ -182,9 +190,17 @@ public final class Fires extends Module {
             float dx0 = w.r.doorX(b) >= 0 ? w.r.doorX(b) : (r.bx(b) + r.bw(b) / 2f) * 16, dy0 = w.r.doorY(b) >= 0 ? w.r.doorY(b) : (r.by(b) + r.bh(b) / 2f) * 16;
             int s = r.sectorOfPx(dx0, dy0);
             // the crew on its way, or at work
-            if (fire(b).crews == 0) dispatch(b, dx0, dy0);
+            if (fire(b).crews == 0 && !fire(b).unloaded) dispatch(b, dx0, dy0);
             float h = fire(b).heat + grow * dt;
-            if (fire(b).crews > 0) {
+            if (footOn && fire(b).engine >= 0) {
+                // the crew as people: only those at the hoses put it out
+                int spraying = footCrew(b, fire(b), dx0, dy0, dt);
+                if (spraying > 0) {
+                    int bs = r.bset(b);
+                    float water = bs >= 0 && w.infra.waterOut(bs) ? 0.3f : 1f;
+                    h -= spraying / 4f * crewRate * water * dt + grow * dt;
+                }
+            } else if (fire(b).crews > 0) {
                 fire(b).eta -= dt;
                 if (fire(b).eta <= 0) {
                     // the dead about: the crew can't work, and some don't come back
@@ -443,8 +459,175 @@ public final class Fires extends Module {
         }
     }
 
+    /**
+     * The engine's crew on foot: down from the engine when it pulls up, each to a hose round the building; when the
+     * dead come near they run back to it and the engine pulls out. Returns how many are at the hoses.
+     */
+    private int footCrew(int b, Fire f, float dx, float dy, float dt) {
+        Vehicles vh = w.veh;
+        Ents e = w.e;
+        int v = f.engine;
+        if (v < 0 || v >= vh.top || !vh.usable(v) || vh.type[v] != vEngine) {
+            // the engine is lost: those on foot make their way back to the station
+            for (int k = 0; k < f.foot.length; k++) if (alive(f.foot[k], f.footUid[k])) w.services.stray(f.foot[k], f.crewFrom);
+            f.foot = new int[0];
+            f.footUid = new int[0];
+            f.engine = -1;
+            f.unloaded = false;
+            f.retreat = false;
+            if (f.crews <= 0) f.crewFrom = -1;
+            return 0;
+        }
+        float cx = (w.r.bx(b) + w.r.bw(b) / 2f) * Tile.SIZE, cy = (w.r.by(b) + w.r.bh(b) / 2f) * Tile.SIZE;
+        if (!f.unloaded) {
+            boolean there = vh.state[v] == Vehicles.V_ARRIVED || vh.state[v] != Vehicles.V_DRIVE && vh.state[v] != Vehicles.V_PARKING
+                    && Math.abs(vh.x[v] - dx) + Math.abs(vh.y[v] - dy) < 500;
+            if (!there || unitFF < 0 || f.crews <= 0) return 0;
+            // down from the engine: up to six of the crew, the rest stay with it
+            int n = Math.min(6, f.crews);
+            f.foot = new int[n];
+            f.footUid = new int[n];
+            Content.Unit u = w.c.units.get(unitFF);
+            for (int k = 0; k < n; k++) {
+                float a = vh.head[v] + 1.57f + k * 0.9f, px = vh.x[v] + (float) Math.cos(a) * (14 + k * 2), py = vh.y[v] + (float) Math.sin(a) * (14 + k * 2);
+                if (!w.r.walkablePx(px, py)) {
+                    px = vh.x[v];
+                    py = vh.y[v];
+                }
+                int i = w.spawnCiv(px, py, u);
+                e.flags[i] |= Ents.F_CREW;
+                e.state[i] = Services.CREW_GO;
+                float[] spot = hose(b, k, dx, dy);
+                e.gx[i] = spot[0];
+                e.gy[i] = spot[1];
+                f.foot[k] = i;
+                f.footUid[k] = e.uid[i];
+            }
+            f.crews -= n;
+            f.unloaded = true;
+            f.eta = 0;
+            return 0;
+        }
+        // the dead coming: back to the engine
+        if (!f.retreat) {
+            boolean dead = w.sp.zombiesNear(e, vh.x[v], vh.y[v], 170, 1) > 0;
+            for (int k = 0; k < f.foot.length && !dead; k++)
+                if (alive(f.foot[k], f.footUid[k]) && w.sp.zombiesNear(e, e.x[f.foot[k]], e.y[f.foot[k]], 110, 2) >= 2) dead = true;
+            if (dead) {
+                f.retreat = true;
+                f.retreatT = 0;
+                w.news.radio("fireback:" + b, "Fire crews pull back from a burning building" + placeOf(b) + ": the dead are on them", dx, dy, News.UNIT);
+            }
+        }
+        int spraying = 0, out = 0;
+        for (int k = 0; k < f.foot.length; k++) {
+            int i = f.foot[k];
+            if (!alive(i, f.footUid[k])) continue;
+            out++;
+            if (f.retreat) {
+                e.state[i] = Services.CREW_BACK;
+                e.gx[i] = vh.x[v];
+                e.gy[i] = vh.y[v];
+                if (Math.abs(e.x[i] - vh.x[v]) + Math.abs(e.y[i] - vh.y[v]) < 30) {
+                    // aboard again (the bitten among them are held apart, and lost to the station)
+                    if ((e.flags[i] & Ents.F_INFECTED) != 0) w.stats.crewDeaths++;
+                    else f.crews++;
+                    if (e.squad[i] >= 0) w.sq.removeMember(e.squad[i], i);
+                    e.remove(i);
+                    out--;
+                }
+                continue;
+            }
+            float[] spot = hose(b, k, dx, dy);
+            if (Math.abs(e.x[i] - spot[0]) + Math.abs(e.y[i] - spot[1]) < 16) {
+                e.state[i] = Services.CREW_SPRAY;
+                e.gx[i] = cx;
+                e.gy[i] = cy;
+                spraying++;
+            } else if (e.state[i] == Services.CREW_SPRAY && Math.abs(e.x[i] - spot[0]) + Math.abs(e.y[i] - spot[1]) < 40) spraying++;
+            else {
+                e.state[i] = Services.CREW_GO;
+                e.gx[i] = spot[0];
+                e.gy[i] = spot[1];
+            }
+        }
+        if (f.retreat) {
+            f.retreatT += dt;
+            if (out == 0 || f.retreatT > 25) {
+                for (int k = 0; k < f.foot.length; k++) if (alive(f.foot[k], f.footUid[k])) w.services.stray(f.foot[k], f.crewFrom);
+                f.foot = new int[0];
+                f.footUid = new int[0];
+                f.retreat = false;
+                f.unloaded = false;
+                recall(b);
+            }
+        }
+        return spraying;
+    }
+
+    private boolean alive(int i, int uid) {
+        Ents e = w.e;
+        return i >= 0 && i < e.top && e.uid[i] == uid && e.loc[i] == Ents.FREE && e.kind[i] == Ents.CIV;
+    }
+
+    /** Where firefighter k stands with a hose: round the door side of the building, a little way off. */
+    private float[] hose(int b, int k, float dx, float dy) {
+        float cx = (w.r.bx(b) + w.r.bw(b) / 2f) * Tile.SIZE, cy = (w.r.by(b) + w.r.bh(b) / 2f) * Tile.SIZE;
+        float ax = dx - cx, ay = dy - cy, al = (float) Math.sqrt(ax * ax + ay * ay) + 0.01f;
+        float a = (float) Math.atan2(ay, ax) + (k - 2.5f) * 0.3f;
+        float rad = al + 10 + (k % 2) * 10;
+        for (int t = 0; t < 6; t++) {
+            float px = cx + (float) Math.cos(a) * (rad + t * 8), py = cy + (float) Math.sin(a) * (rad + t * 8);
+            if (w.r.walkablePx(px, py)) return new float[]{px, py};
+        }
+        return new float[]{dx, dy};
+    }
+
+    /** Before fast-forward: the crews on foot climb back on (the engines go home with the rest of the vehicles). */
+    void enterStrategic() {
+        Ents e = w.e;
+        for (int b : burning) {
+            Fire f = fire(b);
+            for (int k = 0; k < f.foot.length; k++) {
+                int i = f.foot[k];
+                if (!alive(i, f.footUid[k])) continue;
+                if ((e.flags[i] & Ents.F_INFECTED) != 0) w.stats.crewDeaths++;
+                else f.crews++;
+                if (e.squad[i] >= 0) w.sq.removeMember(e.squad[i], i);
+                e.remove(i);
+            }
+            f.foot = new int[0];
+            f.footUid = new int[0];
+            f.unloaded = false;
+            f.retreat = false;
+            f.engine = -1;
+        }
+    }
+
+
     /** The crew goes home (back in the station's pool); its engine drives back. */
     private void recall(int b) {
+        Fire ff = fire(b);
+        if (ff.foot.length > 0) {
+            // out (or given up): the crew on foot climb back on, or walk back if the engine is gone
+            Ents e = w.e;
+            int v = ff.engine;
+            boolean eng = v >= 0 && v < w.veh.top && w.veh.usable(v) && w.veh.type[v] == vEngine;
+            for (int k = 0; k < ff.foot.length; k++) {
+                int i = ff.foot[k];
+                if (!alive(i, ff.footUid[k])) continue;
+                if (eng && Math.abs(e.x[i] - w.veh.x[v]) + Math.abs(e.y[i] - w.veh.y[v]) < 200) {
+                    if ((e.flags[i] & Ents.F_INFECTED) != 0) w.stats.crewDeaths++;
+                    else ff.crews++;
+                    if (e.squad[i] >= 0) w.sq.removeMember(e.squad[i], i);
+                    e.remove(i);
+                } else w.services.stray(i, ff.crewFrom);
+            }
+            ff.foot = new int[0];
+            ff.footUid = new int[0];
+        }
+        ff.unloaded = false;
+        ff.retreat = false;
         if (fire(b).crewFrom >= 0 && fire(b).crews > 0) {
             Region.Facility f = w.r.facilities.get(fire(b).crewFrom);
             if (f.pool != null) f.pool[unitFF] += fire(b).crews;
@@ -482,6 +665,17 @@ public final class Fires extends Module {
             }
             o.writeInt(started);
         }
+        if (footOn) {
+            o.writeInt(burning.size());
+            for (int b : burning) {
+                Fire f = fire(b);
+                o.writeBoolean(f.unloaded);
+                o.writeBoolean(f.retreat);
+                o.writeFloat(f.retreatT);
+                SaveIO.intArr(o, f.foot);
+                SaveIO.intArr(o, f.footUid);
+            }
+        }
     }
 
     @Override
@@ -514,6 +708,17 @@ public final class Fires extends Module {
             }
             started = in.readInt();
         }
+        if (in.available() > 0) {
+            int m = in.readInt();
+            for (int k = 0; k < m && k < burning.size(); k++) {
+                Fire f = fire(burning.get(k));
+                f.unloaded = in.readBoolean();
+                f.retreat = in.readBoolean();
+                f.retreatT = in.readFloat();
+                f.foot = SaveIO.readIntArr(in);
+                f.footUid = SaveIO.readIntArr(in);
+            }
+        }
     }
 
     @Override
@@ -523,6 +728,31 @@ public final class Fires extends Module {
         float x0 = cam.x0() - 400, y0 = cam.y0() - 400, x1 = cam.x1() + 400, y1 = cam.y1() + 400;
         boolean dark = w.daylight() < 0.5f;
         float wxv = (float) Math.cos(wind), wyv = (float) Math.sin(wind);
+        // the water from the hoses: a jet from each firefighter at work to the burning building, spray where it lands
+        if (z > 0.2f)
+            for (int k0 = 0; k0 < burning.size(); k0++) {
+                Fire f = fire(burning.get(k0));
+                for (int k = 0; k < f.foot.length; k++) {
+                    int i = f.foot[k];
+                    if (!alive(i, f.footUid[k]) || w.e.state[i] != Services.CREW_SPRAY) continue;
+                    float ax = cam.toScreenX(w.e.x[i]), ay = cam.toScreenY(w.e.y[i]);
+                    float tx = w.e.gx[i], ty = w.e.gy[i];
+                    float ddx = tx - w.e.x[i], ddy = ty - w.e.y[i], dl = (float) Math.sqrt(ddx * ddx + ddy * ddy) + 0.01f;
+                    float reach = Math.min(dl, 70);
+                    float bx = cam.toScreenX(w.e.x[i] + ddx / dl * reach), by = cam.toScreenY(w.e.y[i] + ddy / dl * reach);
+                    g.color(0x6080C8FF);
+                    g.line(ax, ay, bx, by, Math.max(1.5f * dp, 3.5f * z));
+                    g.color(0xC0D8F0FF);
+                    g.line(ax, ay, bx, by, Math.max(0.8f * dp, 1.4f * z));
+                    for (int d = 0; d < 5; d++) {
+                        float ph = (t * 1.7f + d * 0.2f + k * 0.13f) % 1f;
+                        float px = ax + (bx - ax) * ph + (Rng.unit(i, d, 3) - 0.5f) * 4 * dp, py = ay + (by - ay) * ph - (float) Math.sin(ph * 3.14f) * 5 * dp;
+                        g.color(0xE0E8F8FF);
+                        g.fillCircle(px, py, Math.max(0.8f * dp, 1.6f * z));
+                    }
+                    view.glow(g, view.smoke, bx, by, Math.max(5 * dp, 18 * z), 0.7f);
+                }
+            }
         for (int k0 = 0; k0 < burning.size(); k0++) {
             int b = burning.get(k0);
             float h = heat(b);

@@ -353,7 +353,7 @@ public final class Sectors {
                 w.stats.civTurned += t;
             }
             // the infected go looking for help: the settlement's hospital fills with them
-            if (inf[s] >= 4 && settlement[s] >= 0) {
+            if (inf[s] >= 4 && settlement[s] >= 0 && w.services.admitsBitten(settlement[s])) {
                 int hs = w.strat.hospitalSector(settlement[s]);
                 if (hs >= 0 && hs != s) {
                     int m = Math.min((int) inf[s], stoch(inf[s] * 0.02f * dt * (1 - w.media.hidden()), s * 7L + 4));
@@ -426,7 +426,7 @@ public final class Sectors {
                 e.remove(i);
                 continue;
             }
-            if (e.loc[i] != Ents.FREE || e.armed(i) || i == w.playerEnt || (e.flags[i] & Ents.F_COMPANION) != 0) continue;
+            if (e.loc[i] != Ents.FREE || e.armed(i) || i == w.playerEnt || (e.flags[i] & (Ents.F_COMPANION | Ents.F_CREW)) != 0) continue;
             int s = w.r.sectorOfPx(e.x[i], e.y[i]);
             idx.poke(s);
             if (e.kind[i] == Ents.ZOMBIE) zIn[s]++;
@@ -645,7 +645,7 @@ public final class Sectors {
     private void demote() {
         Ents e = w.e;
         for (int i = 0; i < e.top; i++) {
-            if (e.loc[i] != Ents.FREE || e.armed(i) || i == w.playerEnt || (e.flags[i] & Ents.F_COMPANION) != 0) continue;
+            if (e.loc[i] != Ents.FREE || e.armed(i) || i == w.playerEnt || (e.flags[i] & (Ents.F_COMPANION | Ents.F_CREW)) != 0) continue;
             int s = w.r.sectorOfPx(e.x[i], e.y[i]);
             boolean ambientDone = (e.flags[i] & Ents.F_AMBIENT) != 0 && e.state[i] == CivAI.S_HOME;
             if (!ambientDone && (hot[s] > 0 || cam[s])) continue;

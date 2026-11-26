@@ -16,8 +16,8 @@ import java.util.List;
 public final class Orders extends Module {
     public static final int SO_NONE = 0, SO_ROUTE = 1, SO_FALLBACK = 2, SO_CORDON = 3, SO_CLEAR = 4, SO_ESCORT = 5;
     public static final String[] SO_NAMES = {"", "Following a route", "Falling back", "On a cordon line", "Clearing an area", "Escorting"};
-    public static final int VO_GO = 1, VO_ORBIT = 2, VO_ATTACK = 3, VO_RETURN = 4;
-    public static final String[] VO_NAMES = {"", "Going", "Orbiting", "Attacking", "Returning"};
+    public static final int VO_GO = 1, VO_ORBIT = 2, VO_ATTACK = 3, VO_RETURN = 4, VO_ASSAULT = 5, VO_EVAC = 6;
+    public static final String[] VO_NAMES = {"", "Going", "Orbiting", "Attacking", "Returning", "Air assault", "Lifting out"};
     public static final int FP_NONE = 0, FP_ATTACK = 1, FP_DEFEND = 2, FP_WITHDRAW = 3, FP_SCREEN = 4, FP_DIGIN = 5;
     public static final String[] FP_NAMES = {"", "Attack", "Defend", "Withdraw", "Screen", "Dig in"};
     private static final float[] FP_KILL = {1, 1.5f, 1f, 0.3f, 0.6f, 1.15f};
@@ -182,6 +182,11 @@ public final class Orders extends Module {
         if (v < 0 || v >= vh.top || !vh.usable(v)) return false;
         if (v == driven) driven = -1;
         for (int k = vehicle.size() - 1; k >= 0; k--) if (vehicle.get(k).v == v) vehicle.remove(k);
+        // a transport helicopter's air assault or lift out (Services carries it on)
+        if (kind == VO_ASSAULT || kind == VO_EVAC) return w.services.orderAir(v, kind, x, y);
+        Services.AirTask air = w.services.airTask(v);
+        if (air != null && vh.crewN[v] == 0) w.services.air.remove(air);
+        else if (air != null && kind != VO_RETURN) return w.services.orderAir(v, VO_GO, x, y);
         Content.VType t = vh.type(v);
         boolean ok;
         switch (kind) {

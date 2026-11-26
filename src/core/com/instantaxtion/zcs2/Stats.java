@@ -40,7 +40,7 @@ public final class Stats {
             Content.Unit u = w.c.unit("firefighter");
             crewUnit = u == null ? -1 : u.index;
         }
-        return w.e.kind[i] == Ents.CIV && w.e.type[i] != crewUnit;
+        return w.e.kind[i] == Ents.CIV && w.e.type[i] != crewUnit && (w.e.flags[i] & Ents.F_CREW) == 0;
     }
 
     // timeline: every 10 s

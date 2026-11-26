@@ -19,6 +19,11 @@ final class CivAI {
             w.combat.playerThink(i, s);
             return;
         }
+        if ((e.flags[i] & Ents.F_CREW) != 0) {
+            // a firefighter or paramedic on foot: by its service's orders
+            w.services.crewThink(i, s, this);
+            return;
+        }
         if ((e.flags[i] & Ents.F_COMPANION) != 0) {
             // with the survivor: by their orders (Survival)
             w.surv.companionThink(i, s);
