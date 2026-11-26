@@ -57,6 +57,9 @@ public final class UiShot {
         frames(200);
         shot("04-play");
         // tools
+        tap("tool:town");
+        frames(2);
+        shot("05a-town-tool");
         tap("tool:dead");
         frames(2);
         shot("05-dead-tool");
@@ -157,8 +160,10 @@ public final class UiShot {
         t0 = System.currentTimeMillis();
         while (System.currentTimeMillis() - t0 < 3000) { frames(1); Thread.sleep(50); }
         float[] mp = game.ui.find("ed:map");
-        game.touch(Game.DOWN, 0, mp[0] - 40, mp[1] + 30);
-        game.touch(Game.UP, 0, mp[0] - 40, mp[1] + 30);
+        if (mp != null) { // sideways the editor may have no room for the map
+            game.touch(Game.DOWN, 0, mp[0] - 40, mp[1] + 30);
+            game.touch(Game.UP, 0, mp[0] - 40, mp[1] + 30);
+        }
         tap("ed:z");
         tap("ed:h");
         tap("ed:goal");
@@ -191,9 +196,14 @@ public final class UiShot {
         // a formation ordered somewhere
         World w = game.world();
         tap("tool:orders");
-        frames(1);
+        frames(2);
+        shot("d08b-orders");
         if (!w.forces.formations.isEmpty()) {
             Forces.Formation f = w.forces.formations.get(0);
+            // bring it into view first (the whole country may be cropped to fill the screen)
+            game.cam.cx = f.hq.x;
+            game.cam.cy = f.hq.y;
+            frames(2);
             float sx = game.cam.toScreenX(f.hq.x), sy = game.cam.toScreenY(f.hq.y);
             game.touch(Game.DOWN, 0, sx, sy);
             game.touch(Game.UP, 0, sx, sy);
@@ -204,6 +214,21 @@ public final class UiShot {
             game.touch(Game.UP, 0, tx, ty);
             frames(60);
             shot("d09-formation-ordered");
+            // hand it to the general, then look at it: it can be taken back
+            tap("o:frelease");
+            frames(2);
+            tap("tool:look");
+            game.inspFormation = f;
+            frames(2);
+            shot("d09b-formation-released");
+            tap("o:ftake");
+            frames(2);
+            tap("o:fdone");
+            frames(1);
+            // the whole army to the general
+            tap("o:general");
+            frames(30);
+            shot("d09c-general-commands");
         }
         game.speedIdx = 6; // six hours a second: strategic
         frames(90);

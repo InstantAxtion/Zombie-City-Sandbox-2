@@ -2,7 +2,7 @@ package com.instantaxtion.zcs2;
 
 /** Help and patch notes (kept short). */
 final class Texts {
-    static final String VERSION = "1.2";
+    static final String VERSION = "1.3";
 
     static final String[] HELP = {
             "THE IDEA",
@@ -10,7 +10,7 @@ final class Texts {
             "MOVING ROUND",
             "Drag to move. Pinch (or the mouse wheel) to zoom, all the way from one street to the whole country. Tap anyone or anything to see who it is. The Map tool opens the layers of the national map; its first button jumps out to the whole country and back to where you were. Red arrows at the edge of the map point to the biggest fights out of view: tap one to go there.",
             "WHO YOU ARE",
-            "Pick a role on the New Game screen. God has every tool. The President makes the nation's calls (alert level, martial law, mobilisation, curfew, quarantines, evacuations) and commands every formation (or hands the army, or single formations, to the AI general). The Military commander has the army, air strikes, artillery and bridges. The Incident commander runs one city. The Precinct commander sends out one station's squads. The Squad leader leads one squad. The Police officer and the Survivor are one person in the street: drag the stick to move. They shoot by themselves at the dead in reach; the Shoot switch says which: Firing, or Hold fire (to slip past quietly). The AI runs everything you don't.",
+            "Pick a role on the New Game screen. God has every tool. The President makes the nation's calls (alert level, martial law, mobilisation, curfew, quarantines, evacuations) and commands every formation (or hands the army to the AI general with Let the general command in the Order tool, or single formations from their sheets). The Military commander has the army, air strikes, artillery and bridges. The Incident commander runs one city. The Precinct commander sends out one station's squads. The Squad leader leads one squad. The Police officer and the Survivor are one person in the street: drag the stick to move. They shoot by themselves at the dead in reach; the Shoot switch says which: Firing, or Hold fire (to slip past quietly). They can't fast-forward, but while none of the dead are near, Skip ahead runs time on as fast as the phone can, and stops when they come close. The AI runs everything you don't.",
             "WHAT YOU SEE",
             "Close in: every person, car and shot. The living are warm colours, police blue, soldiers khaki, the dead grey-green with a red rim. Further out: people as dots over a glow where crowds are thick, cream for the living and red for the dead. From high up: the infection as a red bleed, hordes on the march, refugee columns on the roads, formations as unit symbols with arrows and front lines, state borders, the towns with how many live there and how many of the dead. At night only powered places have lights. The ? button explains the marks. The Map tool's layers show utilities (power, water, phones), supplies, public trust and fear, forces and fronts, where people died and where the dead were thickest.",
             "PEOPLE AND THE DEAD",
@@ -22,19 +22,25 @@ final class Texts {
             "TIME",
             "An hour passes every minute at 1x. 1h/s, 6h/s and 1d/s fast-forward through days and weeks: everyone folds into the counts and fights are settled by the numbers until you slow down again. Seasons and weather matter: the cold slows the dead, the heat rots them, rain and fog shorten sight.",
             "CAMPAIGNS AND YOUR OWN",
-            "Campaigns: hold the capital for 30 days, evacuate the coast, retake a fallen state, protect the capital from the hordes. Make your own with the editor: where it starts, how many, hordes, goal, days, season and role.",
+            "Campaigns: hold the capital for 30 days, evacuate the coast, retake a fallen state, protect the capital from the hordes. How a campaign stands, and the days left, is the line under the top bar (and in the pause menu). Make your own with the editor: where it starts, how many, hordes, goal, days, season and role.",
             "REPLAYS AND CHALLENGES",
             "Every game records what you did. Save a replay from the pause menu and it plays the whole outbreak back from its start, exactly. The timelapse shows the country hour by hour. A challenge code (map, seed, scenario, role) lets a friend play the same game; your best for each code is kept."
     };
 
     static final String[] NOTES = {
-            "1.3  Easier to read",
-            "- A new look: muted ground and plain streets with kerbs, lane markings and crossings; buildings with roofs, parapets, windows and soft shadows; canopies of trees; real nights with street lights and lit windows where the power is on; fires with smoke; rain, fog, snow and lightning you can see.",
-            "- Everything on the map is sized for the phone's screen: people, vehicles, symbols and labels, with outlines.",
-            "- Crowds glow where they're thick; the infection bleeds softly from high up; labels no longer pile on top of each other.",
-            "- A compact top bar with the weather named, icons for the tools, a fixed-height palette that says what a tap does, an inspector with bars, and a sideways layout with a tool rail and side sheets.",
-            "- Strikes are aimed and confirmed, orders leave a flag, arrows point to fights out of view, and the radio shows what matters.",
-            "- The after-action report's graph has axes, days and peaks; the radio log's dates are right.",
+            "1.3  A country that makes sense, and a look that reads",
+            "- Wars at the scale of a country: a small outbreak is put down within a day; a big one is a war of weeks that can be won or lost. Bites indoors, turning and fights by the numbers are paced over hours, and ammunition comes from depots and escorted convoys.",
+            "- Things come down again: the alert is lowered a step at a time, curfews, shelter orders, evacuations and quarantines are lifted, outside units go home, people return to their towns, and a town clear of the dead is declared safe with what it cost.",
+            "- Officials believe a reported picture that lags behind the truth. Trust follows how the response goes, and decides how well people keep their doors shut.",
+            "- Evacuations move as fast as the roads allow, to towns with room, and refugees are counted once. Facilities fall and are retaken; forward bases only go up behind the line.",
+            "- The general plans for towns, hordes and nests alike. As President or Military commander you command the army; Let the general command (the Order tool) hands it over, and any formation can be released to the general or taken back.",
+            "- Campaigns are judged fairly from the first count, with their progress under the top bar and in the pause menu. The report says where people were lost. The news says things once and adds up the rest.",
+            "- In the street: cars turn corners and get round jams, squads come out on open ground, stand down and go home, nobody rides off in an empty vehicle, and people run from all the dead near them.",
+            "- A new look: muted ground, streets with markings, buildings with roofs and shadows, trees, real nights with lit windows where the power is on, smoke, rain, fog, snow and lightning. Everything on the map is sized for the phone's screen, with outlines; labels and the radio no longer land on each other.",
+            "- A compact top bar, tools with icons, palettes that say what a tap does, an inspector with bars, a sideways layout, aimed and confirmed strikes, arrows to fights out of view; the whole country fills a tall screen and can be panned.",
+            "- The President can lower the alert, lift martial law and end mobilisation as well as declare them. Formations can be tapped at any zoom. A new game starts on your own city, station, squad or person, with a button to the outbreak.",
+            "- The officer and the survivor can skip ahead while none of the dead are near. Your best on a challenge is one whole game; results show minutes; the radio log shows whole messages; the editor works sideways; challenge codes say when a role or scenario can't be used.",
+            "- Sturdier on phones: an error no longer closes the game (it saves and offers the menu), a damaged save is set aside, loads can be cancelled with back, the renderer setting is honoured, and the game saves every three minutes.",
             "1.2  Together",
             "- Pass-and-play: up to four players share a game, each in a role (President, Military commander, Incident commander, Precinct commander, Squad leader). Players in the pause menu; the P button hands over.",
             "- Friends' results: share your result on a challenge as a code, add theirs, and see who did best on the report.",

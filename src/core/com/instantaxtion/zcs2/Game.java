@@ -266,18 +266,51 @@ public final class Game {
         }
         if (msg != null && msgT > 0) {
             msgT -= dt;
-            float tw = g.textWidth(msg, ui.dp(14), true) + ui.dp(24);
-            float x = (g.width() - tw) / 2, y = g.height() * 0.42f;
-            g.color(0xE0000000);
-            g.fillRoundRect(x, y, tw, ui.dp(36), ui.dp(10));
-            g.color(0xFFFFFFFF);
-            g.text(msg, g.width() / 2f, y + ui.dp(23), ui.dp(14), Gfx.ALIGN_CENTER, true);
+            toastBox(g);
         }
+    }
+
+    private final java.util.List<String> toastLines = new java.util.ArrayList<String>();
+
+    /** The toast: wrapped to at most three lines, centred inside the part of the screen the bars leave free. */
+    private void toastBox(Gfx g) {
+        boolean onMap = screen == S_PLAY && w != null && !hideUi;
+        float l = onMap ? freeL : 0, r = onMap ? freeR : g.width(), t = onMap ? freeT : 0, b = onMap ? freeB : g.height();
+        float ts = ui.dp(13.5f), maxW = Math.min(r - l - ui.dp(32), ui.dp(420));
+        toastLines.clear();
+        StringBuilder line = new StringBuilder();
+        for (String word : msg.split(" ")) {
+            String tryLine = line.length() == 0 ? word : line + " " + word;
+            if (line.length() > 0 && g.textWidth(tryLine, ts, true) > maxW) {
+                toastLines.add(line.toString());
+                line.setLength(0);
+                line.append(word);
+            } else {
+                line.setLength(0);
+                line.append(tryLine);
+            }
+        }
+        if (line.length() > 0) toastLines.add(line.toString());
+        while (toastLines.size() > 3) toastLines.remove(toastLines.size() - 1);
+        float tw = 0;
+        for (int k = 0; k < toastLines.size(); k++) {
+            toastLines.set(k, Ui.fit(g, toastLines.get(k), maxW, ts, true));
+            tw = Math.max(tw, g.textWidth(toastLines.get(k), ts, true));
+        }
+        float lh = ts * 1.35f, th = toastLines.size() * lh + ui.dp(16);
+        tw += ui.dp(28);
+        float x = (l + r - tw) / 2, y = Math.max(t + ui.dp(8), Math.min(b - th - ui.dp(8), t + (b - t) * 0.38f));
+        g.color(0xE6000000);
+        g.fillRoundRect(x, y, tw, th, ui.dp(10));
+        g.color(0xFFFFFFFF);
+        for (int k = 0; k < toastLines.size(); k++)
+            g.text(toastLines.get(k), (l + r) / 2, y + ui.dp(8) + lh * k + ts * 1.0f, ts, Gfx.ALIGN_CENTER, true);
     }
 
     void toast(String s) {
         msg = s;
-        msgT = 2.2f;
+        // long enough to read
+        msgT = 2.2f + Math.min(4, s.length() / 30f);
     }
 
     // ------------------------------------------------------------------ main menu
@@ -437,7 +470,21 @@ public final class Game {
                 // a scenario made in someone else's editor isn't on this phone: say so, don't quietly swap it
                 if (!found) codeNote = "This challenge uses a scenario made on another phone (" + p[4] + "). The map is loaded; pick a scenario, or ask for theirs.";
             }
-            ngRole = p.length > 5 ? Roles.byId(p[5]) : -1;
+            ngRole = -1;
+            if (p.length > 5) {
+                int role = Roles.byId(p[5]);
+                if (role < 0) {
+                    // a role this version doesn't know: say so, and play the scenario's own
+                    codeNote = (codeNote != null ? codeNote + " " : "") + "The role \"" + p[5] + "\" isn't one this game knows: you'll play as "
+                            + Roles.NAMES[chosenRole()] + ".";
+                } else {
+                    boolean offered = false;
+                    for (int r : rolesFor(chosenScenario())) if (r == role) offered = true;
+                    if (offered) ngRole = role;
+                    else codeNote = (codeNote != null ? codeNote + " " : "") + "This scenario can't be played as " + Roles.NAMES[role]
+                            + ": you'll play as " + Roles.NAMES[chosenRole()] + ".";
+                }
+            }
             return true;
         } catch (NumberFormatException e) {
             return false;
@@ -494,6 +541,10 @@ public final class Game {
             cy += ch + ui.dp(6);
         }
         g.restore();
+        // a card half scrolled out of the list mustn't take taps outside it: the tabs above go on top again, and
+        // below the list nothing of it can be tapped
+        for (int i = 0; i < TABS.length; i++) ui.button("mode:" + i, m + i * (cw + ui.dp(6)), y - ui.dp(46), cw, ui.dp(38), TABS[i], ngMode == i, 13);
+        ui.block(0, y + listH, land ? m + colW + ui.dp(8) : W, H - y - listH);
         if (list.isEmpty()) {
             g.color(Ui.DIM);
             g.text("Nothing here yet: make one with \"Make your own\".", m + colW / 2, y + ui.dp(30), ui.dp(Ui.M), Gfx.ALIGN_CENTER, false);
@@ -644,11 +695,18 @@ public final class Game {
             }
         long people = 0;
         for (Region.Settlement s : pr.settlements) people += s.residents;
-        g.color(0xD0000000);
-        g.fillRect(pxx, y + ps - ui.dp(24), ps, ui.dp(24));
-        g.color(0xFFFFFFFF);
+        // the country's name, and its people and states: on one line if it fits, else on two
         String cap = pr.name + ": " + WorldView.people(people) + " people, " + pr.states.size() + " states";
-        g.text(Ui.fit(g, cap, ps - ui.dp(12), ui.dp(12), false), pxx + ui.dp(6), y + ps - ui.dp(8), ui.dp(12), Gfx.ALIGN_LEFT, false);
+        String sub = WorldView.people(people) + " people, " + pr.states.size() + " states";
+        boolean two = g.textWidth(cap, ui.dp(12), false) > ps - ui.dp(12);
+        float bh = ui.dp(two ? 40 : 24);
+        g.color(0xD0000000);
+        g.fillRect(pxx, y + ps - bh, ps, bh);
+        g.color(0xFFFFFFFF);
+        if (two) {
+            g.text(Ui.fit(g, pr.name, ps - ui.dp(12), ui.dp(12), true), pxx + ui.dp(6), y + ps - ui.dp(24), ui.dp(12), Gfx.ALIGN_LEFT, true);
+            g.text(Ui.fit(g, sub, ps - ui.dp(12), ui.dp(12), false), pxx + ui.dp(6), y + ps - ui.dp(8), ui.dp(12), Gfx.ALIGN_LEFT, false);
+        } else g.text(cap, pxx + ui.dp(6), y + ps - ui.dp(8), ui.dp(12), Gfx.ALIGN_LEFT, false);
         return true;
     }
 
@@ -880,6 +938,16 @@ public final class Game {
             cam.cx = startX;
             cam.cy = startY;
             cam.zoom = w.mode == World.MODE_SURVIVOR ? 1.4f : 0.75f;
+            int ro = w.roles.role;
+            if (w.tick < 5 && replay == null && ro != Roles.GOD && ro != Roles.PRESIDENT && ro != Roles.MILITARY) {
+                // a new game starts on the player's own piece (a city, a station, a squad, the person); the way to
+                // the outbreak is a button while it's out of view
+                float[] p = w.roles.focusOf(w.roles.current);
+                cam.cx = p[0];
+                cam.cy = p[1];
+                cam.zoom = Math.max(p[2], ro == Roles.INCIDENT ? 0.25f : 0.5f);
+                if (w.playerEnt >= 0) cam.zoom = w.mode == World.MODE_SURVIVOR ? 1.4f : 1.0f;
+            }
             prevX = cam.cx;
             prevY = cam.cy;
             prevZoom = cam.zoom;
@@ -935,6 +1003,24 @@ public final class Game {
             freeR = W;
             freeB = H;
         } else layout(W, H);
+        if (landOf != w.r) {
+            // where the land is, for framing the whole country on a tall screen
+            landOf = w.r;
+            int n = 64;
+            boolean[] cells = new boolean[n * n];
+            for (int cy = 0; cy < n; cy++)
+                for (int cx = 0; cx < n; cx++) {
+                    int land = 0, all = 0;
+                    for (int k = 0; k < 16; k++) {
+                        int tx = (int) ((cx + (k % 4 + 0.5f) / 4f) * w.r.W / n), ty = (int) ((cy + (k / 4 + 0.5f) / 4f) * w.r.H / n);
+                        byte t = w.r.tile[ty * w.r.W + tx];
+                        all++;
+                        if (t != Tile.WATER && t != Tile.DEEP) land++;
+                    }
+                    cells[cy * n + cx] = land * 2 >= all;
+                }
+            cam.setLand(cells, n);
+        }
         cam.setScreen(W, H, w.r.px());
         // follow
         if (cam.follow >= 0) {
@@ -980,7 +1066,13 @@ public final class Game {
                 replay = null;
                 w.director.replaying = false;
             }
-            int speed = SPEEDS[speedIdx];
+            if (skipping && (w.playerEnt < 0 || w.ended || replay != null || deadNear(SKIP_SAFE * 0.8f))) {
+                skipping = false;
+                if (w.playerEnt >= 0 && !w.ended) toast("The dead are close: back to 1x");
+                speedIdx = 0;
+            }
+            // skipping ahead: everyone still in person, as fast as the device can step (what can't be done is dropped)
+            int speed = skipping ? 3000 : SPEEDS[speedIdx];
             if (replay != null && w.strategic) speed = Math.max(speed, 360);
             acc += dt * speed;
             float stepDt = w.strategic ? World.STRATEGIC_DT : World.DT;
@@ -1034,6 +1126,11 @@ public final class Game {
         view.selectedFormation = inspFormation;
         view.inspectEnt = inspEnt;
         view.inspectVehicle = inspVeh;
+        if (!hideUi) {
+            view.labelArea(freeL, freeT, freeR, freeB);
+            for (int k = 0; k < hudKeepN; k++) view.keepOut(hudKeep[k * 4], hudKeep[k * 4 + 1], hudKeep[k * 4 + 2], hudKeep[k * 4 + 3]);
+        }
+        hudKeepN = 0;
         view.draw(g, cam, dt);
         if (!hideUi) hud(g);
         else {
@@ -1085,11 +1182,12 @@ public final class Game {
     /** The map area left free by the bars and panels, in pixels. */
     float freeL, freeT, freeR, freeB;
     private float topH, railW, paletteW, sheetW;
+    private Region landOf;
 
     /** Works out where the bars go this frame and tells the camera what's covered. */
     private void layout(int W, int H) {
         landscape = W > H * 1.15f;
-        topH = ui.dp(landscape ? 46 : 70);
+        topH = ui.dp(landscape ? 46 : 70) + (goalShown() ? ui.dp(GOAL_H) : 0);
         float bottom = 0, left = 0, right = 0;
         boolean pal = palette() != null && !inspectorOpen();
         if (landscape) {
@@ -1151,8 +1249,7 @@ public final class Game {
         }
         if (pingT < 2.5f) view.flag(g, cam.toScreenX(pingX), cam.toScreenY(pingY), 0xFFFFE040);
         alertArrows(g);
-        outbreakMarker(g);
-        cues(g, W);
+        boolean goLive = outbreakMarker(g);
         topBar(g, W);
         float y = topH;
         // the latest headline: one line, for a few seconds
@@ -1172,25 +1269,50 @@ public final class Game {
             float ts = ui.dp(12.5f);
             g.text(Ui.fit(g, hl.text, x1 - x0 - ui.dp(20), ts, true), x0 + ui.dp(12), y + m * 0.5f + hh / 2 + ts * 0.36f, ts, Gfx.ALIGN_LEFT, true);
             ui.area("radio", x0, y + m * 0.5f, x1 - x0, hh);
+            keepHud(x0, y + m * 0.5f, x1, y + m * 0.5f + hh);
             y += hh + m * 0.5f;
         }
         // the map's key, under the bar on the left; the minimap on the right
         float ky = y + m;
         if (legendOpen || view.overlay > WorldView.OV_INFECTION) {
             float lw = Math.min(ui.dp(230), (freeR - freeL) - ui.dp(140));
-            ky += legendPanel(g, freeL + m, ky, lw) + m;
+            float lh = legendPanel(g, freeL + m, ky, lw);
+            keepHud(freeL + m, ky, freeL + m + lw, ky + lh);
+            ky += lh + m;
         } else {
             ui.iconButton("legend", freeL + m, ky, ui.dp(36), ui.dp(36), "help", "", false);
+            keepHud(freeL + m - ui.dp(2), ky - ui.dp(2), freeL + m + ui.dp(38), ky + ui.dp(38));
         }
         boolean mm = settings.minimap && cam.zoom > 0.25f && !w.strategic;
-        if (mm) minimap(g, freeR - ui.dp(104) - m, y + m, ui.dp(104));
+        if (mm) {
+            minimap(g, freeR - ui.dp(104) - m, y + m, ui.dp(104));
+            keepHud(freeR - ui.dp(108) - m, y + m - ui.dp(4), freeR - m + ui.dp(4), y + m + ui.dp(108));
+        }
         // pass-and-play: whose turn it is, and the hand-over
         if (w.roles.players > 1 && replay == null) {
             ui.button("handover", freeL + m + ui.dp(44), y + m, ui.dp(64), ui.dp(34), "P" + (w.roles.current + 1) + " ▸", false, 12);
         }
         bottomBars(g);
         if (w.mode == World.MODE_SURVIVOR && w.playerEnt >= 0 && replay == null) joystick(g);
-        radioFeed(g, W);
+        // the bottom of the map, stacked upwards: the radio, a note, the way to the outbreak
+        float top = radioFeed(g, W);
+        top = cues(g, top);
+        if (w.playerEnt >= 0 && replay == null && !w.ended) {
+            boolean can = skipping || !deadNear(SKIP_SAFE);
+            float bw = ui.dp(150), bh = ui.dp(34);
+            float bx = (stackX0 + stackX1 - bw) / 2, by = top - bh - ui.dp(8);
+            if (can) {
+                ui.bigButton("skip", bx, by, bw, bh, skipping ? "Stop skipping" : "Skip ahead ▸▸", skipping ? 0xE0B05010 : 0xE0304860);
+                top = by;
+            }
+        }
+        if (goLive) {
+            float bw = ui.dp(170), bh = ui.dp(36);
+            float bx = (freeL + freeR - bw) / 2, by = top - bh - ui.dp(8);
+            ui.bigButton("golive", bx, by, bw, bh, "To the outbreak", 0xE0B03028);
+            top = by;
+        }
+        if (top < freeB) keepHud(stackX0, top - ui.dp(2), stackX1, freeB);
         if (settings.debug) {
             g.color(0xC0FFFFFF);
             g.text((int) fps + " fps  " + fmt(w.e.live) + " simulated  zoom " + String.format("%.3f", cam.zoom), freeL + m, freeB - ui.dp(6), ui.dp(Ui.S), Gfx.ALIGN_LEFT, false);
@@ -1199,8 +1321,8 @@ public final class Game {
     }
 
     /** For the first hours: where it started, pulsing, and a way back there if it's out of view. */
-    private void outbreakMarker(Gfx g) {
-        if (replay != null || w.time > 120 || startX <= 0) return;
+    private boolean outbreakMarker(Gfx g) {
+        if (replay != null || w.time > 120 || startX <= 0) return false;
         float x = cam.toScreenX(startX), y = cam.toScreenY(startY);
         float pulse = (view.time * 0.8f) % 1f;
         boolean in = x > freeL && x < freeR && y > freeT && y < freeB;
@@ -1211,11 +1333,77 @@ public final class Game {
                 g.strokeCircle(x, y, ui.dp(14 + p * 46), ui.dp(2.5f));
             }
             if (cam.zoom > 0.1f) view.label(g, "It starts here", x, y - ui.dp(30), 12, 0xFFFFD0C8, Gfx.ALIGN_CENTER, true);
-        } else if (w.time < 60) {
-            float bw = ui.dp(170), bh = ui.dp(36);
-            float bx = (freeL + freeR - bw) / 2, by = freeB - bh - ui.dp(80);
-            ui.bigButton("golive", bx, by, bw, bh, "To the outbreak", 0xE0B03028);
+            return false;
         }
+        int ro = w.roles.role;
+        // the roles that start on their own piece keep the way to the outbreak for longer
+        return w.time < (ro == Roles.GOD || ro == Roles.PRESIDENT || ro == Roles.MILITARY ? 60 : 120);
+    }
+
+    // screen areas the HUD took last frame, kept free of map labels this frame
+    private final float[] hudKeep = new float[4 * 8];
+    private int hudKeepN;
+    // the radio's slot, left and right
+    private float stackX0, stackX1;
+
+    private void keepHud(float x0, float y0, float x1, float y1) {
+        if (hudKeepN >= 8) return;
+        int k = hudKeepN++ * 4;
+        hudKeep[k] = x0;
+        hudKeep[k + 1] = y0;
+        hudKeep[k + 2] = x1;
+        hudKeep[k + 3] = y1;
+    }
+
+    /** The height of the campaign's progress line under the top bar, in dp. */
+    private static final float GOAL_H = 22;
+
+    /** Is there a campaign goal to show progress towards? */
+    private boolean goalShown() {
+        if (w == null || w.scenario == null || w.scenario.goal == null) return false;
+        String g = w.scenario.goal;
+        // the country-scale goals Roles measures (surviving as one person has no line to show)
+        return g.equals("holdcity") || g.equals("evaccoast") || g.equals("retakestate") || g.equals("protectcap")
+                || w.roles.progressText != null && w.roles.progressText.length() > 0;
+    }
+
+    /** Where the campaign stands, in a line (until the first count is in, that it's coming). */
+    private String goalText() {
+        String t = w.roles.progressText;
+        return t == null || t.length() == 0 ? w.scenario.name + ": the first count is coming in" : t;
+    }
+
+    /** The time left for the goal ("29 days left", "5 hours left"), or "" for a goal with no deadline. */
+    private String goalDays() {
+        int days = w.scenario.days;
+        if (days <= 0) return "";
+        double left = days * 1440.0 - w.time;
+        if (left <= 0) return "Time's up";
+        if (left >= 1440 * 2) return (int) Math.ceil(left / 1440) + " days left";
+        int h = (int) Math.ceil(left / 60);
+        return h + (h == 1 ? " hour left" : " hours left");
+    }
+
+    /** The goal's progress as a thin bar with what it means, across the bottom of the top bar. */
+    private void goalLine(Gfx g, int W) {
+        if (!goalShown()) return;
+        float m = ui.dp(10), y0 = topH - ui.dp(GOAL_H);
+        float ts = ui.dp(Ui.S), base = y0 + ui.dp(11);
+        String days = goalDays();
+        float dw = days.length() > 0 ? g.textWidth(days, ts, true) + ui.dp(10) : 0;
+        g.color(0xFFD8E0EA);
+        g.text(Ui.fit(g, goalText(), W - m * 2 - dw, ts, false), m, base, ts, Gfx.ALIGN_LEFT, false);
+        if (dw > 0) {
+            g.color(Ui.DIM);
+            g.text(days, W - m, base, ts, Gfx.ALIGN_RIGHT, true);
+        }
+        if (w.roles.progressText == null || w.roles.progressText.length() == 0) return;
+        float by = y0 + ui.dp(15), bw = W - m * 2, bh = ui.dp(3);
+        float p = Math.max(0, Math.min(1, w.roles.progress));
+        g.color(0xFF2A333F);
+        g.fillRoundRect(m, by, bw, bh, bh / 2);
+        g.color(w.ended ? (w.won ? Ui.GOOD : Ui.ACCENT) : 0xFF5A9CFF);
+        if (p > 0) g.fillRoundRect(m, by, Math.max(bh, bw * p), bh, bh / 2);
     }
 
     /** The bar along the top: menu, the time and weather, the alert level, the numbers, who you are, the speed. */
@@ -1226,7 +1414,7 @@ public final class Game {
         g.color(0x20FFFFFF);
         g.fillRect(0, topH - 1, W, 1);
         ui.block(0, 0, W, topH);
-        float by = (landscape ? topH : ui.dp(46)) / 2 - bh / 2;
+        float rowH = ui.dp(46), by = rowH / 2 - bh / 2;
         ui.button("pause", m, by, bh, bh, "", false);
         Icons.draw(g, "menu", m + bh / 2, by + bh / 2, ui.dp(18), Ui.TEXT);
         // speed, fixed widths at the right
@@ -1250,17 +1438,21 @@ public final class Game {
         float clockW = Math.max(g.textWidth(w.clock(), ui.dp(Ui.L), true), lx - x);
         float statsX;
         if (landscape) {
-            ui.chip(x + clockW + ui.dp(10), (topH - ui.dp(Ui.S) * 1.75f) / 2, Gov.LEVELS[lvl], Ui.S, MapPainter.alpha(lc, 0.25f), lc, true);
+            ui.chip(x + clockW + ui.dp(10), (rowH - ui.dp(Ui.S) * 1.75f) / 2, Gov.LEVELS[lvl], Ui.S, MapPainter.alpha(lc, 0.25f), lc, true);
             statsX = x + clockW + ui.dp(18) + g.textWidth(Gov.LEVELS[lvl], ui.dp(Ui.S), true) + ui.dp(12);
-            stats(g, statsX, topH / 2, sx - ui.dp(10));
+            stats(g, statsX, rowH / 2, sx - ui.dp(10));
         } else {
             float room = sx - ui.dp(8) - lx;
             if (room > ui.dp(40)) {
-                String lv = Ui.fit(g, Gov.LEVELS[lvl], room - ui.dp(12), ui.dp(Ui.S), true);
+                // short of room, the short name rather than a cut one
+                String lv = Gov.LEVELS[lvl];
+                if (g.textWidth(lv, ui.dp(Ui.S), true) > room - ui.dp(12)) lv = new String[]{"Normal", "Advisory", "Emergency", "Martial law", "Mobilised"}[lvl];
+                lv = Ui.fit(g, lv, room - ui.dp(12), ui.dp(Ui.S), true);
                 ui.chip(lx, cy2 - ui.dp(Ui.S) * 1.25f, lv, Ui.S, MapPainter.alpha(lc, 0.25f), lc, true);
             }
             stats(g, m, ui.dp(58), W - m);
         }
+        goalLine(g, W);
     }
 
     /** The numbers as chips with icons: people, the dead, police, army; then who you are. */
@@ -1282,6 +1474,9 @@ public final class Game {
         String who = replay != null ? "REPLAY: " + replay.title : w.roles.label();
         float room = maxX - x;
         if (room > ui.dp(50)) {
+            // the role and its piece; short of room, the role alone; then a shorter word for it
+            if (replay == null && g.textWidth(who, ui.dp(Ui.S), true) > room - ui.dp(14)) who = Roles.NAMES[w.roles.role];
+            if (g.textWidth(who, ui.dp(Ui.S), true) > room - ui.dp(14)) who = who.replace(" commander", "");
             String cut = Ui.fit(g, who, room - ui.dp(14), ui.dp(Ui.S), true);
             float cw = g.textWidth(cut, ui.dp(Ui.S), true) + ui.dp(12), ch = ui.dp(Ui.S) * 1.75f;
             g.color(replay != null ? 0xD0602080 : 0xFF263040);
@@ -1291,8 +1486,11 @@ public final class Game {
         }
     }
 
-    /** Short notes over the map: fast-forward, and when the people are counted rather than drawn. */
-    private void cues(Gfx g, int W) {
+    /**
+     * Short notes over the map (fast-forward, and when the people are counted rather than drawn), in their own slot
+     * just above the radio's: returns the slot's top (or the bottom given, with no note).
+     */
+    private float cues(Gfx g, float bottom) {
         boolean detail = cam.zoom >= 0.3f;
         if (detail != wasDetail) {
             wasDetail = detail;
@@ -1311,15 +1509,18 @@ public final class Game {
         } else if (detailCueT > 0) {
             cue = detail ? "Close in: everyone in view is simulated in person" : "Far out: what's out of sight is counted, not drawn";
         }
-        if (cue == null) return;
+        if (cue == null) return bottom;
         float ts = ui.dp(Ui.S);
-        String c = Ui.fit(g, cue, freeR - freeL - ui.dp(40), ts, false);
+        // on a narrow screen the short form, rather than a cut one
+        if (w.strategic && g.textWidth(cue, ts, false) > stackX1 - stackX0 - ui.dp(16)) cue = "▶▶ Fast-forward " + speedLabel() + ": fights by the numbers";
+        String c = Ui.fit(g, cue, stackX1 - stackX0 - ui.dp(16), ts, false);
         float tw = g.textWidth(c, ts, false) + ui.dp(16), th = ui.dp(24);
-        float x = (freeL + freeR - tw) / 2, y = freeT + ui.dp(48);
+        float x = (stackX0 + stackX1 - tw) / 2, y = bottom - th - ui.dp(6);
         g.color(bg);
         g.fillRoundRect(x, y, tw, th, th / 2);
         g.color(0xFFFFFFFF);
         g.text(c, x + ui.dp(8), y + th / 2 + ts * 0.36f, ts, Gfx.ALIGN_LEFT, false);
+        return y;
     }
 
     private boolean legendOpen;
@@ -1397,15 +1598,16 @@ public final class Game {
     }
 
     /** The last few messages over the bottom of the map: what matters, and the latest routine call, dimmer. */
-    private void radioFeed(Gfx g, int W) {
-        if (!settings.radio) return;
+    private float radioFeed(Gfx g, int W) {
         float m = ui.dp(8);
         float x0 = freeL + m, x1 = freeR - m;
-        if (w.mode == World.MODE_SURVIVOR && w.playerEnt >= 0 && replay == null && !landscape) x0 = joyCX + ui.dp(64);
-        else if (w.mode == World.MODE_SURVIVOR && w.playerEnt >= 0 && replay == null) x0 = joyCX + ui.dp(64);
-        if (x1 - x0 < ui.dp(120)) return;
+        // beside the survivor's stick, not over it
+        if (w.mode == World.MODE_SURVIVOR && w.playerEnt >= 0 && replay == null) x0 = joyCX + ui.dp(64);
+        stackX0 = x0;
+        stackX1 = x1;
         float ry = freeB - ui.dp(6);
         if (view.aimX >= 0) ry -= ui.dp(60);
+        if (!settings.radio || x1 - x0 < ui.dp(120)) return ry;
         int shown = 0;
         boolean routineShown = false;
         float ts = ui.dp(Ui.S + 0.5f), lh = ui.dp(22);
@@ -1433,6 +1635,7 @@ public final class Game {
             if (it.x >= 0) ui.area("goto:" + i, x0, ry, tw, lh - ui.dp(3));
             shown++;
         }
+        return ry;
     }
 
     /** An aimed strike: what it is, and fire or cancel. */
@@ -1493,6 +1696,17 @@ public final class Game {
         }
     }
 
+    /** Can the player hand the whole army to the AI general (the President and the Military commander)? */
+    private boolean generalToggle() {
+        int r = w.roles.role;
+        return replay == null && (r == Roles.PRESIDENT || r == Roles.MILITARY);
+    }
+
+    /** Is this formation the AI general's to move, rather than the player's? */
+    private boolean underGeneral(Forces.Formation f) {
+        return w.forces.aiMay(f);
+    }
+
     /** What a tap does with the Towns tool. */
     String townMode = "info";
 
@@ -1531,8 +1745,10 @@ public final class Game {
             case "map": return "Layers of the national map";
             case "erase": return "Drag to clear the dead away";
             case "orders":
-                if (inspFormation != null && inspFormation.alive) return Forces.shortName(inspFormation) + " (" + inspFormation.strength() + "): tap where to hold";
+                if (inspFormation != null && inspFormation.alive)
+                    return Forces.shortName(inspFormation) + " (" + inspFormation.strength() + "): " + (underGeneral(inspFormation) ? "the general has it; tap where to send it to take it back" : "tap where to hold");
                 if (inspSquad != null && inspSquad.alive) return inspSquad.name + ": tap where to go";
+                if (generalToggle()) return w.forces.generalCommands ? "The general commands the army; tap a formation to take it back" : "Tap a formation or a squad, then where it goes";
                 return w.roles.commandsFormations() ? "Tap a formation or a squad, then where it goes" : "Tap one of your squads, then where it goes";
             default: return null;
         }
@@ -1558,8 +1774,12 @@ public final class Game {
                 if (w.roles.role == Roles.INCIDENT)
                     return new String[][]{{"tm:info", "Look", "tm:evac", "Evacuate", "tm:army", "Ask for the army"}};
                 String[] row1 = {"tm:info", "Look", "tm:evac", "Evacuate", "tm:quar", "Quarantine", "tm:army", "Send army"};
-                String[] row2 = {"curfew", w.gov.curfew ? "Lift curfew" : "Curfew", "n:alert", "Raise alert", "n:martial", "Martial law", "n:mobilise", "Mobilise"};
-                return new String[][]{row1, row2};
+                // the nation's alert: up, down, and martial law and mobilisation each declared or lifted
+                int lv = w.gov.level;
+                String[] row2 = {"curfew", w.gov.curfew ? "Lift curfew" : "Curfew", lv >= Gov.LEVELS.length - 1 ? "x:alert" : "n:alert", "Raise alert",
+                        lv <= 0 ? "x:lower" : "n:lower", "Lower alert"};
+                String[] row3 = {"n:martial", lv >= 3 ? "Lift martial law" : "Martial law", "n:mobilise", lv >= 4 ? "End mobilisation" : "Mobilise"};
+                return new String[][]{row1, row2, row3};
             }
             case "send": {
                 if (w.roles.target < 0) return null;
@@ -1578,15 +1798,16 @@ public final class Game {
                 return new String[][]{row.toArray(new String[0])};
             }
             case "map": {
-                String[] row1 = {"m:jump", cam.zoom > cam.fitZoom() * 1.5f ? "Whole country" : "Back to where I was", "ov:0", "Plain", "ov:1", "Infection", "ov:2", "Utilities"};
+                String[] row1 = {"m:jump", cam.zoom > cam.countryZoom() * 1.3f ? "Whole country" : "Back to where I was", "ov:0", "Plain", "ov:1", "Infection", "ov:2", "Utilities"};
                 String[] row2 = {"ov:3", "Supplies", "ov:4", "Trust", "ov:5", "Forces", "ov:6", "Deaths", "ov:7", "Peak"};
                 return new String[][]{row1, row2};
             }
             case "orders":
                 if (inspFormation != null && inspFormation.alive)
-                    return new String[][]{{"o:frelease", "Release", "o:fdone", "Done"}};
+                    return new String[][]{{underGeneral(inspFormation) ? "o:ftake" : "o:frelease", underGeneral(inspFormation) ? "Take command" : "Release to the general", "o:fdone", "Done"}};
                 if (inspSquad != null && inspSquad.alive)
                     return new String[][]{{"o:release", "Release", "o:home", "Send home"}};
+                if (generalToggle()) return new String[][]{{"o:general", "Let the general command"}};
                 return new String[][]{{}};
             case "erase":
                 return new String[][]{{"b:10", "Small", "b:50", "Medium", "b:250", "Large"}};
@@ -1607,6 +1828,7 @@ public final class Game {
         if (id.startsWith("tm:")) return id.substring(3).equals(townMode);
         if (id.startsWith("send:")) return id.substring(5).equals(sendTemplate);
         if (id.startsWith("ov:")) return view != null && Integer.parseInt(id.substring(3)) == view.overlay;
+        if (id.equals("o:general")) return w.forces.generalCommands;
         return false;
     }
 
@@ -1718,8 +1940,10 @@ public final class Game {
         int k = 0;
         for (String[] row : rows) {
             for (int i = 0; i < row.length / 2; i++) {
-                option(row[i * 2], row[i * 2 + 1], x + ui.dp(8) + (k % 2) * (bw + ui.dp(8)), yy + (k / 2) * (bh + ui.dp(6)), bw, bh);
-                k++;
+                boolean wide = row.length == 2 || g.textWidth(row[i * 2 + 1], ui.dp(12.5f), true) > bw - ui.dp(12);
+                if (wide && k % 2 == 1) k++;
+                option(row[i * 2], row[i * 2 + 1], x + ui.dp(8) + (k % 2) * (bw + ui.dp(8)), yy + (k / 2) * (bh + ui.dp(6)), wide ? bw * 2 + ui.dp(8) : bw, bh);
+                k += wide ? 2 : 1;
             }
             if (k % 2 == 1) k++;
         }
@@ -1895,7 +2119,9 @@ public final class Game {
             title = f.name;
             inspIcon = f.faction == Ents.COP ? "police" : "army";
             inspIconCol = f.faction == Ents.COP ? 0xFF7FA8FF : WorldView.C_ARMY;
-            sub = Forces.STATES[f.state] + (f.player ? ", under your command" : f.task >= 0 ? ", sent to " + w.r.settlements.get(f.task).name : "");
+            boolean gen = underGeneral(f);
+            sub = Forces.STATES[f.state] + (f.player ? ", under your command" : f.task >= 0 ? ", sent to " + w.r.settlements.get(f.task).name : "")
+                    + (w.roles.commandsFormations() && !f.player ? (gen ? ", under the general" : ", awaiting your orders") : "");
             float frac = f.start > 0 ? f.strength() / (float) f.start : 1;
             bar("Strength", frac, healthCol(frac), f.strength() + (f.faction == Ents.COP ? " officers" : " soldiers"));
             bar("Ammo", (float) Math.log10(1 + f.hq.ammo) / 5, 0xFFE0C040, (int) f.hq.ammo + " rounds");
@@ -1904,7 +2130,10 @@ public final class Game {
             if (tank != null && f.hq.vpool[tank.index] + f.tanksOut > 0) body.append(", ").append(f.hq.vpool[tank.index] + f.tanksOut).append(" tanks");
             if (f.t.guns > 0) body.append(", ").append(f.t.guns).append(" guns");
             body.append(". ").append(fmt(f.kills)).append(" of the dead destroyed, ").append(f.losses).append(" lost.");
-            actions = new String[]{"i:fcommand", "Command it", "i:close", "Close"};
+            if (w.roles.commandsFormations() && replay == null)
+                actions = gen ? new String[]{"o:ftake", "Take command", "i:close", "Close"}
+                        : new String[]{"i:fcommand", "Give orders", "o:frelease", "Release to the general", "i:close", "Close"};
+            else actions = new String[]{"i:close", "Close"};
         } else {
             Squads.Squad s = inspSquad;
             if (s == null || !s.alive) {
@@ -1987,12 +2216,19 @@ public final class Game {
 
     private void endPanel(Gfx g) {
         int W = g.width(), H = g.height();
-        float pw = Math.min(W - ui.dp(32), ui.dp(360)), ph = ui.dp(200);
-        float x = (W - pw) / 2, y = H * 0.3f;
+        float pw = Math.min(W - ui.dp(32), ui.dp(360));
+        // a person's own end in a campaign: how the campaign stood, too
+        String camp = goalShown() && w.roles.progressText != null && w.roles.progressText.length() > 0 ? w.scenario.name + ": " + w.roles.progressText + "." : null;
+        int cl = camp == null ? 0 : Math.min(3, Ui.lines(g, camp, pw - ui.dp(32), ui.dp(12)));
+        String endText = w.endText == null ? "" : w.endText;
+        int el = Math.min(3, Ui.lines(g, endText, pw - ui.dp(32), ui.dp(13)));
+        float ph = ui.dp(64) + el * ui.dp(13) * 1.3f + (cl > 0 ? ui.dp(8) + cl * ui.dp(12) * 1.3f : 0) + ui.dp(72);
+        float x = (W - pw) / 2, y = Math.min(H * 0.3f, H - ph - ui.dp(16));
         ui.panel(x, y, pw, ph);
         g.color(w.won ? Ui.GOOD : Ui.ACCENT);
-        g.text(w.endTitle == null ? "It's over" : w.endTitle, x + pw / 2, y + ui.dp(36), ui.dp(20), Gfx.ALIGN_CENTER, true);
-        ui.wrap(w.endText == null ? "" : w.endText, x + ui.dp(16), y + ui.dp(64), pw - ui.dp(32), ui.dp(13), Ui.TEXT, 3);
+        g.text(Ui.fit(g, w.endTitle == null ? "It's over" : w.endTitle, pw - ui.dp(24), ui.dp(20), true), x + pw / 2, y + ui.dp(36), ui.dp(20), Gfx.ALIGN_CENTER, true);
+        float ty = y + ui.dp(64) + ui.wrap(endText, x + ui.dp(16), y + ui.dp(64), pw - ui.dp(32), ui.dp(13), Ui.TEXT, 3);
+        if (camp != null) ui.wrap(camp, x + ui.dp(16), ty + ui.dp(8), pw - ui.dp(32), ui.dp(12), Ui.DIM, 3);
         float bw = (pw - ui.dp(48)) / 3;
         ui.button("report", x + ui.dp(16), y + ph - ui.dp(56), bw, ui.dp(40), "Report", false, 13);
         ui.button("watch", x + ui.dp(24) + bw, y + ph - ui.dp(56), bw, ui.dp(40), "Keep watching", false, 12);
@@ -2029,18 +2265,46 @@ public final class Game {
         String[][] items = {{"report", "Report"}, {"radio", "Radio log"}, {"save", "Save"}, {"loadp", "Load"},
                 {"timelapse", "Timelapse"}, {"savereplay", "Save replay"}, {"sharecode", "Challenge code"}, {"players", "Players"},
                 {"settings", "Settings"}, {"shot", "Screenshot"}, {"hideui", "Hide buttons"}, {"tomenu", "Quit to the menu"}};
-        int cols = land ? 3 : 2;
+        // the campaign: how it stands, and the days
+        boolean goal = goalShown();
+        int cols = land ? (goal ? 4 : 3) : 2;
+        if (land && goal) pw = Math.min(W - ui.dp(32), ui.dp(680));
         int rows = (items.length + cols - 1) / cols;
-        float ph = ui.dp(66) + ui.dp(56) + gap + rows * (bh + gap) + ui.dp(8);
+        float iw = pw - ui.dp(28);
+        float ts = ui.dp(12.5f);
+        int gl = goal ? Math.min(3, Ui.lines(g, goalText(), iw - ui.dp(20), ts)) : 0;
+        float goalH = goal ? ui.dp(44) + gl * ts * 1.3f + ui.dp(10) : 0;
+        float ph = ui.dp(66) + goalH + ui.dp(56) + gap + rows * (bh + gap) + ui.dp(8);
         ph = Math.min(ph, H - ui.dp(16));
         float x = (W - pw) / 2, y = (H - ph) / 2;
         ui.panel(x, y, pw, ph);
         g.color(Ui.TEXT);
         g.text("Paused", x + pw / 2, y + ui.dp(30), ui.dp(Ui.XL), Gfx.ALIGN_CENTER, true);
         g.color(Ui.DIM);
-        String line = w.r.name + (w.scenario != null ? ", " + w.scenario.name : "") + ". " + w.roles.label() + ". " + w.clock();
+        String line = w.r.name + (w.scenario != null && !goal ? ", " + w.scenario.name : "") + ". " + w.roles.label() + ". " + w.clock();
+        if (g.textWidth(line, ui.dp(Ui.S + 0.5f), false) > pw - ui.dp(24)) line = w.roles.label() + ". " + w.clock();
         g.text(Ui.fit(g, line, pw - ui.dp(24), ui.dp(Ui.S + 0.5f), false), x + pw / 2, y + ui.dp(52), ui.dp(Ui.S + 0.5f), Gfx.ALIGN_CENTER, false);
-        float yy = y + ui.dp(66), ix = x + ui.dp(14), iw = pw - ui.dp(28);
+        float yy = y + ui.dp(66), ix = x + ui.dp(14);
+        if (goal) {
+            float bx = ix, bw = iw, gh = goalH - ui.dp(10);
+            g.color(0xFF141A22);
+            g.fillRoundRect(bx, yy, bw, gh, ui.dp(8));
+            String days = goalDays();
+            float dw = days.length() > 0 ? g.textWidth(days, ui.dp(Ui.S + 0.5f), true) + ui.dp(12) : 0;
+            g.color(Ui.ACCENT);
+            g.text(Ui.fit(g, w.scenario.name.toUpperCase(), bw - ui.dp(20) - dw, ui.dp(Ui.S + 0.5f), true), bx + ui.dp(10), yy + ui.dp(18), ui.dp(Ui.S + 0.5f), Gfx.ALIGN_LEFT, true);
+            if (dw > 0) {
+                g.color(Ui.DIM);
+                g.text(days, bx + bw - ui.dp(10), yy + ui.dp(18), ui.dp(Ui.S + 0.5f), Gfx.ALIGN_RIGHT, true);
+            }
+            float p = Math.max(0, Math.min(1, w.roles.progress)), barW = bw - ui.dp(20), barH = ui.dp(6);
+            g.color(0xFF2A333F);
+            g.fillRoundRect(bx + ui.dp(10), yy + ui.dp(27), barW, barH, barH / 2);
+            g.color(w.ended ? (w.won ? Ui.GOOD : Ui.ACCENT) : 0xFF5A9CFF);
+            if (p > 0) g.fillRoundRect(bx + ui.dp(10), yy + ui.dp(27), Math.max(barH, barW * p), barH, barH / 2);
+            ui.wrap(goalText(), bx + ui.dp(10), yy + ui.dp(48), barW, ts, Ui.TEXT, 3);
+            yy += goalH;
+        }
         // the main thing: carry on
         ui.bigButton("resume", ix, yy, iw, ui.dp(52), "Resume", Ui.ON);
         yy += ui.dp(52) + gap + ui.dp(4);
@@ -2203,10 +2467,14 @@ public final class Game {
         float m = ui.dp(12);
         g.save();
         g.clip(0, ui.dp(54), W, H - ui.dp(54));
-        float y = ui.dp(60) - scroll, rh = ui.dp(44);
+        float y = ui.dp(60) - scroll;
+        float ts = ui.dp(Ui.M), tw = W - m * 2 - ui.dp(12);
         List<News.Item> log = w.news.log;
         for (int i = log.size() - 1; i >= 0; i--) {
             News.Item it = log.get(i);
+            // each message whole, wrapped over as many lines as it needs (up to four)
+            int nl = Math.min(4, Ui.lines(g, it.text, tw, ts));
+            float rh = ui.dp(30) + nl * ts * 1.3f + ui.dp(6);
             if (y > -rh && y < H) {
                 int col = it.kind == News.HEADLINE ? 0xFFFFC890 : it.kind == News.LOSS ? 0xFFFF8A7A : it.kind == News.COMMAND ? 0xFFFFD87A : it.kind == News.CALL ? 0xFF9EC4FF : Ui.TEXT;
                 boolean go = it.x >= 0;
@@ -2220,9 +2488,7 @@ public final class Game {
                 String kind = it.kind == News.HEADLINE ? "News" : it.kind == News.LOSS ? "Loss" : it.kind == News.COMMAND ? "Command" : it.kind == News.CALL ? "911" : "Units";
                 g.color(Ui.DIM);
                 g.text(clockAt(it.time) + "  ·  " + kind + (go ? "  ·  tap to go there" : ""), m + ui.dp(6), y + ui.dp(15), ui.dp(Ui.S), Gfx.ALIGN_LEFT, false);
-                g.color(col);
-                float ts = ui.dp(Ui.M);
-                g.text(Ui.fit(g, it.text, W - m * 2 - ui.dp(12), ts, it.kind == News.HEADLINE), m + ui.dp(6), y + ui.dp(32), ts, Gfx.ALIGN_LEFT, it.kind == News.HEADLINE);
+                ui.wrap(it.text, m + ui.dp(6), y + ui.dp(32), tw, ts, col, 4);
             }
             y += rh;
         }
@@ -2264,7 +2530,7 @@ public final class Game {
         float y = ui.dp(70) - scroll;
         Stats s = w.stats;
         g.color(Ui.DIM);
-        g.text(w.r.name + ", " + w.clock() + (w.scenario != null ? ", " + w.scenario.name : ""), m, y, ui.dp(12), Gfx.ALIGN_LEFT, false);
+        g.text(Ui.fit(g, w.r.name + ", " + w.clock() + (w.scenario != null ? ", " + w.scenario.name : ""), W - m * 2, ui.dp(12), false), m, y, ui.dp(12), Gfx.ALIGN_LEFT, false);
         y += ui.dp(14);
         if (w.ended) {
             g.color(w.won ? Ui.GOOD : Ui.ACCENT);
@@ -2297,7 +2563,7 @@ public final class Game {
                 for (String[] r : board) {
                     g.color(r[0].equals(playerName()) ? Ui.GOOD : Ui.TEXT);
                     g.text(place++ + ". " + r[0], m, y + ui.dp(12), ui.dp(12), Gfx.ALIGN_LEFT, false);
-                    g.text(WorldView.people(Integer.parseInt(r[1])) + " lost, " + duration(Integer.parseInt(r[2]) * 60f)
+                    g.text(WorldView.people(Integer.parseInt(r[1])) + " lost, " + duration(Integer.parseInt(r[2]))
                             + (r[3].equals("1") ? "" : " (not finished)"), W - m, y + ui.dp(12), ui.dp(12), Gfx.ALIGN_RIGHT, false);
                     y += ui.dp(17);
                 }
@@ -2371,7 +2637,8 @@ public final class Game {
         }
         y += gh + ui.dp(30);
         // the key, with each line's peak
-        String[] keys = {"people " + WorldView.people(maxA), "the dead " + WorldView.people(maxZ), "police " + fmt(maxP), "army " + fmt(maxR)};
+        String[] keys = {"people (peak " + WorldView.people(maxA) + ")", "the dead (peak " + WorldView.people(maxZ) + ")",
+                "police out (peak " + fmt(maxP) + ")", "soldiers out (peak " + fmt(maxR) + ")"};
         int[] kc = {0xFFE8E0C8, 0xFFE84848, 0xFF5A96FF, WorldView.C_ARMY};
         float kx = m;
         for (int k = 0; k < 4; k++) {
@@ -2393,10 +2660,10 @@ public final class Game {
         String[][] nums = {
                 {"People killed", fmt(s.civDeaths)}, {"Infected", fmt(s.infectedTotal)}, {"Most of the dead at once", fmt(s.peakZombies)},
                 {"Dead destroyed", fmt(s.zombieKills)}, {"  by the police", fmt(s.killsBySide[1])}, {"  by the army", fmt(s.killsBySide[2])},
-                {"Officers lost", "" + s.armedDeaths[Ents.COP]}, {"Soldiers lost", "" + s.armedDeaths[Ents.SOLDIER]},
+                {"Officers lost", fmt(s.armedDeaths[Ents.COP])}, {"Soldiers lost", fmt(s.armedDeaths[Ents.SOLDIER])},
                 {"Help from outside", fmt(s.outsidePolice + s.outsideSoldiers)}, {"Evacuated", fmt(w.strat.evacuatedOut + w.strat.evacuatedArrived)},
-                {"Air strikes", "" + s.airStrikes}, {"Bridges blown", "" + s.bridgesBlown}, {"Places overrun", "" + s.facilitiesLost},
-                {"Buildings destroyed", "" + s.buildingsLost}, {"Vehicles lost", "" + s.vehiclesLost}, {"Shots fired", fmt(s.shots)},
+                {"Air strikes", fmt(s.airStrikes)}, {"Bridges blown", fmt(s.bridgesBlown)}, {"Places overrun", fmt(s.facilitiesLost)},
+                {"Buildings destroyed", fmt(s.buildingsLost)}, {"Vehicles lost", fmt(s.vehiclesLost)}, {"Shots fired", fmt(s.shots)},
                 {"Public trust", (int) w.gov.trust + "%"}};
         for (String[] r : nums) {
             g.color(Ui.DIM);
@@ -2404,6 +2671,14 @@ public final class Game {
             g.color(Ui.TEXT);
             g.text(r[1], W - m, y + ui.dp(14), ui.dp(12.5f), Gfx.ALIGN_RIGHT, true);
             y += ui.dp(20);
+        }
+        String lost = s.lossSummary();
+        if (lost.length() > 0) {
+            y += ui.dp(12);
+            g.color(Ui.ACCENT);
+            g.text("WHERE PEOPLE WERE LOST", m, y + ui.dp(12), ui.dp(13), Gfx.ALIGN_LEFT, true);
+            y += ui.dp(20);
+            y += ui.wrap(Character.toUpperCase(lost.charAt(0)) + lost.substring(1) + ".", m, y + ui.dp(12), W - m * 2, ui.dp(12.5f), Ui.TEXT, 6) + ui.dp(4);
         }
         y += ui.dp(12);
         g.color(Ui.ACCENT);
@@ -2465,8 +2740,9 @@ public final class Game {
 
     // ------------------------------------------------------------------ personal bests
 
-    static String duration(float seconds) {
-        int h = (int) (seconds / 60), mins = (int) (seconds % 60);
+    /** A game time span ("3h 20m", "2d 5h"), from game minutes. */
+    static String duration(float minutes) {
+        int h = (int) (minutes / 60), mins = (int) (minutes % 60);
         if (h >= 24) return (h / 24) + "d " + (h % 24) + "h";
         return h + "h " + mins + "m";
     }
@@ -2493,9 +2769,11 @@ public final class Game {
         }
         float t = w.roles.containedAt >= 0 ? w.roles.containedAt : (float) w.time;
         int loss = losses();
-        if (loss < bestLoss || t < bestTime) {
-            pf.setPref(key, Math.min(loss, bestLoss) + "," + Math.min(t, bestTime));
-            if (loss < bestLoss || t < bestTime) toast("A personal best for this challenge");
+        // the best game, kept whole: fewest lives lost, and the faster of two equal ones (never the losses of one
+        // game with the time of another)
+        if (loss < bestLoss || loss == bestLoss && t < bestTime) {
+            pf.setPref(key, loss + "," + t);
+            toast("A personal best for this challenge");
         }
     }
 
@@ -2509,7 +2787,7 @@ public final class Game {
     String resultCode() {
         String name = playerName().replace("~", "-");
         boolean done = w.roles.containedAt >= 0 || (w.ended && w.won);
-        int minutes = (int) ((w.roles.containedAt >= 0 ? w.roles.containedAt : w.time) / 60);
+        int minutes = (int) (w.roles.containedAt >= 0 ? w.roles.containedAt : w.time);
         return resultCodeFor(challengeCodeOf(w), name, losses(), minutes, done);
     }
 
@@ -2557,7 +2835,7 @@ public final class Game {
         String[] b = pf.pref("best." + challenge, "").split(",");
         if (b.length == 2) {
             try {
-                out.add(new String[]{playerName(), b[0], "" + (int) (Float.parseFloat(b[1]) / 60), "1"});
+                out.add(new String[]{playerName(), b[0], "" + (int) Float.parseFloat(b[1]), "1"});
             } catch (NumberFormatException ignored) {
             }
         }
@@ -2576,7 +2854,7 @@ public final class Game {
         String[] v = pf.pref("best." + code, "").split(",");
         if (v.length != 2) return null;
         try {
-            return "Your best: " + WorldView.people(Integer.parseInt(v[0])) + " lives lost, contained in " + duration(Float.parseFloat(v[1]));
+            return "Your best: " + WorldView.people(Integer.parseInt(v[0])) + " lives lost, over in " + duration(Float.parseFloat(v[1]));
         } catch (NumberFormatException e) {
             return null;
         }
@@ -2701,7 +2979,18 @@ public final class Game {
             case "seed": ngSeed = (ngSeed * 1103515245L + 12345L + System.nanoTime()) % 1000000L; if (ngSeed < 0) ngSeed = -ngSeed; return;
             case "pause": screen = S_PAUSE; return;
             case "playpause": paused = !paused; return;
-            case "speed": speedIdx = speedIdx >= maxSpeedIdx() ? 0 : speedIdx + 1; paused = false; achieved = 0; return;
+            case "speed": skipping = false; speedIdx = speedIdx >= maxSpeedIdx() ? 0 : speedIdx + 1; paused = false; achieved = 0; return;
+            case "skip":
+                if (skipping) {
+                    skipping = false;
+                    speedIdx = 0;
+                } else if (deadNear(SKIP_SAFE)) toast("Not with the dead this close");
+                else {
+                    skipping = true;
+                    paused = false;
+                    achieved = 0;
+                }
+                return;
             case "report": back = screen == S_PAUSE ? S_PAUSE : S_PLAY; screen = S_REPORT; scroll = 0; recordBest(); return;
             case "radio": back = S_PAUSE; screen = S_RADIO; scroll = 0; return;
             case "shot": screenshot(); return;
@@ -2720,8 +3009,10 @@ public final class Game {
                 if (w.gov.level >= Gov.LEVELS.length - 1) toast("Already at " + Gov.LEVELS[w.gov.level]);
                 else Actions.level(w, w.gov.level + 1);
                 return;
-            case "n:martial": if (w.gov.level < 3) Actions.level(w, 3); else toast("Martial law is already in force"); return;
-            case "n:mobilise": if (w.gov.level < 4) Actions.level(w, 4); else toast("The nation is already mobilised"); return;
+            case "n:lower": if (w.gov.level > 0) Actions.level(w, w.gov.level - 1); return;
+            // lifting martial law goes back to a state of emergency; ending mobilisation back to martial law
+            case "n:martial": Actions.level(w, w.gov.level < 3 ? 3 : 2); return;
+            case "n:mobilise": Actions.level(w, w.gov.level < 4 ? 4 : 3); return;
             case "m:jump": mapToggle(); return;
             case "aim:go": fireAimed(); return;
             case "aim:no": view.aimX = -1; return;
@@ -2730,7 +3021,22 @@ public final class Game {
             case "rolesheet:close": roleSheet = false; return;
             case "golive": cam.follow = -1; cam.flyTo(startX, startY, Math.max(cam.zoom, 0.6f)); return;
             case "o:release": Actions.release(w, inspSquad); inspSquad = null; return;
-            case "o:frelease": Actions.releaseFormation(w, inspFormation); inspFormation = null; return;
+            case "o:frelease":
+                if (inspFormation != null) toast(Forces.shortName(inspFormation) + ": the general commands it");
+                Actions.releaseFormation(w, inspFormation);
+                inspFormation = null;
+                return;
+            case "o:ftake":
+                // taking it back: it holds where it is, under your command, until you send it somewhere
+                if (inspFormation != null && inspFormation.alive) {
+                    Actions.formation(w, inspFormation, inspFormation.hq.x, inspFormation.hq.y);
+                    toast(Forces.shortName(inspFormation) + " waits for your orders");
+                    tool = "orders";
+                }
+                return;
+            case "o:general":
+                Actions.generalCommands(w, !w.forces.generalCommands);
+                return;
             case "o:fdone": inspFormation = null; return;
             case "o:home": Actions.home(w, inspSquad); return;
             case "i:quar": Actions.quarantine(w, inspSettle, !w.roles.quarantined(inspSettle)); return;
@@ -2870,7 +3176,7 @@ public final class Game {
     }
 
     private void mapToggle() {
-        if (cam.zoom > cam.fitZoom() * 1.5f) {
+        if (cam.zoom > cam.countryZoom() * 1.3f) {
             prevX = cam.cx;
             prevY = cam.cy;
             prevZoom = cam.zoom;
@@ -3049,6 +3355,27 @@ public final class Game {
     }
 
     /** The fastest speed the player may pick: no fast-forward while playing a person. */
+    /**
+     * A person (the officer, the survivor) can't be fast-forwarded past, which folds everyone into counts; instead,
+     * while none of the dead are near, time can be skipped ahead with everyone still in person, as fast as the device
+     * steps. It stops by itself when the dead come close.
+     */
+    boolean skipping;
+    private static final float SKIP_SAFE = 900;
+
+    /** Are any of the dead walking within this distance (world px) of the person you play? */
+    private boolean deadNear(float r) {
+        if (w == null || w.playerEnt < 0) return false;
+        Ents e = w.e;
+        float px = e.x[w.playerEnt], py = e.y[w.playerEnt], r2 = r * r;
+        for (int i = 0; i < e.top; i++) {
+            if (e.loc[i] != Ents.FREE || e.kind[i] != Ents.ZOMBIE) continue;
+            float dx = e.x[i] - px, dy = e.y[i] - py;
+            if (dx * dx + dy * dy < r2) return true;
+        }
+        return false;
+    }
+
     int maxSpeedIdx() {
         if (w != null && w.playerEnt >= 0 && replay == null) {
             int k = 0;
@@ -3060,6 +3387,7 @@ public final class Game {
 
     /** The speed button's label: the speed chosen, or what the device really reaches when it falls short. */
     String speedLabel() {
+        if (skipping) return achieved > 0 ? "~" + Math.round(achieved) + "x" : "Skip";
         String name = SPEED_NAMES[speedIdx];
         int want = SPEEDS[speedIdx];
         if (paused || want < 60 || achieved <= 0 || achieved >= want * 0.8f) return name;
@@ -3241,7 +3569,7 @@ public final class Game {
             case "orders": {
                 if (w.roles.commandsFormations()) {
                     Forces.Formation fm = w.forces.formationAt(x, y, Math.max(60, ui.dp(24) / cam.zoom));
-                    if (fm != null && fm != inspFormation && cam.zoom < 0.6f) {
+                    if (fm != null && fm != inspFormation) {
                         inspFormation = fm;
                         inspSquad = null;
                         return;
@@ -3368,17 +3696,16 @@ public final class Game {
             toast(w.logistics.describe(cv));
             return;
         }
+        // a formation's symbol, at any zoom (before the base it may stand on)
+        Forces.Formation fm = w.forces.formationAt(x, y, ui.dp(18) / cam.zoom);
+        if (fm != null) {
+            inspFormation = fm;
+            return;
+        }
         for (Region.Facility f : w.r.facilities) {
             if (f.kind == Region.F_HELIPAD || f.kind == Region.F_PARK) continue;
             if (dist(cam.toScreenX(f.x), cam.toScreenY(f.y), sx, sy) < ui.dp(16)) {
                 inspFac = f.id;
-                return;
-            }
-        }
-        if (cam.zoom < 0.6f) {
-            Forces.Formation fm = w.forces.formationAt(x, y, ui.dp(18) / cam.zoom);
-            if (fm != null) {
-                inspFormation = fm;
                 return;
             }
         }

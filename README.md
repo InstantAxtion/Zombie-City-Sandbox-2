@@ -35,10 +35,11 @@ one person.
   the days pass.
 - **Play as anyone** (chosen on the New Game screen; the AI runs everything else):
   - *God*: every tool. Paint the dead, place forces, strike, order anyone, decide everything.
-  - *President*: alert level, martial law, mobilisation, curfews, quarantines, evacuations, air strikes,
-    artillery, bridges, and every formation, or hand the army (or single formations) to the AI general.
-  - *Military commander*: the formations, air strikes, artillery and bridges; the civil government decides the
-    rest.
+  - *President*: alert level (up and down), martial law and mobilisation (declared and lifted), curfews, quarantines, evacuations, air strikes,
+    artillery, bridges, and every formation, or hand the army to the AI general ("Let the general command" in the
+    Order tool) or release single formations to it (and take them back) from a formation's sheet.
+  - *Military commander*: the formations, air strikes, artillery and bridges, with the same hand-over to the
+    general; the civil government decides the rest.
   - *Incident commander*: one city's police and the soldiers sent there, its evacuation, and asking for the army.
   - *Precinct commander*: one police station; send its squads out and move them.
   - *Squad leader*: one squad; tell it where to go.
@@ -46,8 +47,9 @@ one person.
   - *Survivor*: one person; move with the stick, survive.
 - **Scenarios and campaigns.** Sandbox starts: an open country, a lab leak, a crashed airliner, a prison riot, a
   summer festival, a ship in the port, somewhere random. Campaigns: hold the capital for 30 days, evacuate the
-  coast, retake a fallen state, protect the capital from hordes of tens of thousands. Survival: as a survivor or
-  on patrol as an officer.
+  coast, retake a fallen state, protect the capital from hordes of tens of thousands. A campaign's progress (and
+  the days left) is a line under the top bar and a section of the pause menu. Survival: as a survivor or on patrol
+  as an officer.
 - **Director mode.** Every game records what the player did and where the camera looked; save a replay from the
   pause menu (a few kilobytes) and it rebuilds the whole outbreak from its start, exactly, and you can take over
   when it ends. A timelapse plays the country back hour by hour.
@@ -60,18 +62,21 @@ one person.
   symbols, labels with outlines), crowds glow where they're thick, and labels don't pile on top of each other. Tap
   anyone or anything: names, ranks, ammunition, orders, a formation's strength
   and losses, a town's people, the dead and its power. The radio log keeps every message (tap one to go there).
-  The after-action report has a timeline, the turning point, the numbers, the best fighters, what happened, the
-  fallen, and your best for the challenge.
+  The after-action report has a timeline, the turning point, the numbers, where people were lost (in their homes,
+  on the roads, to hordes, to our own guns, in fires), the best fighters, what happened, the fallen, and your best
+  for the challenge.
 
 ## Controls
 
 Drag to move, pinch to zoom, tap to look. The tools are along the bottom (down the left side when the phone is
 sideways); each says in a line above its options what a tap does. The **Map** tool switches the national map's
-layers, and its first button jumps out to the whole country and back; the minimap jumps too. Strikes are aimed,
+layers, and its first button jumps out to the whole country and back (on a tall phone the country fills the
+screen's height and can be panned sideways); the minimap jumps too. Strikes are aimed,
 then confirmed. Red arrows at the map's edge point to the biggest fights out of view. The **?** button explains the
 marks on the map. Top right: pause and speed (1x to 16x, then fast-forward). The menu button (or the phone's back
 button) pauses, and the back button also cancels a load in progress. The officer and the survivor can't
-fast-forward (the speed button goes round 1x to 16x); when the phone can't keep up with a fast-forward speed, the
+fast-forward (the speed button goes round 1x to 16x), but while none of the dead are near, Skip ahead runs time on
+as fast as the phone can and stops by itself when they come close; when the phone can't keep up with a fast-forward speed, the
 button shows the rate it really reaches ("~15h/s"). The game saves itself every three minutes of play and whenever
 the app is paused. On a desktop: the mouse is a finger, the wheel zooms, space
 pauses, 1-8 set the speed, M toggles the map, Esc is back.
@@ -94,8 +99,9 @@ builds the APK on every push.
 
 Headless tools (run from the repository root, with `build/test` on the classpath): `Probe` (an outbreak of any
 size, printing the numbers; `STRAT=days` then fast-forwards), `Shot` (the world at five zooms), `UiShot` (the
-interface driven by scripted taps; `UiShot dir 540 1170 1.5 director` walks the roles, campaigns, editor,
-layers, timelapse and replays).
+interface driven by scripted taps; `UiShot dir 1080 2400 2.75` shoots a phone in portrait, `UiShot dir 2400 1080
+2.75` sideways, and `UiShot dir 1080 2400 2.75 director` walks the roles, campaigns, editor, layers, the hand-over
+to the general, the timelapse and replays).
 
 `tools/balance.sh 5000,50000,100000,250000 8 2304 30 4` plays each outbreak size on many seeds in fast-forward
 and prints the spread of outcomes (days to contain or fall, share of the country lost, losses); every run goes to

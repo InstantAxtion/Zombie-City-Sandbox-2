@@ -16,7 +16,7 @@ How the sequel works, and how it answers the lessons written down in the first g
 | Entity state | Booleans (dead, removed, listed), lazy sweeps | One location per slot, changed only by four methods |
 | Behaviour versions | `if (civic >= N)` everywhere | None: saves are versioned, the rules aren't |
 | Content | Code (40,000 lines of landmark drawing) | `assets/content.ini` for every type and scenario |
-| Tests | 25, about 12 minutes, Android stubs | 42, a few minutes, no stubs (the core has no Android code) |
+| Tests | 25, about 12 minutes, Android stubs | About fifty, a minute or two, no stubs (the core has no Android code) |
 
 ## Code map
 
@@ -100,12 +100,18 @@ and the river becomes a line hordes can't cross (sector connectivity is recomput
 
 Everything that marks something on the map is sized in dp (`Camera.dp`), not world pixels, so a person, a car, a
 unit symbol or a label reads the same on any screen at any zoom; labels have outlines (`Gfx.textHalo`) and are
-placed most important first, skipping any that would land on another. The ground is painted into 32-tile chunks at
-four levels of detail (4, 9, 16 and 28 pixels a tile) within a time budget each frame and a memory budget overall.
+placed most important first, skipping any that would land on another, on a formation's symbol, outside the map
+area the bars leave free, or under the interface's own slots (the radio, the note above it, the minimap, the key).
+Notes and the radio are stacked up from the bottom of the map in separate slots, so they never cover each other.
+The ground is painted into 32-tile chunks at four levels of detail (4, 9, 16 and 28 pixels a tile) within a time
+budget each frame and a memory budget overall.
 Soft things are small pictures scaled up with smoothing: glow sprites (street lights, fire, sirens, smoke), the
 infection's bleed and the heatmaps (two pixels a sector, blurred), the glow of crowds (the 64 px grid round the
 view). The interface's bars cover the screen's edges, and the camera knows it (`Camera.setInsets`), so "the whole
-country" fits the map area between them; sideways, the tools become a rail and the inspector a side sheet.
+country" fits the map area between them; on a tall screen it fits the map's height instead when that puts more
+land on the screen (a coarse land mask scores each zoom), and the rest is a pan away. Sideways, the tools become a
+rail and the inspector a side sheet. A campaign's progress (`Roles.progress`, `progressText`) is a line under the
+top bar.
 
 ## Saves version the format, not the rules
 
@@ -121,7 +127,10 @@ commander, a police station for the precinct commander, a squad for the squad le
 and the survivor. A role decides the tools the interface shows, which squads can be ordered (`canOrder`), whether
 the governor AI (`Gov.playerDecides`) and the military command (`Forces.command`) step aside, and which station
 the dispatcher leaves to the player. Everything else stays with the AI. The officer is an armed police entity the
-stick moves (`ArmedAI` hands it to `Combat.playerThink`), with its patrol kept close each second.
+stick moves (`ArmedAI` hands it to `Combat.playerThink`), with its patrol kept close each second. A person can't
+be fast-forwarded (that would fold them into the counts); instead, while none of the dead are near, "Skip ahead"
+steps the world in person as fast as the device can and stops when the dead come close. Speed is not an input, so
+replays don't change. A new game opens on the player's own piece (`Roles.focusOf`), with a button to the outbreak.
 
 ## Director mode: replays are exact
 
@@ -183,7 +192,8 @@ phones down slow the calls and the officials' picture, rumours move people onto 
 - *The general.* Every half minute `Forces.command` makes a plan: towns by the reported dead, hordes and nests in
   open country by reconnaissance, formations in proportion to each, each to its own part of the line
   (`frontFor`); free formations join the biggest fights; idle ones go home. The player as President or Military
-  commander commands the army until they hand it over (`Actions.generalCommands`) or release single formations.
+  commander commands the army until they hand it over (`Actions.generalCommands`, "Let the general command" in the
+  Order tool) or release single formations (`Actions.releaseFormation`); ordering a formation takes it back.
 - *Evacuation.* The roads out of a town carry `evacPerHourTown`/`evacPerHourCity` an hour; a destination takes
   refugees up to `hostShare` of its people; the bitten among each town's leavers are counted per town.
 - *The news.* A line is said once; things that happen again and again are said the first time and then added

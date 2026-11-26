@@ -90,10 +90,49 @@ public final class WorldView {
         g.image(img, x - size / 2, y - size / 2, size, size, alpha);
     }
 
-    /** A label over the map: dp size, an outline so it reads over anything. */
+    /**
+     * A label over the map: dp size, an outline so it reads over anything. It takes its place among this frame's
+     * labels and is left out if it would land on one already there, or outside the map area the bars leave free.
+     */
     public void label(Gfx g, String s, float x, float y, float sizeDp, int color, int align, boolean bold) {
+        float sz = sizeDp * dp, tw = g.textWidth(s, sz, bold);
+        float x0 = align == Gfx.ALIGN_CENTER ? x - tw / 2 : align == Gfx.ALIGN_RIGHT ? x - tw : x;
+        float ly0 = y - sz * 0.95f, ly1 = y + sz * 0.35f;
+        int k = (placedN - 1) * 4;
+        boolean callers = justPlaced && placedN > 0 && x0 < placed[k + 2] && x0 + tw > placed[k] && ly0 < placed[k + 3] && ly1 > placed[k + 1];
+        // unless the caller has just taken this label's place, it finds its own
+        if (!callers && !place(x0 - 2 * dp, ly0, x0 + tw + 2 * dp, ly1)) return;
+        labelAlways(g, s, x, y, sizeDp, color, align, bold);
+    }
+
+    /** A label drawn whatever else is there (its place already taken, or a mark that must show). */
+    public void labelAlways(Gfx g, String s, float x, float y, float sizeDp, int color, int align, boolean bold) {
+        justPlaced = false;
         g.color(color);
         g.textHalo(s, x, y, sizeDp * dp, align, bold, 0xD0000000, Math.max(1.2f, 1.3f * dp));
+    }
+
+    // where labels may go this frame (the map area the bars leave free), and areas the interface keeps for itself
+    private float areaX0 = -1e9f, areaY0 = -1e9f, areaX1 = 1e9f, areaY1 = 1e9f;
+    private final float[] keep = new float[4 * 8];
+    private int keepN;
+
+    /** For the next frame drawn only: labels stay inside this screen rectangle. */
+    public void labelArea(float x0, float y0, float x1, float y1) {
+        areaX0 = x0;
+        areaY0 = y0;
+        areaX1 = x1;
+        areaY1 = y1;
+    }
+
+    /** For the next frame drawn only: no labels in this screen rectangle (the radio, a note). */
+    public void keepOut(float x0, float y0, float x1, float y1) {
+        if (keepN >= 8 || x1 <= x0 || y1 <= y0) return;
+        int k = keepN++ * 4;
+        keep[k] = x0;
+        keep[k + 1] = y0;
+        keep[k + 2] = x1;
+        keep[k + 3] = y1;
     }
 
     public void draw(Gfx g, Camera cam, float dt) {
@@ -105,6 +144,7 @@ public final class WorldView {
         g.fillRect(0, 0, g.width(), g.height());
         ground(g, cam);
         float x0 = cam.x0() - 80, y0 = cam.y0() - 80, x1 = cam.x1() + 80, y1 = cam.y1() + 80;
+        smoothLines(g, cam, x0, y0, x1, y1);
         if (z >= 0.3f && blood) decals(g, cam, x0, y0, x1, y1);
         if (z >= 0.3f) bodies(g, cam, x0, y0, x1, y1);
         if (z >= 0.18f && z < 0.6f) crowd.draw(g, cam);
@@ -117,6 +157,8 @@ public final class WorldView {
         effects(g, cam, x0, y0, x1, y1);
         overlays(g, cam);
         for (int i = 0; i < w.modules.size(); i++) w.modules.get(i).draw(g, cam, this);
+        areaX0 = areaY0 = -1e9f;
+        areaX1 = areaY1 = 1e9f;
         if (brushX >= 0 && time - brushT < 0.8f) {
             g.color(brushColor);
             float bx = cam.toScreenX(brushX), by = cam.toScreenY(brushY), br = Math.max(brushR * z, 6 * dp);
@@ -609,12 +651,14 @@ public final class WorldView {
         Ents e = w.e;
         float z = cam.zoom;
         if (z < 0.6f) {
-            // dots, batched by colour: the dead first, units drawn over them
+            // dots, batched by colour: the dead first and lighter (filled, a dark rim only from fairly close, so a
+            // big crowd is a mass rather than a heap of rings), the living over them, police and soldiers on top
+            // with a pale outline so they don't vanish among the dead
             float size = Math.max(2.4f * dp, Math.min(4.2f * dp, 8 * z));
-            dots(g, cam, x0, y0, x1, y1, Ents.ZOMBIE, C_DEAD, DEAD_RIM, size);
+            dots(g, cam, x0, y0, x1, y1, Ents.ZOMBIE, z > 0.4f ? C_DEAD : 0xFFB8483E, z > 0.4f ? DEAD_RIM : 0, size * 0.9f);
             dots(g, cam, x0, y0, x1, y1, Ents.CIV, C_CIV, LIVING_LINE, size);
-            dots(g, cam, x0, y0, x1, y1, Ents.COP, C_COP, 0xFF0A1A40, size * 1.2f);
-            dots(g, cam, x0, y0, x1, y1, Ents.SOLDIER, C_ARMY, 0xFF2A2610, size * 1.2f);
+            dots(g, cam, x0, y0, x1, y1, Ents.COP, C_COP, 0xFFF2F4F8, size * 1.3f);
+            dots(g, cam, x0, y0, x1, y1, Ents.SOLDIER, C_ARMY, 0xFFF2F4F8, size * 1.3f);
             if (w.playerEnt >= 0 && e.loc[w.playerEnt] == Ents.FREE) {
                 g.color(0xFFFFE040);
                 g.strokeCircle(cam.toScreenX(e.x[w.playerEnt]), cam.toScreenY(e.y[w.playerEnt]), 9 * dp, 2 * dp);
@@ -660,8 +704,10 @@ public final class WorldView {
             n++;
         }
         if (n == 0) return;
-        g.color(rim);
-        g.points(pts, n, size + Math.max(1.5f, 1.1f * dp));
+        if (rim != 0) {
+            g.color(rim);
+            g.points(pts, n, size + Math.max(1.5f, 1.1f * dp));
+        }
         g.color(color);
         g.points(pts, n, size);
     }
@@ -948,7 +994,10 @@ public final class WorldView {
 
     private void overlays(Gfx g, Camera cam) {
         float z = cam.zoom;
-        placedN = 0;
+        // the interface's own areas are taken before any label
+        for (int i = 0; i < keepN * 4; i++) placed[i] = keep[i];
+        placedN = keepN;
+        keepN = 0;
         layers(g, cam);
         // the infection as a soft red bleed over the sectors (from far out, and where the dead are only counted)
         if (z < 0.55f && (overlay == OV_INFECTION || overlay == OV_FORCES)) {
@@ -968,7 +1017,11 @@ public final class WorldView {
             g.color(0xFFFF6060);
             g.strokeCircle(sx, sy, rad, 1.6f * dp);
             if (h.target >= 0) arrow(g, sx, sy, cam.toScreenX(h.tx), cam.toScreenY(h.ty), 0xC0FF7070, rad);
-            label(g, "Horde " + fmt(h.count), sx, sy - rad - 5 * dp, 12, 0xFFFFD0D0, Gfx.ALIGN_CENTER, true);
+            String hl = "Horde " + fmt(h.count);
+            float hw = g.textWidth(hl, 12 * dp, true) / 2 + 3 * dp;
+            float lx = Math.max(Math.max(areaX0, 0) + hw, Math.min(Math.min(areaX1, cam.sw) - hw, sx));
+            float ly = Math.max(Math.max(areaY0, 0) + 13 * dp, sy - rad - 5 * dp);
+            label(g, hl, lx, ly, 12, 0xFFFFD0D0, Gfx.ALIGN_CENTER, true);
         }
         // refugee columns
         for (Strategic.Column c : w.strat.columns) {
@@ -981,7 +1034,6 @@ public final class WorldView {
             g.fillCircle(sx, sy, rad);
             g.color(0xFF3060A0);
             g.strokeCircle(sx, sy, rad, 1.4f * dp);
-            if (z < 0.6f) label(g, people(c.count) + " refugees", sx, sy - rad - 4 * dp, 10.5f, 0xFFE8F0FF, Gfx.ALIGN_CENTER, false);
         }
         // the airliner wreck
         if (w.strat.crashX >= 0) {
@@ -996,27 +1048,6 @@ public final class WorldView {
             g.color(0xFF303030);
             g.fillRect(30 * k, -6 * k, 40 * k, 12 * k);
             g.restore();
-        }
-        // facilities: icons, greyed when overrun
-        if (z < 1.2f) {
-            for (Region.Facility f : w.r.facilities) {
-                if (f.kind == Region.F_HELIPAD || f.kind == Region.F_PARK) continue;
-                if (f.kind == Region.F_DEPOT || f.kind == Region.F_LAB) {
-                    if (z < 0.15f) continue;
-                }
-                if (z < 0.06f && f.kind != Region.F_POWER && f.kind != Region.F_BASE && f.kind != Region.F_PRISON) continue;
-                if (z < 0.12f && (f.kind == Region.F_FIRE || f.kind == Region.F_FUEL || f.kind == Region.F_WATER || f.kind == Region.F_PHONE || f.kind == Region.F_FOODW)) continue;
-                float sx = cam.toScreenX(f.x), sy = cam.toScreenY(f.y);
-                if (sx < -30 * dp || sy < -30 * dp || sx > cam.sw + 30 * dp || sy > cam.sh + 30 * dp) continue;
-                boolean on = w.strat.online[f.id];
-                float s = (z < 0.12f ? 7.5f : 9.5f) * dp;
-                facilityIcon(g, f.kind, sx, sy, on, s);
-                if (z > 0.35f && names) {
-                    String fn = on ? f.name : f.name + " (overrun)";
-                    float tw = g.textWidth(fn, 10.5f * dp, false), ly = sy + s + 12 * dp;
-                    if (place(sx - tw / 2, ly - 10 * dp, sx + tw / 2, ly + 3 * dp)) label(g, fn, sx, ly, 10.5f, on ? 0xFFFFFFFF : 0xFFFF8A80, Gfx.ALIGN_CENTER, false);
-                }
-            }
         }
         // squads as unit symbols when far out
         if (z < 0.3f) {
@@ -1056,7 +1087,7 @@ public final class WorldView {
                 g.fillCircle(sx, sy, rr);
                 g.color(col);
                 g.strokeCircle(sx, sy, rr, 1.8f * dp);
-                if (big && z > 0.06f) label(g, in.zombies >= 1000 ? (in.zombies / 1000) + "k" : in.zombies + "", sx, sy + 4 * dp, 11, 0xFFFFFFFF, Gfx.ALIGN_CENTER, true);
+                if (big && z > 0.06f) labelAlways(g, in.zombies >= 1000 ? (in.zombies / 1000) + "k" : in.zombies + "", sx, sy + 4 * dp, 11, 0xFFFFFFFF, Gfx.ALIGN_CENTER, true);
             }
         }
         if (z > 0.2f) for (Dispatch.Post p : w.disp.posts) {
@@ -1076,6 +1107,14 @@ public final class WorldView {
             dashedLine(g, cam.toScreenX(p[0]), cam.toScreenY(p[1]), gx, gy, 1.5f * dp, 6 * dp);
             flag(g, gx, gy, 0xFFFFE040);
         }
+        // the formations' symbols (drawn later, by Forces) keep their ground: names don't go under them
+        float fs = (z < 0.08f ? 6.5f : 7.5f) * dp, fhw = fs * 1.3f + 1.5f * dp, fhh = fs * 0.85f;
+        for (Forces.Formation f : w.forces.formations) {
+            if (!f.alive) continue;
+            float sx = cam.toScreenX(f.hq.x), sy = cam.toScreenY(f.hq.y);
+            if (sx < -fhw || sy < -fhh || sx > cam.sw + fhw || sy > cam.sh + fhh) continue;
+            claim(sx - fhw, sy - fhh + 0.5f * dp, sx + fhw, sy + fhh + 6 * dp);
+        }
         // place names: the most important first, and none on top of another
         if (names) {
             for (int pass = 0; pass < 4; pass++)
@@ -1090,38 +1129,125 @@ public final class WorldView {
                     else size = z < 0.4f && z > 0.07f ? 10.5f : 0;
                     if (size == 0) continue;
                     String label = s.capital ? "★ " + s.name : s.name;
-                    boolean two = (s.kind == Region.S_CITY || s.kind == Region.S_TOWN) && z < 0.2f && (s.kind == Region.S_CITY || z > 0.045f);
+                    boolean twoWant = (s.kind == Region.S_CITY || s.kind == Region.S_TOWN) && z < 0.2f && (s.kind == Region.S_CITY || z > 0.045f);
+                    boolean two = twoWant;
                     float tw = g.textWidth(label, size * dp, true);
-                    if (!place(sx - tw / 2 - 2 * dp, sy - size * dp, sx + tw / 2 + 2 * dp, sy + (two ? 12 * dp : 3 * dp))) continue;
-                    label(g, label, sx, sy, size, s.kind == Region.S_CITY ? 0xFFFFFFFF : 0xFFE8E8E8, Gfx.ALIGN_CENTER, true);
+                    // where it sits: on the place; a city's name, if a fight is marked there, just above or below it
+                    float sy0 = sy;
+                    boolean ok = false;
+                    int tries = rank <= 1 ? 5 : 1;
+                    for (int k = 0; k < tries && !ok; k++) {
+                        sy = sy0 + (k == 0 ? 0 : (k % 2 == 1 ? -1 : 1) * ((k + 1) / 2) * (size + 18) * dp);
+                        two = twoWant;
+                        if (place(sx - tw / 2 - 2 * dp, sy - size * dp, sx + tw / 2 + 2 * dp, sy + (two ? (size * 0.4f + 14) * dp : 3 * dp))) ok = true;
+                        else if (two && place(sx - tw / 2 - 2 * dp, sy - size * dp, sx + tw / 2 + 2 * dp, sy + 3 * dp)) {
+                            // no room for the second line: the name alone
+                            two = false;
+                            ok = true;
+                        }
+                    }
+                    if (!ok) continue;
+                    labelAlways(g, label, sx, sy, size, s.kind == Region.S_CITY ? 0xFFFFFFFF : 0xFFE8E8E8, Gfx.ALIGN_CENTER, true);
                     if (two) {
                         // a second line: how many live there, and how many of the dead
                         int zz = w.stats.zBySettlement[s.id];
                         String sub = people(w.stats.popBySettlement[s.id]);
                         float sy2 = sy + (size * 0.4f + 11) * dp;
                         if (w.gov.evacuating(s.id)) {
-                            label(g, sub + "  evacuating", sx, sy2, 10, 0xFFA0C8FF, Gfx.ALIGN_CENTER, false);
+                            labelAlways(g, sub + "  evacuating", sx, sy2, 10, 0xFFA0C8FF, Gfx.ALIGN_CENTER, false);
                         } else if (zz > 0) {
                             float t1 = g.textWidth(sub + "  ", 10 * dp, false), t2 = g.textWidth(people(zz) + " dead", 10 * dp, true);
                             float left = sx - (t1 + t2) / 2;
-                            label(g, sub, left, sy2, 10, 0xFFE0E0E0, Gfx.ALIGN_LEFT, false);
-                            label(g, people(zz) + " dead", left + t1, sy2, 10, 0xFFFF7A70, Gfx.ALIGN_LEFT, true);
-                        } else label(g, sub, sx, sy2, 10, 0xFFE0E0E0, Gfx.ALIGN_CENTER, false);
+                            labelAlways(g, sub, left, sy2, 10, 0xFFE0E0E0, Gfx.ALIGN_LEFT, false);
+                            labelAlways(g, people(zz) + " dead", left + t1, sy2, 10, 0xFFFF7A70, Gfx.ALIGN_LEFT, true);
+                        } else labelAlways(g, sub, sx, sy2, 10, 0xFFE0E0E0, Gfx.ALIGN_CENTER, false);
                     }
                 }
+        }
+        // then, in falling order of importance, whatever finds room: facilities, the overlays' badges, refugee
+        // columns' numbers, the states' names
+        // facilities: icons, greyed when overrun
+        if (z < 1.2f) {
+            for (Region.Facility f : w.r.facilities) {
+                if (f.kind == Region.F_HELIPAD || f.kind == Region.F_PARK) continue;
+                if (f.kind == Region.F_DEPOT || f.kind == Region.F_LAB) {
+                    if (z < 0.15f) continue;
+                }
+                if (z < 0.06f && f.kind != Region.F_POWER && f.kind != Region.F_BASE && f.kind != Region.F_PRISON) continue;
+                if (z < 0.12f && (f.kind == Region.F_FIRE || f.kind == Region.F_FUEL || f.kind == Region.F_WATER || f.kind == Region.F_PHONE || f.kind == Region.F_FOODW)) continue;
+                float sx = cam.toScreenX(f.x), sy = cam.toScreenY(f.y);
+                if (sx < -30 * dp || sy < -30 * dp || sx > cam.sw + 30 * dp || sy > cam.sh + 30 * dp) continue;
+                boolean on = w.strat.online[f.id];
+                float s = (z < 0.12f ? 7.5f : 9.5f) * dp;
+                // an icon only where it doesn't cover a name (or another icon)
+                if (!place(sx - s - dp, sy - s - dp, sx + s + dp, sy + s + dp)) continue;
+                facilityIcon(g, f.kind, sx, sy, on, s);
+                if (z > 0.35f && names) {
+                    String fn = on ? f.name : f.name + " (overrun)";
+                    float tw = g.textWidth(fn, 10.5f * dp, false), ly = sy + s + 12 * dp;
+                    if (place(sx - tw / 2, ly - 10 * dp, sx + tw / 2, ly + 3 * dp)) labelAlways(g, fn, sx, ly, 10.5f, on ? 0xFFFFFFFF : 0xFFFF8A80, Gfx.ALIGN_CENTER, false);
+                }
+            }
+        }
+        if (overlay == OV_UTIL) utilities(g, cam);
+        if (overlay == OV_SUPPLY) supplies(g, cam);
+        if (z < 0.6f) for (Strategic.Column c : w.strat.columns) {
+            if (!c.alive) continue;
+            float sx = cam.toScreenX(c.x), sy = cam.toScreenY(c.y);
+            float rad = Math.max(5 * dp, 14 * z);
+            label(g, people(c.count) + " refugees", sx, sy - rad - 4 * dp, 10.5f, 0xFFE8F0FF, Gfx.ALIGN_CENTER, false);
+        }
+        stateNames(g, cam);
+    }
+
+    /**
+     * From the city's zoom outwards the ground is a few pixels a tile, so a diagonal highway or railway painted tile by
+     * tile is a staircase. Over it, each runs as a smooth line along its graph: the railway thin and dark, the
+     * highway in asphalt with a darker edge (a blown bridge is left out).
+     */
+    private void smoothLines(Gfx g, Camera cam, float x0, float y0, float x1, float y1) {
+        float z = cam.zoom;
+        if (z >= 0.45f) return;
+        RoadGraph rail = w.r.rails;
+        if (rail != null && rail.edgeCount > 0) {
+            float lw = Math.max(1.2f * dp, 24 * z);
+            for (int pass = 0; pass < 2; pass++) {
+                g.color(pass == 0 ? 0xC0201C18 : 0xFF6A6258);
+                for (int e = 0; e < rail.edgeCount; e++) {
+                    if (!rail.ealive[e]) continue;
+                    float ax = rail.nx[rail.ea[e]], ay = rail.ny[rail.ea[e]], bx = rail.nx[rail.eb[e]], by = rail.ny[rail.eb[e]];
+                    if (Math.max(ax, bx) < x0 || Math.min(ax, bx) > x1 || Math.max(ay, by) < y0 || Math.min(ay, by) > y1) continue;
+                    g.line(cam.toScreenX(ax), cam.toScreenY(ay), cam.toScreenX(bx), cam.toScreenY(by), pass == 0 ? lw + dp : lw * 0.5f);
+                }
+            }
+        }
+        RoadGraph rg = w.r.roads;
+        for (int pass = 0; pass < 2; pass++) {
+            g.color(pass == 0 ? 0xFF2A2C30 : MapPainter.GROUND[Tile.HIGHWAY]);
+            for (int e = 0; e < rg.edgeCount; e++) {
+                if (rg.ekind[e] != RoadGraph.HIGHWAY || !rg.ealive[e]) continue;
+                float ax = rg.nx[rg.ea[e]], ay = rg.ny[rg.ea[e]], bx = rg.nx[rg.eb[e]], by = rg.ny[rg.eb[e]];
+                if (Math.max(ax, bx) < x0 || Math.min(ax, bx) > x1 || Math.max(ay, by) < y0 || Math.min(ay, by) > y1) continue;
+                float lw = Math.max(1.6f * dp, rg.ehalf[e] * 2 * z);
+                g.line(cam.toScreenX(ax), cam.toScreenY(ay), cam.toScreenX(bx), cam.toScreenY(by), pass == 0 ? lw + 1.2f * dp : lw);
+            }
         }
     }
 
     // labels already placed this frame (x0, y0, x1, y1 each), so the next ones don't land on them
     private final float[] placed = new float[4 * 256];
+    private boolean justPlaced;
     private int placedN;
 
     /** Takes a screen rectangle for a label if it's free; false if it would overlap one already placed. */
     boolean place(float x0, float y0, float x1, float y1) {
+        justPlaced = false;
+        if (x0 < areaX0 || y0 < areaY0 || x1 > areaX1 || y1 > areaY1) return false;
         for (int i = 0; i < placedN; i++) {
             int k = i * 4;
             if (x0 < placed[k + 2] && x1 > placed[k] && y0 < placed[k + 3] && y1 > placed[k + 1]) return false;
         }
+        justPlaced = true;
         if (placedN < 256) {
             int k = placedN * 4;
             placed[k] = x0;
@@ -1131,6 +1257,16 @@ public final class WorldView {
             placedN++;
         }
         return true;
+    }
+
+    /** Takes a screen rectangle whatever is there already (a mark drawn later that labels must not cover). */
+    private void claim(float x0, float y0, float x1, float y1) {
+        if (placedN >= 256) return;
+        int k = placedN++ * 4;
+        placed[k] = x0;
+        placed[k + 1] = y0;
+        placed[k + 2] = x1;
+        placed[k + 3] = y1;
     }
 
     /** An arrow from a point to another, starting outside a radius. */
@@ -1193,9 +1329,7 @@ public final class WorldView {
             heat.kindFor(overlay);
             heat.draw(g, cam, 1);
         }
-        if (overlay == OV_UTIL) utilities(g, cam);
-        if (overlay == OV_SUPPLY) supplies(g, cam);
-        // state borders and names from far out
+        // state borders from far out (their names come last, where there's room)
         if (z < 0.2f && w.r.states.size() > 1) {
             float lw = 1.4f * dp;
             for (int pass = 0; pass < 2; pass++) {
@@ -1228,11 +1362,15 @@ public final class WorldView {
                         stateY[k] /= cnt[k];
                     }
                 }
-                for (Region.State st : w.r.states) {
-                    label(g, spaced(st.name.toUpperCase()), cam.toScreenX(stateX[st.id]), cam.toScreenY(stateY[st.id]) + 34 * dp, 12, 0x90F0E8D8, Gfx.ALIGN_CENTER, true);
-                }
             }
         }
+    }
+
+    /** The states' names, spaced out, from far out: the least important label, only where there's room. */
+    private void stateNames(Gfx g, Camera cam) {
+        if (cam.zoom >= 0.08f || stateX == null || w.r.states.size() < 2) return;
+        for (Region.State st : w.r.states)
+            label(g, spaced(st.name.toUpperCase()), cam.toScreenX(stateX[st.id]), cam.toScreenY(stateY[st.id]) + 34 * dp, 12, 0x90F0E8D8, Gfx.ALIGN_CENTER, true);
     }
 
     private final StringBuilder spacedSb = new StringBuilder();
@@ -1266,8 +1404,9 @@ public final class WorldView {
         float r = 7 * dp;
         for (Region.Settlement s : w.r.settlements) {
             if (s.kind != Region.S_CITY && s.kind != Region.S_TOWN) continue;
-            float x = cam.toScreenX(s.cx * 16f), y = cam.toScreenY(s.cy * 16f) + 22 * dp;
+            float x = cam.toScreenX(s.cx * 16f), y = cam.toScreenY(s.cy * 16f) + 31 * dp;
             if (x < -40 * dp || y < -40 * dp || x > cam.sw + 40 * dp || y > cam.sh + 40 * dp) continue;
+            if (!place(x - r * 3.6f, y - r - 2 * dp, x + r * 3.6f, y + r + 2 * dp)) continue;
             for (int k = 0; k < 3; k++) {
                 boolean on = k == 0 ? s.grid < 0 || w.strat.gridOn[s.grid] : k == 1 ? s.water < 0 || s.water >= waterNet.length || waterNet[s.water]
                         : s.phone < 0 || s.phone >= phoneNet.length || phoneNet[s.phone];
@@ -1304,6 +1443,7 @@ public final class WorldView {
             float x = cam.toScreenX(f.x), y = cam.toScreenY(f.y);
             if (x < -30 * dp || y < -30 * dp || x > cam.sw + 30 * dp || y > cam.sh + 30 * dp) continue;
             float pw = bw * 3 + gap * 4, ph = bh + gap * 2;
+            if (!place(x - pw / 2, y - ph, x + pw / 2, y)) continue;
             g.color(0xD0000000);
             g.fillRoundRect(x - pw / 2, y - ph, pw, ph, 3 * dp);
             for (int k = 0; k < 3; k++) {

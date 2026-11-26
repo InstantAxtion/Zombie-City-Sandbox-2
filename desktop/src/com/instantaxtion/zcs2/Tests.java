@@ -850,6 +850,11 @@ public final class Tests {
                 check(g.applyCode(code), "code refused: " + code);
                 check(g.challengeCode().equals(code), "code didn't come back: " + g.challengeCode() + " vs " + code);
                 check(!g.applyCode("nonsense"), "nonsense accepted");
+                // a role the scenario doesn't offer, or one this game doesn't know, is refused with a note, not swapped quietly
+                check(g.applyCode("ZC2-1536-0-77-survivor-president"), "survivor code refused");
+                check(g.ngRole == -1 && g.codeNote != null && g.codeNote.contains("President"), "a president in a survivor scenario: " + g.ngRole + ", " + g.codeNote);
+                check(g.applyCode("ZC2-1536-0-77-survivor-pilot"), "unknown-role code refused");
+                check(g.ngRole == -1 && g.codeNote != null && g.codeNote.contains("pilot"), "an unknown role wasn't reported: " + g.codeNote);
                 // a scenario from the editor, saved, read back, played
                 Content.Scenario sc = new Content.Scenario();
                 sc.id = "custom1";

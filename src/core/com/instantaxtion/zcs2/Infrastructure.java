@@ -354,6 +354,8 @@ public final class Infrastructure extends Module {
             if (x < -60 * dp || y < -40 * dp || x > cam.sw + 60 * dp || y > cam.sh + 40 * dp) continue;
             int n = (food ? 1 : 0) + (dry ? 1 : 0) + (phone ? 1 : 0);
             float bx = x - (n - 1) * r * 1.2f;
+            // only where they cover no name or other mark
+            if (!view.place(bx - r * 1.3f, y - r * 1.3f, bx + (n - 1) * r * 2.4f + r * 1.3f, y + r * 1.3f)) continue;
             if (food) {
                 badge(g, bx, y, r, shortage[st] == 2 ? 0xFFE04030 : 0xFFE0A030, "F");
                 bx += r * 2.4f;

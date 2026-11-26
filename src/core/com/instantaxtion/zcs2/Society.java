@@ -524,7 +524,8 @@ public final class Society extends Module {
         float z = cam.zoom, dp = cam.dp;
         if (z < 0.03f) return;
         Sectors sec = w.sec;
-        if (z < 1.2f && z > 0.05f) {
+        // holdouts only from close enough that they don't tile the map, and never over a label
+        if (z < 1.2f && z > 0.2f) {
             float cs = Region.SECT * Tile.SIZE;
             int sx0 = Math.max(0, (int) (cam.x0() / cs)), sy0 = Math.max(0, (int) (cam.y0() / cs));
             int sx1 = Math.min(sec.sw - 1, (int) (cam.x1() / cs)), sy1 = Math.min(sec.sh - 1, (int) (cam.y1() / cs));
@@ -535,6 +536,7 @@ public final class Society extends Module {
                     float x = cam.toScreenX(sec.cx(s)), y = cam.toScreenY(sec.cy(s));
                     // a barricaded holdout: a striped bar
                     float hw = 10 * dp, hh = 4 * dp;
+                    if (!view.place(x - hw - dp, y - hh - dp, x + hw + dp, y + hh + dp)) continue;
                     g.color(0xFF101010);
                     g.fillRect(x - hw - dp, y - hh - dp, hw * 2 + 2 * dp, hh * 2 + 2 * dp);
                     for (int k = 0; k < 4; k++) {

@@ -139,7 +139,8 @@ final class DirectorScreens {
         frame = Math.max(0, Math.min(n - 1, frame));
         boolean land = W > H * 1.15f;
         float size = land ? Math.min(H - ui.dp(70), W * 0.55f) : Math.min(W - m * 2, H - ui.dp(260));
-        float x0 = land ? m : (W - size) / 2, y0 = ui.dp(60);
+        // upright, the map and its controls sit in the middle of the screen, not at the top of an empty one
+        float x0 = land ? m : (W - size) / 2, y0 = land ? ui.dp(60) : Math.max(ui.dp(60), (H - size - ui.dp(180)) / 2 + ui.dp(20));
         g.image(g0.view.map.regionImage, x0, y0, size, size);
         g.color(0x70000000);
         g.fillRect(x0, y0, size, size);
@@ -179,10 +180,16 @@ final class DirectorScreens {
         g.color(Ui.TEXT);
         g.text(Game.clockAt(t), cx, y, ui.dp(Ui.L + 3), Gfx.ALIGN_LEFT, true);
         y += ui.dp(24);
+        // the hours kept are rounded (a byte a sector); the latest is the count the game has now, as on the HUD
+        boolean now = frame == n - 1;
+        if (now) {
+            dead = w.totalZombies();
+            people = w.livingCivilians();
+        }
         g.color(0xFFFF8080);
-        g.text("about " + WorldView.people(dead) + " dead", cx, y, ui.dp(Ui.M), Gfx.ALIGN_LEFT, true);
+        g.text((now ? "" : "about ") + WorldView.people(dead) + " dead", cx, y, ui.dp(Ui.M), Gfx.ALIGN_LEFT, true);
         g.color(0xFFE8E0C8);
-        g.text("about " + WorldView.people(people) + " people", cx + cw, y, ui.dp(Ui.M), Gfx.ALIGN_RIGHT, false);
+        g.text((now ? "" : "about ") + WorldView.people(people) + " people", cx + cw, y, ui.dp(Ui.M), Gfx.ALIGN_RIGHT, false);
         y += ui.dp(26);
         // the scrubber: a track with a mark at each day, and a knob
         float bw = cw, ty = y + ui.dp(8);
@@ -261,20 +268,35 @@ final class DirectorScreens {
                 {"ed:days", "Days", DAYS[edDays] + ""},
                 {"ed:season", "Season", SEASON_NAMES[edSeason]},
                 {"ed:role", "Play as", Roles.NAMES[edRole]}};
-        float rh = ui.dp(40);
+        // sideways: the settings and Save on the left, the map on the right; upright: one above the other
+        boolean land = W > H * 1.15f;
+        float startH = ui.dp(48);
+        float rh = ui.dp(land ? 36 : 40);
+        float colW = land ? Math.min(ui.dp(360), (W - m * 3) / 2) : W - m * 2;
         for (String[] r : rows) {
             g.color(Ui.TEXT);
-            g.text(r[1], m, y + rh / 2 + ui.dp(5), ui.dp(13), Gfx.ALIGN_LEFT, false);
-            ui.button(r[0], W - m - ui.dp(170), y + ui.dp(3), ui.dp(170), rh - ui.dp(6), r[2], false, 12);
+            g.text(Ui.fit(g, r[1], colW - ui.dp(160), ui.dp(13), false), m, y + rh / 2 + ui.dp(5), ui.dp(13), Gfx.ALIGN_LEFT, false);
+            ui.button(r[0], m + colW - ui.dp(150), y + ui.dp(3), ui.dp(150), rh - ui.dp(6), r[2], false, 12);
             y += rh;
         }
-        g.color(Ui.DIM);
-        g.text(edX < 0 ? "Tap the map where it starts (or it starts somewhere random)" : "It starts where the red ring is. Tap to move it.", m, y + ui.dp(14), ui.dp(11), Gfx.ALIGN_LEFT, false);
-        y += ui.dp(22);
-        float startH = ui.dp(48);
-        float ps = Math.min(W - m * 2, H - y - startH - ui.dp(20));
-        mapX = (W - ps) / 2;
-        mapY = y;
+        String hint = edX < 0 ? "Tap the map where it starts (or it starts somewhere random)" : "It starts where the red ring is. Tap to move it.";
+        float ps;
+        if (land) {
+            float mx = m * 2 + colW, top = ui.dp(10);
+            float hw = W - mx - m;
+            g.color(Ui.DIM);
+            g.text(Ui.fit(g, hint, hw, ui.dp(11), false), mx, top + ui.dp(12), ui.dp(11), Gfx.ALIGN_LEFT, false);
+            ps = Math.min(hw, H - top - ui.dp(22) - m);
+            mapX = mx + (hw - ps) / 2;
+            mapY = top + ui.dp(22);
+        } else {
+            g.color(Ui.DIM);
+            g.text(Ui.fit(g, hint, W - m * 2, ui.dp(11), false), m, y + ui.dp(14), ui.dp(11), Gfx.ALIGN_LEFT, false);
+            y += ui.dp(22);
+            ps = Math.min(W - m * 2, H - y - startH - ui.dp(20));
+            mapX = (W - ps) / 2;
+            mapY = y;
+        }
         mapS = ps;
         if (ps > ui.dp(60)) {
             g0.drawPreview(g, mapX, mapY, ps);
@@ -285,7 +307,8 @@ final class DirectorScreens {
                 g.fillCircle(mapX + edX * ps, mapY + edY * ps, ui.dp(3));
             }
         }
-        ui.bigButton("ed:save", m, H - startH - ui.dp(12), W - m * 2, startH, "Save it", Ui.ACCENT);
+        float sy = Math.max(H - startH - ui.dp(12), land ? y + ui.dp(8) : 0);
+        ui.bigButton("ed:save", m, sy, colW, startH, "Save it", Ui.ACCENT);
     }
 
     /** Builds the scenario the editor describes. */

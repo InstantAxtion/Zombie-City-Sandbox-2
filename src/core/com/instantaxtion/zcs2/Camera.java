@@ -49,10 +49,72 @@ public final class Camera {
         return (insetT + (sh - insetT - insetB) / 2f - sh / 2f) / z;
     }
 
-    /** Flies to show the whole map in the free area. */
+    // where the land is, coarsely (landN x landN cells over the map), for framing the whole country
+    private boolean[] land;
+    private int landN, landCount;
+    private float landCX, landCY;
+
+    /** Tells the camera where the land is (true for a cell with land in it), for {@link #countryZoom()}. */
+    public void setLand(boolean[] cells, int n) {
+        land = cells;
+        landN = n;
+        landCount = 0;
+        double sx = 0, sy = 0;
+        for (int i = 0; i < n * n; i++) {
+            if (!cells[i]) continue;
+            landCount++;
+            sx += i % n + 0.5;
+            sy += i / n + 0.5;
+        }
+        landCX = landCount > 0 ? (float) (sx / landCount / n) : 0.5f;
+        landCY = landCount > 0 ? (float) (sy / landCount / n) : 0.5f;
+    }
+
+    private float viewX, viewY;
+
+    /**
+     * The zoom for "the whole country". Sideways, or on a squarish screen, that's the whole map. On a tall screen the
+     * square map would leave bands of nothing above and below it, so the zoom goes up as far as fitting the map's
+     * height when that frames the land better: more of the screen is land, for a little of the country left to pan
+     * to. Also leaves where to look in viewX, viewY (the free area's middle, in the world).
+     */
+    public float countryZoom() {
+        float fw = Math.max(sw * 0.3f, sw - insetL - insetR), fh = Math.max(sh * 0.3f, sh - insetT - insetB);
+        float zFit = fitZoom();
+        viewX = viewY = worldPx / 2f;
+        // upright only: sideways the rail and the sheets already frame the square map well enough, and cropping
+        // half the country off the top and bottom would hide too much of it
+        if (land == null || landCount == 0 || fh < fw * 1.1f) return zFit;
+        float zTall = fh / worldPx;
+        float best = zFit, bestScore = -1, bestX = viewX;
+        for (int k = 0; k <= 8; k++) {
+            float z = (float) (zFit * Math.pow(zTall / zFit, k / 8.0));
+            float hw = Math.min(worldPx, fw / z) / worldPx / 2, hh = Math.min(worldPx, fh / z) / worldPx / 2; // in map units
+            float cx = Math.max(hw, Math.min(1 - hw, landCX)), cy = Math.max(hh, Math.min(1 - hh, landCY));
+            int seen = 0;
+            int x0 = (int) Math.floor((cx - hw) * landN), x1 = (int) Math.ceil((cx + hw) * landN);
+            int y0 = (int) Math.floor((cy - hh) * landN), y1 = (int) Math.ceil((cy + hh) * landN);
+            for (int y = Math.max(0, y0); y < Math.min(landN, y1); y++)
+                for (int x = Math.max(0, x0); x < Math.min(landN, x1); x++) if (land[y * landN + x]) seen++;
+            // how much of the screen is land, and how much of the country is on the screen
+            float screenCells = (fw / z / worldPx * landN) * (fh / z / worldPx * landN);
+            float cover = Math.min(1, seen / screenCells), share = seen / (float) landCount;
+            float score = cover * (float) Math.sqrt(share);
+            if (score > bestScore + 1e-4f) {
+                bestScore = score;
+                best = z;
+                bestX = cx * worldPx;
+                viewY = cy * worldPx;
+            }
+        }
+        viewX = bestX;
+        return best;
+    }
+
+    /** Flies to show the whole country in the free area (see {@link #countryZoom()}); it can be panned from there. */
     public void showAll() {
-        float z = fitZoom();
-        flyTo(worldPx / 2f - freeOffX(z), worldPx / 2f - freeOffY(z), z);
+        float z = countryZoom();
+        flyTo(viewX - freeOffX(z), viewY - freeOffY(z), z);
     }
 
     public float toScreenX(float wx) {

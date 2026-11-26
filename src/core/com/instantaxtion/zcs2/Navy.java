@@ -379,6 +379,8 @@ public final class Navy extends Module {
             float sx = cam.toScreenX(s.x), sy = cam.toScreenY(s.y);
             if (sx < -100 * dp || sy < -100 * dp || sx > cam.sw + 100 * dp || sy > cam.sh + 100 * dp) continue;
             float L = Math.max(22 * dp, (vt != null ? vt.length : 110) * z), W = Math.max(5 * dp, (vt != null ? vt.width : 22) * z);
+            // from far out a ship is a mark like any other: left out where it would cover a name
+            if (z < 0.3f && !view.place(sx - L * 0.55f, sy - L * 0.3f, sx + L * 0.55f, sy + L * 0.3f)) continue;
             g.save();
             g.translate(sx, sy);
             g.rotate(s.head);
