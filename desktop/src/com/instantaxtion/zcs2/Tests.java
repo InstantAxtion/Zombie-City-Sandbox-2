@@ -1127,6 +1127,120 @@ public final class Tests {
                 }
             }
         });
+        test("street: cars drive round corners to where they're sent, never in circles", new T() {
+            public void run() {
+                World w = game(31, 1024, "sandbox", 1);
+                RoadGraph g = w.r.roads;
+                Region.Settlement c = w.r.city();
+                java.util.List<Integer> nodes = new java.util.ArrayList<Integer>();
+                for (int n = 0; n < g.nodeCount; n++) if (g.nset[n] == c.id && g.nodeLive(n)) nodes.add(n);
+                check(nodes.size() > 20, "too few junctions in the city");
+                int cars = 24;
+                int[] v = new int[cars];
+                for (int k = 0; k < cars; k++) {
+                    int a = nodes.get(Rng.hashInt(77, k, 1, nodes.size())), b = nodes.get(Rng.hashInt(77, k, 2, nodes.size()));
+                    v[k] = w.veh.add(w.c.vtype("patrol_car"), g.nx[a], g.ny[a], 0, -1);
+                    w.veh.driveTo(v[k], g.nx[b], g.ny[b], 0);
+                }
+                float[][] hx = new float[cars][20], hy = new float[cars][20], hh = new float[cars][20];
+                int circling = 0;
+                for (int sec = 0; sec < 150; sec++) {
+                    play(w, 1, false);
+                    for (int k = 0; k < cars; k++) {
+                        int q = sec % 20;
+                        hx[k][q] = w.veh.x[v[k]];
+                        hy[k][q] = w.veh.y[v[k]];
+                        hh[k][q] = w.veh.head[v[k]];
+                        if (sec < 20 || w.veh.state[v[k]] != Vehicles.V_DRIVE) continue;
+                        float turn = 0;
+                        for (int j = 1; j < 20; j++) {
+                            float dh = hh[k][(sec + 1 + j) % 20] - hh[k][(sec + j) % 20];
+                            while (dh > Math.PI) dh -= 2 * Math.PI;
+                            while (dh < -Math.PI) dh += 2 * Math.PI;
+                            turn += dh;
+                        }
+                        float net = (float) Math.hypot(hx[k][q] - hx[k][(sec + 1) % 20], hy[k][q] - hy[k][(sec + 1) % 20]);
+                        if (Math.abs(turn) > 2 * Math.PI && net < 150) circling++;
+                    }
+                }
+                int there = 0;
+                for (int k = 0; k < cars; k++) if (w.veh.state[v[k]] != Vehicles.V_DRIVE) there++;
+                check(circling == 0, circling + " car-seconds spent going round in circles");
+                check(there >= cars * 9 / 10, "only " + there + " of " + cars + " cars got there in 150 s");
+                w.shutdown();
+            }
+        });
+        test("street: stations and bases send their people out onto open ground", new T() {
+            public void run() {
+                World w = game(6, 1024, "sandbox", 1);
+                int tried = 0;
+                for (int fi = 0; fi < w.r.facilities.size(); fi++) {
+                    Region.Facility f = w.r.facilities.get(fi);
+                    if (f.pool == null) continue;
+                    for (Content.SquadT t : w.c.squads) {
+                        boolean home = false;
+                        for (String h : t.homes) if (h.equals(Forces.homeKind(f))) home = true;
+                        if (!home) continue;
+                        Squads.Squad s = w.forces.deploy(f, t);
+                        if (s == null) continue;
+                        tried++;
+                        for (int k = 0; k < s.n; k++) {
+                            int m = s.mem[k];
+                            check(w.r.walkablePx(w.e.x[m], w.e.y[m]), t.id + " from " + f.name + " put down inside " + Tile.NAMES[w.r.tileAtPx(w.e.x[m], w.e.y[m])]);
+                        }
+                        if (s.vehicle >= 0) {
+                            int vt = w.r.tileAtPx(w.veh.x[s.vehicle], w.veh.y[s.vehicle]);
+                            check(Tile.walkable(vt), t.id + "'s vehicle from " + f.name + " put down on " + Tile.NAMES[vt]);
+                        }
+                        w.forces.standDown(s);
+                    }
+                }
+                check(tried > 10, "only " + tried + " squads deployed");
+                check(Audit.check(w).isEmpty(), Audit.check(w));
+                w.shutdown();
+            }
+        });
+        test("street: the response goes home and stands down, and never drives off empty", new T() {
+            public void run() {
+                World w = Setup.newGame(content, 1024, RegionGen.COAST, 31, content.scenario("sandbox"), 2, Roles.GOD, 60000);
+                float x = Setup.originX, y = Setup.originY;
+                Tools.paintZombies(w, x, y, 500, 400, -1);
+                int empty = 0, inBuilding = 0;
+                for (int sec = 0; sec < 600; sec++) {
+                    float cx = x, cy = y;
+                    for (Dispatch.Incident in : w.disp.incidents)
+                        if (in.open) {
+                            cx = in.x;
+                            cy = in.y;
+                            break;
+                        }
+                    camOver(w, cx, cy);
+                    play(w, 1, sec % 30 == 0);
+                    for (int v = 0; v < w.veh.top; v++)
+                        if (w.veh.state[v] == Vehicles.V_DRIVE && w.veh.squad[v] >= 0 && w.veh.crewN[v] == 0 && w.veh.type(v).seats > 0) empty++;
+                    for (Squads.Squad s : w.sq.list) {
+                        if (!s.alive) continue;
+                        for (int k = 0; k < s.n; k++) {
+                            int m = s.mem[k];
+                            if (w.e.loc[m] == Ents.FREE && !w.r.walkablePx(w.e.x[m], w.e.y[m])) inBuilding++;
+                        }
+                    }
+                }
+                check(w.totalZombies() == 0, "still " + w.totalZombies() + " of the dead after 10 minutes");
+                check(empty <= 10, empty + " vehicle-seconds driving for a squad with nobody in it");
+                check(inBuilding <= 20, inBuilding + " officer-seconds inside walls");
+                int out = 0;
+                for (Squads.Squad s : w.sq.list)
+                    if (s.alive && !s.player && s.order != Squads.O_PATROL && s.order != Squads.O_GUARD) out++;
+                check(out == 0, out + " squads still out ten minutes after it began (the dead were gone long before)");
+                int parked = 0;
+                for (int v = 0; v < w.veh.top; v++)
+                    if (w.veh.state[v] == Vehicles.V_ARRIVED && w.veh.squad[v] < 0 && w.veh.type(v).seats > 0 && !w.veh.type(v).flies) parked++;
+                check(parked == 0, parked + " abandoned squad vehicles left in the streets");
+                check(Audit.check(w).isEmpty(), Audit.check(w));
+                w.shutdown();
+            }
+        });
         test("perf: 20,000 of the dead", new T() {
             public void run() {
                 World w = game(2, 1024, "sandbox", 4);
