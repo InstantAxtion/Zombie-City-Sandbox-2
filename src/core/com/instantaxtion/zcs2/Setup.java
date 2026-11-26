@@ -288,7 +288,7 @@ public final class Setup {
                 if (set >= 0 && r.settlements.get(set).capital || capSecs.isEmpty()) continue;
                 int fled = w.sec.popIn[s] * 4 / 5;
                 if (fled <= 0) continue;
-                w.sec.popIn[s] -= fled;
+                w.sec.popIn[w.sec.touch(s)] -= fled;
                 w.sec.popIn[w.sec.touch(capSecs.get(s % capSecs.size()))] += fled;
                 if (set >= 0) w.strat.refuge[set][cap.id] += fled;
             }
@@ -347,7 +347,7 @@ public final class Setup {
                     if (!r.walkablePx(x, y)) continue;
                     int from = fullest(w, s);
                     if (from < 0) break;
-                    w.sec.popIn[from]--;
+                    w.sec.popIn[w.sec.touch(from)]--;
                     int i = w.spawnCiv(x, y, civ);
                     w.e.flags[i] |= Ents.F_AMBIENT;
                     w.e.timer[i] = 400 + Rng.unit(w.seed, k, 3) * 400;
@@ -437,7 +437,7 @@ public final class Setup {
                     if (to == null) continue;
                     int fled = w.sec.popIn[s] * 2 / 3;
                     int ts = r.sectorOfPx(to.cx * 16f, to.cy * 16f);
-                    w.sec.popIn[s] -= fled;
+                    w.sec.popIn[w.sec.touch(s)] -= fled;
                     w.sec.popIn[w.sec.touch(ts)] += fled;
                     w.strat.refuge[st][to.id] += fled;
                 }
@@ -539,7 +539,7 @@ public final class Setup {
         for (int k = 0; k < homes && !cand.isEmpty(); k++) {
             int s = cand.remove(Rng.hashInt(w.seed, k, salt, cand.size()));
             int m = Math.min(w.sec.popIn[s], lo + Rng.hashInt(w.seed, k, salt + 1, hi - lo + 1));
-            w.sec.popIn[s] -= m;
+            w.sec.popIn[w.sec.touch(s)] -= m;
             w.sec.inf[w.sec.touch(s)] += m;
         }
     }

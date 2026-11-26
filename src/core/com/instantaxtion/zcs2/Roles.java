@@ -428,7 +428,7 @@ public final class Roles extends Module {
                 for (int s : dl) {
                     if (w.sec.zIn[s] > 0 || w.sec.popIn[s] == 0) continue;
                     int m = Math.min(w.sec.popIn[s], (int) (w.sec.popIn[s] * share));
-                    w.sec.popIn[s] -= m;
+                    w.sec.popIn[w.sec.touch(s)] -= m;
                     moved += m;
                 }
             }

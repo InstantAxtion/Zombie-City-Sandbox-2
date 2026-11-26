@@ -258,7 +258,7 @@ final class Combat {
                     if (b >= 0) {
                         int s = w.r.sectorOfPx(w.doorX[b] >= 0 ? w.doorX[b] : x, w.doorY[b] >= 0 ? w.doorY[b] : y);
                         int lost = Math.min(w.sec.popIn[s], w.r.bres[b]);
-                        w.sec.popIn[s] -= lost;
+                        w.sec.popIn[w.sec.touch(s)] -= lost;
                         w.stats.civDeaths += lost;
                         int zl = Math.min(w.sec.zIn[s], Math.max(1, w.sec.zIn[s] / 8));
                         w.sec.zIn[s] -= zl;

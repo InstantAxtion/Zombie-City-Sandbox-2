@@ -71,7 +71,7 @@ public final class Director extends Module {
     public Director(World w) {
         super(w);
         SectorIndex idx = w.sec.idx;
-        coarse = w.sec.n > SectorIndex.NATIONAL;
+        coarse = w.national;
         lapseN = coarse ? idx.dn : w.sec.n;
         lapseW = coarse ? idx.dw : w.sec.sw;
         lapseH = coarse ? idx.dh : w.sec.sh;

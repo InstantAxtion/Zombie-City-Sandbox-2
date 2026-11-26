@@ -4,7 +4,7 @@ package com.instantaxtion.zcs2;
  * What makes the once-a-second work scale with what is happening rather than with the size of the map
  * (docs/SCALE_PLAN.md, 2.5):
  * - each settlement's sectors as a sorted list, so "the sectors of town st" costs that town's size, not the map's;
- *   and the sectors outside any settlement where people may be ("rural"), so the totals need not scan the map;
+ *   and running totals of the people in sleeping districts, so the totals need not scan the map;
  * - districts of 8x8 sectors with sums of the dead, the living and the infected;
  * - which districts are awake this second. A district is awake if any of its sectors (or of the eight districts
  *   round it) has anything the once-a-second work would change: the dead or the infected indoors, a hot timer,
@@ -27,8 +27,6 @@ public final class SectorIndex {
     /** Stagger quiet districts in fast-forward: on by default on national maps only. */
     public boolean stagger;
     public static final int STAGGER = 4;
-    /** Above this many sectors a map is national: staggering, and the Director's district-sized heatmaps. */
-    public static final int NATIONAL = 50000;
 
     private final World w;
     private final Sectors sec;
@@ -38,9 +36,12 @@ public final class SectorIndex {
     /** Residents' homes in each settlement (fixed at the start). */
     public long[] homeBySettlement;
     /** Sectors outside every settlement that may hold people (homes there, or people put there since). */
-    private int[] rural = new int[16];
-    private int ruralN;
-    private final boolean[] inRural;
+    /**
+     * People indoors (popIn) in sleeping districts, by settlement and in all. Every write to popIn wakes the
+     * sector's district first (decrements too), so a sleeping district's people stay exactly as counted here.
+     */
+    private long[] frozenPop = new long[0];
+    private long frozenTotal;
     /** Sums by district, as of the start of the second (or the last time the district was awake). */
     public final int[] dead, living, infected;
     /** Awake this second, by district; and how many are awake in each row of districts. */
@@ -76,8 +77,7 @@ public final class SectorIndex {
         due = new boolean[dn];
         scale = new byte[dn];
         act = new boolean[dn];
-        inRural = new boolean[n];
-        stagger = n > NATIONAL;
+        stagger = w.national;
         reindex();
     }
 
@@ -124,20 +124,15 @@ public final class SectorIndex {
     /** Everything may have changed (a new game being set up, a save loaded): every district wakes. */
     public void reset() {
         all = true;
-        for (int d = 0; d < dn; d++) setAwake(d, true);
-        for (int k = 0; k < ruralN; k++) inRural[rural[k]] = false;
-        ruralN = 0;
-        for (int s = 0; s < n; s++)
-            if (sec.settlement[s] < 0 && (sec.home[s] > 0 || sec.popIn[s] > 0 || sec.inf[s] > 0)) addRural(s);
+        java.util.Arrays.fill(awake, true);
+        for (int dy = 0; dy < dh; dy++) rowAwake[dy] = dw;
+        awakeN = dn;
+        java.util.Arrays.fill(due, true);
+        java.util.Arrays.fill(scale, (byte) 1);
+        frozenPop = new long[bySettlement.length];
+        frozenTotal = 0;
         camN = 0;
         for (int s = 0; s < n; s++) if (sec.cam[s]) addCam(s);
-    }
-
-    private void addRural(int s) {
-        if (inRural[s]) return;
-        inRural[s] = true;
-        if (ruralN == rural.length) rural = java.util.Arrays.copyOf(rural, ruralN * 2);
-        rural[ruralN++] = s;
     }
 
     private void addCam(int s) {
@@ -147,6 +142,17 @@ public final class SectorIndex {
 
     private void setAwake(int d, boolean on) {
         if (awake[d] == on) return;
+        // its people leave the frozen totals as it wakes, and join them as it sleeps
+        int x0 = (d % dw) << SHIFT, y0 = (d / dw) << SHIFT, x1 = Math.min(sw, x0 + D), y1 = Math.min(sh, y0 + D);
+        int sign = on ? -1 : 1;
+        for (int y = y0; y < y1; y++)
+            for (int s = y * sw + x0, e = y * sw + x1; s < e; s++) {
+                int p = sec.popIn[s];
+                if (p == 0) continue;
+                frozenTotal += sign * p;
+                int st = sec.settlement[s];
+                if (st >= 0) frozenPop[st] += sign * p;
+            }
         awake[d] = on;
         rowAwake[d / dw] += on ? 1 : -1;
         awakeN += on ? 1 : -1;
@@ -168,7 +174,6 @@ public final class SectorIndex {
             due[d] = true;
             scale[d] = 1;
         }
-        if (!inRural[s] && sec.settlement[s] < 0) addRural(s);
     }
 
     public boolean awake(int s) {
@@ -281,14 +286,24 @@ public final class SectorIndex {
 
     // ------------------------------------------------------------------ the people, wherever they may be
 
-    /** Sum of popIn and (int) inf over every sector that may hold anyone (the same as over the whole map). */
+    /** Sum of popIn and (int) inf over the map: the frozen total, and the awake sectors (only they hold the infected). */
     public int totalPop() {
-        int t = 0;
+        long t = frozenTotal;
         int[] p = sec.popIn;
         float[] inf = sec.inf;
-        for (int[] l : bySettlement) for (int s : l) t += p[s] + (int) inf[s];
-        for (int k = 0; k < ruralN; k++) t += p[rural[k]] + (int) inf[rural[k]];
-        return t;
+        for (int s = first(); s >= 0; s = next(s)) t += p[s] + (int) inf[s];
+        return (int) t;
+    }
+
+    /** popIn summed by settlement into out (cleared first): frozen totals and the awake sectors. */
+    public void popBySettlement(int[] out) {
+        int m = Math.min(out.length, frozenPop.length);
+        java.util.Arrays.fill(out, 0);
+        for (int st = 0; st < m; st++) out[st] = (int) frozenPop[st];
+        for (int s = first(); s >= 0; s = next(s)) {
+            int st = sec.settlement[s];
+            if (st >= 0 && st < out.length) out[st] += sec.popIn[s];
+        }
     }
 
     /** Sum of zIn over the map (only awake sectors can hold any). */
@@ -418,18 +433,19 @@ public final class SectorIndex {
         return false;
     }
 
-    /** Tests: every sleeping sector is quiet (else a write somewhere is missing its poke). */
+    /** Tests: every sleeping sector is quiet (else a write somewhere is missing its poke), and the frozen totals hold. */
     private void check() {
+        long total = 0;
+        long[] by = new long[frozenPop.length];
         for (int s = 0; s < n; s++) {
             if (awake[district(s)]) continue;
             if (!quiet(s))
                 throw new IllegalStateException("sector " + s + " asleep but not quiet: zIn " + sec.zIn[s] + " inf " + sec.inf[s] + " hot " + sec.hot[s] + " panic "
                         + sec.panic[s] + " firstZ " + sec.firstZ[s] + " at t=" + w.time);
-            if (sec.settlement[s] < 0 && !inRural[s] && (sec.popIn[s] > 0 || sec.inf[s] > 0))
-                throw new IllegalStateException("sector " + s + " holds people but isn't listed");
+            total += sec.popIn[s];
+            if (sec.settlement[s] >= 0) by[sec.settlement[s]] += sec.popIn[s];
         }
-        for (int s = 0; s < n; s++)
-            if (sec.settlement[s] < 0 && !inRural[s] && (sec.popIn[s] > 0 || sec.inf[s] > 0))
-                throw new IllegalStateException("sector " + s + " holds people but isn't listed (popIn " + sec.popIn[s] + ") at t=" + w.time);
+        if (total != frozenTotal || !java.util.Arrays.equals(by, frozenPop))
+            throw new IllegalStateException("people in sleeping districts " + total + " but counted " + frozenTotal + " at t=" + w.time);
     }
 }

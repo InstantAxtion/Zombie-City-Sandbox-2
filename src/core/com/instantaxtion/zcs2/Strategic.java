@@ -64,7 +64,7 @@ public final class Strategic {
             latent.remove(k);
             int s = (int) l[0];
             int m = Math.min(w.sec.popIn[s], (int) l[1]);
-            w.sec.popIn[s] -= m;
+            w.sec.popIn[w.sec.touch(s)] -= m;
             w.sec.inf[w.sec.touch(s)] += m;
             w.stats.infectedTotal += m;
         }
@@ -338,7 +338,7 @@ public final class Strategic {
             boolean town = stl >= 0 && (w.r.settlements.get(stl).kind == Region.S_CITY || w.r.settlements.get(stl).kind == Region.S_TOWN);
             if (marching && !town && sec.popIn[s] > 0 && sec.hot[s] <= 0 && !sec.cam[s]) {
                 int bitten = Math.min(sec.popIn[s], (int) (sec.popIn[s] * 0.02f * dt));
-                sec.popIn[s] -= bitten;
+                sec.popIn[sec.touch(s)] -= bitten;
                 sec.inf[sec.touch(s)] += bitten;
                 w.stats.infectedTotal += bitten;
                 if (stl >= 0) w.stats.lostBySettlement[stl] += bitten;
@@ -639,7 +639,7 @@ public final class Strategic {
                 if (sec.popIn[s] == 0 || sec.zIn[s] > 0) continue;
                 float want = sec.popIn[s] * share;
                 int m = Math.min(sec.popIn[s], (int) want + (Rng.unit(w.seed, w.tick, s) < want % 1f ? 1 : 0));
-                sec.popIn[s] -= m;
+                sec.popIn[sec.touch(s)] -= m;
                 moved += m;
                 // (a precinct's district counts its people who got out as safe)
                 if (m > 0 && w.roles.inDistrict(s)) w.roles.districtOut += m;
@@ -741,7 +741,7 @@ public final class Strategic {
                     if (sec.zIn[s] > 0 || sec.popIn[s] == 0) continue;
                     int m = (int) Math.min(sec.popIn[s], Math.max(1, (long) sec.popIn[s] * n / total));
                     m = Math.min(m, n - got);
-                    sec.popIn[s] -= m;
+                    sec.popIn[sec.touch(s)] -= m;
                     got += m;
                 }
                 if (got <= 0) continue;

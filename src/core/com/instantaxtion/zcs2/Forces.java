@@ -582,7 +582,7 @@ public final class Forces extends Module {
         if (people <= 0) return;
         int lost = Math.min(people, stoch(guns * 1.5f * Math.min(1, people / 400f), s * 23L + 7));
         if (lost <= 0) return;
-        w.sec.popIn[s] -= lost;
+        w.sec.popIn[w.sec.touch(s)] -= lost;
         w.sec.bodies[s] += lost;
         w.stats.civDeaths += lost;
         w.stats.shelledCivilians += lost;

@@ -104,7 +104,7 @@ public final class Media extends Module {
             float want = sec.popIn[s] * share;
             int m = Math.min(sec.popIn[s], (int) want + (Rng.unit(w.seed, w.tick, s * 5L + 3) < want % 1f ? 1 : 0));
             if (m <= 0) continue;
-            sec.popIn[s] -= m;
+            sec.popIn[sec.touch(s)] -= m;
             w.strat.pending[st] += m;
             w.stats.fled += m;
             // the bitten who hide it go with them

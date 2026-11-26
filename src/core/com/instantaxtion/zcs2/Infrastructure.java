@@ -193,7 +193,7 @@ public final class Infrastructure extends Module {
                     if (w.sec.popIn[k] == 0) continue;
                     float want = w.sec.popIn[k] * rate * dt;
                     int m = Math.min(w.sec.popIn[k], (int) want + (Rng.unit(w.seed, w.tick, k * 5L + 3) < want % 1f ? 1 : 0));
-                    w.sec.popIn[k] -= m;
+                    w.sec.popIn[w.sec.touch(k)] -= m;
                     w.strat.pending[st] += m;
                     w.sec.panic[w.sec.touch(k)] = Math.min(1, w.sec.panic[k] + 0.01f * dt);
                 }

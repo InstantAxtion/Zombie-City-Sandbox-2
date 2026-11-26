@@ -179,7 +179,7 @@ public final class Society extends Module {
             int t = sec.neighbour(s, d);
             if (t < 0 || sec.settlement[t] != st || sec.home[t] == 0) continue;
             int m = Math.min(sec.popIn[s], stoch(sec.popIn[s] * rate * dt, s * 29L + 1));
-            sec.popIn[s] -= m;
+            sec.popIn[sec.touch(s)] -= m;
             sec.popIn[sec.touch(t)] += m;
             float carry = sec.inf[s] * rate * dt * 2;
             int c = Math.min((int) sec.inf[s], stoch(carry, s * 29L + 2));
@@ -238,7 +238,7 @@ public final class Society extends Module {
                 e.state[i] = CivAI.S_MILITIA;
                 e.gx[i] = p[0];
                 e.gy[i] = p[1];
-                sec.popIn[s]--;
+                sec.popIn[sec.touch(s)]--;
                 out[st]++;
             }
         }
@@ -268,7 +268,7 @@ public final class Society extends Module {
             if (lost > 0) {
                 militia[st] -= lost;
                 int dead = Math.min(lost, sec.popIn[s]);
-                sec.popIn[s] -= dead;
+                sec.popIn[sec.touch(s)] -= dead;
                 w.stats.civDeaths += dead;
                 sec.zIn[sec.touch(s)] += stoch(dead * 0.6f, s * 41L + 3);
             }
@@ -361,7 +361,7 @@ public final class Society extends Module {
                 int k = sl[j];
                 if (sec.popIn[k] == 0) continue;
                 int m = Math.min(sec.popIn[k], (int) ((long) sec.popIn[k] * move / total));
-                sec.popIn[k] -= m;
+                sec.popIn[sec.touch(k)] -= m;
                 moved += m;
             }
             sec.popIn[sec.touch(c.sector)] += moved;
@@ -447,7 +447,7 @@ public final class Society extends Module {
                 int k = sl[j];
                 if (sec.popIn[k] == 0 || sec.zIn[k] > 0) continue;
                 int m = Math.min(sec.popIn[k], want - got);
-                sec.popIn[k] -= m;
+                sec.popIn[sec.touch(k)] -= m;
                 got += m;
             }
             if (got == 0) continue;
@@ -495,7 +495,7 @@ public final class Society extends Module {
                 // hungry: some leave for the towns
                 c.food = 0;
                 int leave = stoch(people * 0.002f * dt / 60f, k * 37L + 1);
-                sec.popIn[c.sector] -= Math.min(people, leave);
+                sec.popIn[sec.touch(c.sector)] -= Math.min(people, leave);
             }
             // the armed colonists hold their ground against the dead counted round them
             int z = sec.zIn[c.sector];

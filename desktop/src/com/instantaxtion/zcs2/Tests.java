@@ -899,10 +899,10 @@ public final class Tests {
                         for (int dx = -2; dx <= 2; dx++) {
                             int x = sx + dx, y = sy + dy;
                             if (x < 0 || y < 0 || x >= sec.sw || y >= sec.sh) continue;
-                            sec.popIn[y * sec.sw + x] = 0;
+                            sec.popIn[sec.touch(y * sec.sw + x)] = 0;
                             sec.inf[y * sec.sw + x] = 0;
                         }
-                    if (sec.zIn[s] < 1000) sec.zIn[s] = 1000;
+                    if (sec.zIn[s] < 1000) sec.zIn[sec.touch(s)] = 1000;
                     w.step();
                 }
                 check(w.ecology.hunger[s] > 0.5f, "not hungry: " + w.ecology.hunger[s]);
@@ -911,8 +911,8 @@ public final class Tests {
                 int s2 = -1;
                 for (int k = 0; k < sec.n && s2 < 0; k++)
                     if (sec.settlement[k] >= 0 && sec.home[k] > 0 && Math.abs(k % sec.sw - sx) + Math.abs(k / sec.sw - sy) > 6) s2 = k;
-                sec.popIn[s2] = 0;
-                sec.zIn[s2] = 800;
+                sec.popIn[sec.touch(s2)] = 0;
+                sec.zIn[sec.touch(s2)] = 800;
                 w.ecology.strain[s2] = 2;
                 w.ecology.strain[s] = 2;
                 for (int k = 0; k < 30; k++) w.step();
@@ -967,7 +967,7 @@ public final class Tests {
                 w.command.setQuarantine(t.id, true);
                 for (int s = 0; s < w.sec.n; s++)
                     if (w.sec.settlement[s] == t.id && w.sec.popIn[s] >= 300) {
-                        w.sec.popIn[s] -= 300;
+                        w.sec.popIn[w.sec.touch(s)] -= 300;
                         w.strat.pending[t.id] += 300;
                         break;
                     }
@@ -1001,7 +1001,7 @@ public final class Tests {
                 int add = t.residents;
                 for (int s = 0; s < w.sec.n; s++)
                     if (w.sec.settlement[s] == t.id && w.sec.home[s] > 0) {
-                        w.sec.popIn[s] += add;
+                        w.sec.popIn[w.sec.touch(s)] += add;
                         break;
                     }
                 long before = Audit.people(w);
@@ -1045,7 +1045,7 @@ public final class Tests {
                         if (d < bd) { bd = d; best = k; }
                     }
                     check(best >= 0, "no unguarded shore in range");
-                    w.sec.zIn[best] = 600;
+                    w.sec.zIn[w.sec.touch(best)] = 600;
                     w.setStrategic(true);
                     for (int k = 0; k < 30; k++) w.step();
                     check(sh.kills > 0, "the ship never fired");
@@ -1131,14 +1131,14 @@ public final class Tests {
                 World w = game(31, 768, "hold_city", 2);
                 check(w.roles.role == Roles.PRESIDENT, "campaigns are played as the president");
                 Region.Settlement c = w.r.city();
-                for (int s = 0; s < w.sec.n; s++) if (w.sec.settlement[s] == c.id) w.sec.popIn[s] = 0;
+                for (int s = 0; s < w.sec.n; s++) if (w.sec.settlement[s] == c.id) w.sec.popIn[w.sec.touch(s)] = 0;
                 w.setStrategic(true);
                 for (int k = 0; k < 60 && !w.ended; k++) w.step();
                 check(w.ended && !w.won, "an empty capital should lose: " + w.endTitle);
                 w.shutdown();
                 w = game(32, 768, "protect", 2);
                 c = w.r.city();
-                for (int s = 0; s < w.sec.n; s++) if (w.sec.settlement[s] == c.id) w.sec.zIn[s] += 5000;
+                for (int s = 0; s < w.sec.n; s++) if (w.sec.settlement[s] == c.id) w.sec.zIn[w.sec.touch(s)] += 5000;
                 w.setStrategic(true);
                 for (int k = 0; k < 150 && !w.ended; k++) w.step();
                 check(w.ended && !w.won, "a capital full of the dead should lose: " + w.endTitle);
@@ -1322,11 +1322,11 @@ public final class Tests {
                 for (int k = 0; k < 7; k++) w.step();
                 java.util.List<Integer> secs = new java.util.ArrayList<Integer>();
                 for (int s = 0; s < w.sec.n; s++) if (w.sec.settlement[s] == cap.id && w.sec.home[s] > 0) secs.add(s);
-                for (int s : secs) w.sec.zIn[s] += 300;
+                for (int s : secs) w.sec.zIn[w.sec.touch(s)] += 300;
                 for (int k = 0; k < 6; k++) w.step();
                 check(!w.ended, "lost at once: " + w.endText);
                 for (int k = 0; k < 170 && !w.ended; k++) {
-                    for (int s : secs) w.sec.zIn[s] = Math.max(w.sec.zIn[s], 300);
+                    for (int s : secs) w.sec.zIn[w.sec.touch(s)] = Math.max(w.sec.zIn[s], 300);
                     w.step();
                 }
                 check(w.ended && !w.won, "the dead held the capital for a whole day and it wasn't lost");
@@ -1343,7 +1343,7 @@ public final class Tests {
                         moved += w.sec.popIn[s];
                         w.strat.outBy[cap.id] += w.sec.popIn[s];
                         w.strat.evacuatedOut += w.sec.popIn[s];
-                        w.sec.popIn[s] = 0;
+                        w.sec.popIn[w.sec.touch(s)] = 0;
                     }
                 for (int k = 0; k < 60; k++) w.step();
                 check(!w.ended || w.won, "the capital's evacuated people were counted as lost: " + w.endText);
@@ -1459,9 +1459,9 @@ public final class Tests {
                 col.arms = 10;
                 col.ammo = 0;
                 col.tradeT = 30;
-                w.sec.popIn[s] += 800;
+                w.sec.popIn[w.sec.touch(s)] += 800;
                 w.society.colonies.add(col);
-                w.sec.zIn[s] += 40;
+                w.sec.zIn[w.sec.touch(s)] += 40;
                 w.setStrategic(true);
                 for (int k = 0; k < 144; k++) w.step();
                 check(col.trades > 0, "no caravan set out");

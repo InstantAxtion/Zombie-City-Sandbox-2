@@ -261,7 +261,7 @@ public final class Fires extends Module {
     private void collapse(int b, int s) {
         Region r = w.r;
         int lost = Math.min(w.sec.popIn[s], Math.max(0, r.bres(b) / 20));
-        w.sec.popIn[s] -= lost;
+        w.sec.popIn[w.sec.touch(s)] -= lost;
         w.stats.civDeaths += lost;
         w.stats.lossBy[4] += lost;
         heat[b] = 0;

@@ -127,13 +127,14 @@ public final class Stats {
     public void recount() {
         java.util.Arrays.fill(zBySettlement, 0);
         java.util.Arrays.fill(popBySettlement, 0);
-        // (each settlement's own sectors; the dead only in awake ones)
+        // (people in sleeping districts from the running totals; the rest, and the dead, only in awake ones)
         SectorIndex idx = w.sec.idx;
-        for (int st = 0; st < idx.bySettlement.length && st < popBySettlement.length; st++)
-            for (int s : idx.bySettlement[st]) popBySettlement[st] += w.sec.popIn[s] + w.sp.secCiv[s];
+        idx.popBySettlement(popBySettlement);
         for (int s = idx.first(); s >= 0; s = idx.next(s)) {
             int st = w.sec.settlement[s];
-            if (st >= 0) zBySettlement[st] += w.sp.secZ[s] + w.sec.zIn[s];
+            if (st < 0) continue;
+            zBySettlement[st] += w.sp.secZ[s] + w.sec.zIn[s];
+            popBySettlement[st] += w.sp.secCiv[s];
         }
     }
 

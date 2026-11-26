@@ -88,6 +88,7 @@ public final class ScaleProbe {
         r.name = n.name;
         for (Region.Settlement st : n.settlements) {
             st.hubNode = -1;
+            st.edgeNodes.clear();
             st.grid = st.water = st.phone = -1;
             r.settlements.add(st);
         }

@@ -248,7 +248,7 @@ public final class Navy extends Module {
             float m = sec.popIn[s] * rate * dt;
             int k = Math.min(sec.popIn[s], (int) m + (Rng.unit(w.seed, w.tick, s * 3L + 99) < m % 1f ? 1 : 0));
             if (k <= 0) continue;
-            sec.popIn[s] -= k;
+            sec.popIn[sec.touch(s)] -= k;
             w.strat.leftCountry(st, k);
             rescued += k;
             if (!coastNews[st]) {
