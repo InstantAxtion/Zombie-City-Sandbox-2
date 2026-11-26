@@ -843,7 +843,8 @@ public final class Game {
         float k = ps / (pr != null ? pr.W : pn.size);
         // the caption first: the names keep above it
         long people = 0;
-        for (Region.Settlement s : setts) people += s.residents;
+        if (pn != null && pr == null) people = pn.totalResidents(); // (the countryside too, as the game counts them)
+        else for (Region.Settlement s : setts) people += s.residents;
         // the country's name, and its people and states: on one line if it fits, else on two
         String cap = pname + ": " + WorldView.people(people) + " people, " + nstates + " states";
         String sub = WorldView.people(people) + " people, " + nstates + " states";
