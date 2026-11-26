@@ -99,7 +99,8 @@ public final class Weather extends Module {
         if (t > 28) {
             float rot = w.c.rule("rotPerHour", 0.004f) * dt / 60f;
             Sectors sec = w.sec;
-            for (int s = 0; s < sec.n; s++) {
+            // (only awake sectors hold any of the dead)
+            for (int s = sec.idx.first(); s >= 0; s = sec.idx.next(s)) {
                 int z = sec.zIn[s];
                 if (z <= 0) continue;
                 int lost = (int) (z * rot) + (Rng.unit(w.seed, w.tick, s * 3L + 7) < (z * rot) % 1f ? 1 : 0);

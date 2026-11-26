@@ -5,8 +5,10 @@ import java.io.FileInputStream;
 /**
  * Baselines for the move to real-scale maps (docs/SCALE_PLAN.md):
  *   world:  today's maps: memory by component, build time, the once-a-second update and fast-forward speed;
- *   nation: the national coarse layer at each national size: build time, memory, people, road graph, routing.
- *   java -Xmx2g ... ScaleProbe [world|nation|all] [sizes...]
+ *   nation: the national coarse layer at each national size: build time, memory, people, road graph, routing;
+ *   sectors: the once-a-second update and a fast-forward game day on a national map's sectors (P3), for a quiet
+ *            country, a war in the capital and the whole country collapsing.
+ *   java -Xmx2g ... ScaleProbe [world|nation|sectors|all] [sizes...]
  */
 public final class ScaleProbe {
     public static void main(String[] a) throws Exception {
@@ -19,6 +21,11 @@ public final class ScaleProbe {
         if (what.equals("nation") || what.equals("all")) {
             int[] sizes = a.length > 1 && what.equals("nation") ? parse(a) : Nation.SIZES;
             for (int size : sizes) nation(size);
+        }
+        if (what.equals("sectors") || what.equals("all")) {
+            Content c = Content.load(new FileInputStream("assets/content.ini"));
+            int size = a.length > 1 && what.equals("sectors") ? Integer.parseInt(a[1]) : 28672;
+            for (int k = 0; k < 3; k++) sectors(c, size, k);
         }
     }
 
@@ -56,6 +63,107 @@ public final class ScaleProbe {
         }
         System.out.printf("    street step %.2f ms; the once-a-second update adds %.2f ms%n", plain / 1e6 / np, (sec / (double) ns - plain / (double) np) / 1e6);
         System.out.println("    " + Probe.fastForward(w, 432));
+        w.shutdown();
+    }
+
+    /**
+     * A world with a national map's sectors, filled from a Nation (until P7 there are no chunks behind it: every
+     * page is one shared page of grass, or of water where the nation's sector is mostly water, so the tiles cost
+     * nothing; no facilities, roads or buildings). Then: 0 a quiet country, 1 the capital's streets full of the dead,
+     * 2 the dead in every street where anyone lives.
+     */
+    static World nationalWorld(Content c, Nation n) {
+        int size = n.size;
+        Region r = new Region(size, size, n.seed, n.preset, Nation.SECT, false);
+        byte[] grass = new byte[4096], water = new byte[4096], open = new byte[1024], shut = new byte[1024];
+        java.util.Arrays.fill(grass, (byte) Tile.GRASS);
+        java.util.Arrays.fill(water, (byte) Tile.WATER);
+        java.util.Arrays.fill(open, (byte) 1);
+        int ns = r.secW * r.secH;
+        for (int s = 0; s < ns; s++) {
+            boolean wet = n.sum(Nation.SUM_WATER, s) > 160;
+            r.store.tile[s] = wet ? water : grass;
+            r.store.nav[s] = wet ? shut : open;
+        }
+        r.name = n.name;
+        for (Region.Settlement st : n.settlements) {
+            st.hubNode = -1;
+            st.grid = st.water = st.phone = -1;
+            r.settlements.add(st);
+        }
+        World w = new World(c, r, n.seed, 2, true);
+        Sectors sec = w.sec;
+        for (int s = 0; s < sec.n; s++) {
+            sec.settlement[s] = n.secSettlement[s];
+            sec.home[s] = sec.popIn[s] = n.residents[s];
+        }
+        sec.connectivity();
+        sec.idx.reindex();
+        return w;
+    }
+
+    static void sectors(Content c, int size, int which) {
+        Nation n = NationGen.generate(size, RegionGen.COAST, 7, 2);
+        World w = nationalWorld(c, n);
+        Sectors sec = w.sec;
+        String what;
+        if (which == 0) what = "quiet country";
+        else if (which == 1) {
+            // the capital's streets: about 5k sectors awake
+            int cap = n.capital().id, put = 0;
+            for (int s : sec.idx.bySettlement[cap])
+                if (sec.home[s] > 0) {
+                    sec.zIn[sec.touch(s)] += 40;
+                    put++;
+                }
+            what = "war in the capital (" + put + " sectors with the dead)";
+        } else {
+            int put = 0;
+            for (int s = 0; s < sec.n; s++)
+                if (sec.home[s] > 0) {
+                    sec.zIn[sec.touch(s)] += Math.max(10, sec.home[s] / 20);
+                    put++;
+                }
+            what = "whole country (" + put + " sectors with the dead)";
+        }
+        System.out.printf("sectors %d tiles, %s: %d sectors, %d districts, %d people%n", size, what, sec.n, sec.idx.dn, sec.totalPop());
+        // street speed: the step that runs the once-a-second update against those that don't
+        for (int k = 0; k < 60; k++) w.step();
+        long secNs = 0, plainNs = 0;
+        int sn = 0, pn = 0;
+        long awake = 0;
+        for (int k = 0; k < 600; k++) {
+            boolean s1 = (w.tick + 1) % 20 == 0;
+            long t0 = System.nanoTime();
+            w.step();
+            long d = System.nanoTime() - t0;
+            if (s1) {
+                secNs += d;
+                sn++;
+                awake += sec.idx.lastAwakeSectors;
+            } else {
+                plainNs += d;
+                pn++;
+            }
+        }
+        System.out.printf("    1x: the once-a-second update %.2f ms (a plain step %.2f ms), %d sectors awake%n", (secNs / (double) sn - plainNs / (double) pn) / 1e6,
+                plainNs / 1e6 / pn, awake / sn);
+        for (int pass = 0; pass < 2; pass++) {
+            boolean stag = pass == 1;
+            sec.idx.stagger = stag;
+            w.setStrategic(true);
+            for (int k = 0; k < 20; k++) w.step();
+            long t0 = System.nanoTime();
+            awake = 0;
+            for (int k = 0; k < 144; k++) {
+                w.step();
+                awake += sec.idx.lastAwakeSectors;
+            }
+            double ms = (System.nanoTime() - t0) / 1e6;
+            System.out.printf("    fast-forward%s: %.2f ms an update, a game day in %.2f s, %d sectors awake, %d dead, %d people%n", stag ? " (staggered)" : "", ms / 144, ms / 1000,
+                    awake / 144, w.totalZombies(), sec.totalPop());
+            w.setStrategic(false);
+        }
         w.shutdown();
     }
 

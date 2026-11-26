@@ -34,9 +34,9 @@ public final class SectorIndex {
     private final Sectors sec;
     public final int n, sw, sh, dw, dh, dn;
     /** Each settlement's sectors, ascending. */
-    public final int[][] bySettlement;
+    public int[][] bySettlement;
     /** Residents' homes in each settlement (fixed at the start). */
-    public final long[] homeBySettlement;
+    public long[] homeBySettlement;
     /** Sectors outside every settlement that may hold people (homes there, or people put there since). */
     private int[] rural = new int[16];
     private int ruralN;
@@ -51,7 +51,7 @@ public final class SectorIndex {
     private final boolean[] due;
     private final byte[] scale;
     private final boolean[] act;
-    private final int[] hospitals;
+    private int[] hospitals;
     private int[] camList = new int[64];
     private int camN;
     private boolean all = true;
@@ -77,6 +77,15 @@ public final class SectorIndex {
         scale = new byte[dn];
         act = new boolean[dn];
         inRural = new boolean[n];
+        stagger = n > NATIONAL;
+        reindex();
+    }
+
+    /**
+     * Works out the settlements' lists (and the hospitals') from Sectors.settlement and home, then wakes everything.
+     * Call again if those are filled in afterwards (a national map's sectors start from the nation's residents).
+     */
+    public void reindex() {
         int ns = w.r.settlements.size();
         int[] count = new int[ns];
         homeBySettlement = new long[ns];
@@ -95,8 +104,6 @@ public final class SectorIndex {
             if (st >= 0) bySettlement[st][count[st]++] = s;
         }
         // the hospitals' sectors, by settlement (the infected go to theirs)
-        int[] hs = new int[ns];
-        java.util.Arrays.fill(hs, -1);
         java.util.List<Integer> hl = new java.util.ArrayList<Integer>();
         for (Region.Facility f : w.r.facilities)
             if (f.kind == Region.F_HOSPITAL && f.settlement >= 0) {
@@ -105,7 +112,7 @@ public final class SectorIndex {
             }
         hospitals = new int[hl.size()];
         for (int k = 0; k < hospitals.length; k++) hospitals[k] = hl.get(k);
-        stagger = n > NATIONAL;
+        noSettlement = null;
         reset();
     }
 
