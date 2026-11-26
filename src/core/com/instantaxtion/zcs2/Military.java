@@ -139,10 +139,10 @@ public final class Military {
         }
         int alive = 0;
         for (Forces.Formation f : w.forces.formations) if (f.alive) alive++;
-        boolean room = alive < w.c.rule("maxFormations", 45);
+        boolean room = alive < w.rule("maxFormations", 45);
         // one measure of how many soldiers the reported picture calls for, for the Guard and the regulars alike (a
         // smaller war gets the same kind of army, artillery and armour included, only less of it)
-        float want = w.c.rule("soldiersBase", 2500) + nat * w.c.rule("soldiersPerDead", 0.1f);
+        float want = w.rule("soldiersBase", 2500) + nat * w.rule("soldiersPerDead", 0.1f);
         if (w.gov.level >= 3 && guardT <= 0 && room && dead > 100 && soldiers < want) {
             arrive("guard_brigade", "National Guard");
             guardsArrived++;

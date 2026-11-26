@@ -727,7 +727,11 @@ public final class Tests {
                         "planeSpeed", 500f, "shipSpeed", 25f, "transitSpeed", 1667f,
                         "trainOver", 2500f, "troopTrainOver", 4000f, "airliftDistance", 7000f, "hordeSense", 24f * 512, "hordeMerge", 200f,
                         "indoorDensity", 10000f, "sectorSpill", 3000f, "hordeSize", 300f, "nestMin", 400f, "biteFloor", 0.5f,
-                        "emergeDead", 40f, "emergeFleeing", 12f, "emergeStreet", 28f, "migrateRate", 0.02f, "shambleRate", 0.003f};
+                        "emergeDead", 40f, "emergeFleeing", 12f, "emergeStreet", 28f, "migrateRate", 0.02f, "shambleRate", 0.003f,
+                        // P9b: mechanics that are off (or as before) on today's maps, and balance numbers on national maps
+                        "hordeArrivePeople", 0f, "overrunRatio", 20f, "wanderOver", 0f, "refugeeCarShare", 0f, "reachScale", 1f,
+                        "formationRefront", 0f, "aggregateKill", 0.014f, "findHalf", 300f, "sweepBelow", 4000f, "sweepRate", 1f,
+                        "sweepPeakShare", 0f, "hiddenSpread", 1f, "maxFormations", 22f};
                 // national only: today the code uses the type's own speed ([formation] speed, the destroyer's, the
                 // transport plane's), or has no such rule yet (tactical moves, evacuation per highway exit)
                 List<String> only = java.util.Arrays.asList("formationSpeed", "formationTactical", "warshipSpeed", "airliftSpeed", "evacPerHourPerExit");
@@ -755,7 +759,8 @@ public final class Tests {
                 check(Math.abs(content.rule("hordeSpeed", 0, true) - 133.33f) < 0.01f, "a horde walks 2 km/h");
                 check(content.rule("trainOver", 0, true) == 80000 && content.rule("hordeMerge", 0, true) == 2000, "km and m");
                 check(Math.abs(content.rule("convoySpeed", 0, true) - 2000) < 0.01f, "convoys 30 km/h");
-                check(content.rule("indoorDensity", 0, true) == 4 * content.rule("indoorDensity", 0), "per-sector x4");
+                // (a national sector holds a few hundred people where today's hold thousands: the dead find them as readily)
+                check(content.rule("indoorDensity", 0, true) < content.rule("indoorDensity", 0), "national sectors hold fewer people");
                 // a key with any other @ is refused; today's maps aren't national
                 boolean threw = false;
                 try {

@@ -1004,8 +1004,8 @@ public final class Forces extends Module {
     }
 
     /**
-     * The worst streets of a town (most of the dead) that no other formation holds or is on its way to (within four
-     * sectors of it), or null.
+     * The worst streets of a town (most of the dead) that no other formation of a hundred or more holds or is on its
+     * way to (within four sectors of it), or null.
      */
     private float[] openFront(Region.Settlement s, Formation me) {
         Sectors sec = w.sec;
@@ -1016,7 +1016,7 @@ public final class Forces extends Module {
             boolean held = false;
             int qx = q % sec.sw, qy = q / sec.sw;
             for (Formation g : formations) {
-                if (g == me || !g.alive || g.state == BROKEN) continue;
+                if (g == me || !g.alive || g.state == BROKEN || g.strength() < 100) continue; // (a battery holds nothing)
                 float gx = g.state == HOLDING ? g.hq.x : g.gx, gy = g.state == HOLDING ? g.hq.y : g.gy;
                 int t = w.r.sectorOfPx(gx, gy);
                 if (Math.abs(t % sec.sw - qx) <= 4 && Math.abs(t / sec.sw - qy) <= 4) {
