@@ -140,6 +140,8 @@ public final class Recovery extends Module {
         o.writeBoolean(w.watching);
         o.writeInt(sg.hordes.size());
         for (Strategic.Horde h : sg.hordes) o.writeFloat(h.waitT);
+        o.writeInt(sg.byDead.length);
+        for (boolean b : sg.byDead) o.writeBoolean(b);
     }
 
     @Override
@@ -202,6 +204,12 @@ public final class Recovery extends Module {
         for (int i = 0; i < nh; i++) {
             float wt = in.readFloat();
             if (i < sg.hordes.size()) sg.hordes.get(i).waitT = wt;
+        }
+        int nb = in.readInt();
+        sg.extendFacilities();
+        for (int i = 0; i < nb; i++) {
+            boolean b = in.readBoolean();
+            if (i < sg.byDead.length) sg.byDead[i] = b;
         }
     }
 }

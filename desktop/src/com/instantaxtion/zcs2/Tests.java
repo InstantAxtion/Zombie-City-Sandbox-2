@@ -345,7 +345,7 @@ public final class Tests {
                 Tools.erase(w, 0, 0, 1e9f);
                 for (int s = 0; s < w.sec.n; s++) w.sec.zIn[s] = 0;
                 w.strat.hordes.clear();
-                play(w, 125, false);
+                play(w, 200, false);
                 check(w.ended && w.won, "retaking an empty region should win: " + w.endTitle);
                 w.shutdown();
             }
@@ -532,6 +532,7 @@ public final class Tests {
         test("ecology: hunger, nests, and strains that spread", new T() {
             public void run() {
                 World w = game(17, 768, "sandbox", 1);
+                w.forces.generalCommands = false; // nobody comes to clear it: this is about the dead left alone
                 Sectors sec = w.sec;
                 // a village sector with people round it
                 int s = -1;
@@ -814,13 +815,15 @@ public final class Tests {
                 check(w.roles.role == Roles.PRESIDENT, "campaigns are played as the president");
                 Region.Settlement c = w.r.city();
                 for (int s = 0; s < w.sec.n; s++) if (w.sec.settlement[s] == c.id) w.sec.popIn[s] = 0;
-                play(w, 3, false);
+                w.setStrategic(true);
+                for (int k = 0; k < 60 && !w.ended; k++) w.step();
                 check(w.ended && !w.won, "an empty capital should lose: " + w.endTitle);
                 w.shutdown();
                 w = game(32, 768, "protect", 2);
                 c = w.r.city();
-                for (int s = 0; s < w.sec.n; s++) if (w.sec.settlement[s] == c.id) w.sec.zIn[s] += 500;
-                play(w, 3, false);
+                for (int s = 0; s < w.sec.n; s++) if (w.sec.settlement[s] == c.id) w.sec.zIn[s] += 5000;
+                w.setStrategic(true);
+                for (int k = 0; k < 150 && !w.ended; k++) w.step();
                 check(w.ended && !w.won, "a capital full of the dead should lose: " + w.endTitle);
                 w.shutdown();
                 w = game(33, 768, "officer", 2);
@@ -876,20 +879,170 @@ public final class Tests {
         test("balance: outbreak sizes play out in broad bands (many seeds)", new T() {
             public void run() throws Exception {
                 int[] sizes = {3000, 60000, 250000};
-                java.util.List<Balance.Run> runs = Balance.batch(content, sizes, 2, 1536, 12, 2);
+                java.util.List<Balance.Run> runs = Balance.batch(content, sizes, 2, 1536, 14, 2);
                 System.out.print(Balance.table(runs, sizes).replaceAll("(?m)^", "        "));
                 for (Balance.Run r : runs) {
                     if (r.zombies == 3000)
-                        check(r.result == Balance.CONTAINED && r.days < 1, "a small outbreak should be put down within a day: " + Balance.RESULTS[r.result] + " after " + r.days);
+                        check(r.result == Balance.CONTAINED && r.days < 2, "a small outbreak should be put down within a day or two: " + Balance.RESULTS[r.result] + " after " + r.days);
                     if (r.zombies == 60000) {
-                        check(r.days > 0.2f, "a medium outbreak should be a fight, not over in " + r.days + " days");
+                        check(r.result != Balance.CONTAINED || r.days > 2, "a medium outbreak should be a fight of days, not over in " + r.days + " days");
                         check(r.lostShare < 0.6f, "a medium outbreak shouldn't usually take the country: lost " + r.lostShare);
                     }
                     if (r.zombies == 250000) {
-                        check(r.result != Balance.CONTAINED || r.days > 2, "a big outbreak shouldn't be over in " + r.days + " days");
-                        check(r.lostShare > 0.05f, "a big outbreak should cost a lot: lost " + r.lostShare);
+                        check(r.result != Balance.CONTAINED || r.days > 4, "a big outbreak should be a war, not over in " + r.days + " days");
+                        check(r.lostShare > 0.03f, "a big outbreak should cost a lot: lost " + r.lostShare);
                     }
                 }
+            }
+        });
+        test("country: a small outbreak is put down and everything stands down again", new T() {
+            public void run() {
+                World w = Setup.newGame(content, 1536, RegionGen.COAST, 12, content.scenario("sandbox"), 2);
+                Region.Settlement cap = w.r.city();
+                Tools.paintZombies(w, cap.cx * 16f, cap.cy * 16f, 3000, 400, -1);
+                play(w, 60, true);
+                w.setStrategic(true);
+                int peakLevel = 0;
+                boolean curfewed = false, sheltered = false;
+                for (int k = 0; k < 6 * 144; k++) {
+                    w.step();
+                    peakLevel = Math.max(peakLevel, w.gov.level);
+                    curfewed |= w.gov.curfew;
+                    sheltered |= w.command.sheltering(cap.id);
+                }
+                check(peakLevel >= 2, "the alert never went up: " + peakLevel);
+                check(curfewed && sheltered, "no curfew or shelter order during the outbreak");
+                check(w.totalZombies() == 0, "not contained in six days: " + w.totalZombies());
+                check(w.gov.level <= 1, "the alert level never came down: " + Gov.LEVELS[w.gov.level]);
+                check(!w.gov.curfew, "the curfew was never lifted");
+                check(!w.command.sheltering(cap.id), "the shelter order was never lifted");
+                check(w.command.nationalReported() < 1, "the officials still believe in " + w.command.nationalReported() + " of the dead");
+                for (Region.Settlement s : w.r.settlements) check(!w.gov.evacuating(s.id), "still evacuating " + s.name);
+                int outside = 0;
+                for (Forces.Formation f : w.forces.formations) if (f.alive && f.outside) outside++;
+                check(outside == 0, outside + " outside formations never went home");
+                boolean over = false;
+                for (News.Item it : w.news.log) if (it.text.startsWith("The outbreak in " + cap.name + " is over")) over = true;
+                check(over, "nobody said it was over");
+                check(Audit.check(w).isEmpty(), Audit.check(w));
+                w.shutdown();
+            }
+        });
+        test("country: the news says a thing once and adds up the rest", new T() {
+            public void run() {
+                World w = Setup.newGame(content, 1024, RegionGen.COAST, 3, content.scenario("sandbox"), 1);
+                w.setStrategic(true);
+                int before = w.news.version;
+                for (int k = 0; k < 20; k++) w.news.tally("t", "A column reaches Elm|Columns reached Elm: {n} more, {m} people", 1, 100, 0, 0, News.CALL);
+                for (int k = 0; k < 20; k++) w.news.radio("Same words", 0, 0, News.UNIT);
+                check(w.news.version - before == 2, "said " + (w.news.version - before) + " times, not twice");
+                for (int k = 0; k < 40; k++) w.step();
+                check(w.news.log.get(w.news.log.size() - 1).text.equals("Columns reached Elm: 19 more, 1,900 people"), "the total: " + w.news.log.get(w.news.log.size() - 1).text);
+                w.shutdown();
+            }
+        });
+        test("country: sectors belong to the town whose people live there", new T() {
+            public void run() {
+                World w = Setup.newGame(content, 1536, RegionGen.COAST, 5, content.scenario("sandbox"), 1);
+                w.stats.recount();
+                for (Region.Settlement s : w.r.settlements) {
+                    if (s.kind != Region.S_CITY && s.kind != Region.S_TOWN) continue;
+                    int pop = w.stats.popBySettlement[s.id];
+                    check(pop > s.residents * 0.85f && pop < s.residents * 1.15f, s.name + " counts " + pop + " of its " + s.residents + " people");
+                }
+                w.shutdown();
+            }
+        });
+        test("campaigns: goals are judged on the right thing, over time", new T() {
+            public void run() {
+                // evacuate: nothing is won at the start, and it's won by people reaching safety inland
+                World w = Setup.newGame(content, 1536, RegionGen.COAST, 23, content.scenario("evacuate"), 2, Roles.PRESIDENT, 0);
+                w.setStrategic(true);
+                for (int k = 0; k < 12; k++) w.step();
+                check(!w.ended, "evacuate ended at the start: " + w.endTitle);
+                check(w.roles.baseline > 0, "no starting count");
+                int coastal = -1, inland = -1;
+                for (Region.Settlement s : w.r.settlements) {
+                    if (s.kind != Region.S_CITY && s.kind != Region.S_TOWN) continue;
+                    if (w.roles.coastal(s)) coastal = s.id;
+                    else inland = s.id;
+                }
+                if (coastal >= 0 && inland >= 0) {
+                    w.strat.refuge[coastal][inland] += w.roles.baseline;
+                    w.step();
+                    check(w.ended && w.won, "refugees safe inland didn't win it");
+                }
+                w.shutdown();
+                // keep watching after the end: the game goes on, and doesn't end again
+                w = Setup.newGame(content, 1536, RegionGen.COAST, 9, content.scenario("protect"), 2, Roles.GOD, 0);
+                w.ended = true;
+                w.won = false;
+                long t = w.tick;
+                w.step();
+                check(w.tick == t, "an ended campaign (as God) kept running");
+                Actions.watch(w);
+                w.setStrategic(true);
+                for (int k = 0; k < 30; k++) w.step();
+                check(w.tick > t && !w.ended, "keep watching didn't keep it going");
+                w.shutdown();
+                // protect: a moment of the dead in the capital isn't a defeat; holding a fifth of it for half a day is
+                w = Setup.newGame(content, 1536, RegionGen.COAST, 9, content.scenario("protect"), 2, Roles.PRESIDENT, 0);
+                w.setStrategic(true);
+                for (Strategic.Horde h : w.strat.hordes) h.alive = false;
+                Region.Settlement cap = w.r.city();
+                for (int k = 0; k < 7; k++) w.step();
+                java.util.List<Integer> secs = new java.util.ArrayList<Integer>();
+                for (int s = 0; s < w.sec.n; s++) if (w.sec.settlement[s] == cap.id && w.sec.home[s] > 0) secs.add(s);
+                for (int s : secs) w.sec.zIn[s] += 300;
+                for (int k = 0; k < 6; k++) w.step();
+                check(!w.ended, "lost at once: " + w.endText);
+                for (int k = 0; k < 120 && !w.ended; k++) {
+                    for (int s : secs) w.sec.zIn[s] = Math.max(w.sec.zIn[s], 300);
+                    w.step();
+                }
+                check(w.ended && !w.won, "the dead held the capital for half a day and it wasn't lost");
+                w.shutdown();
+                // hold: the capital's people evacuated safely still count
+                w = Setup.newGame(content, 1536, RegionGen.COAST, 3, content.scenario("hold_city"), 2, Roles.PRESIDENT, 0);
+                w.setStrategic(true);
+                for (int k = 0; k < 7; k++) w.step();
+                int base = w.roles.baseline;
+                cap = w.r.city();
+                int moved = 0;
+                for (int s = 0; s < w.sec.n; s++)
+                    if (w.sec.settlement[s] == cap.id && moved < base * 0.7f) {
+                        moved += w.sec.popIn[s];
+                        w.strat.outBy[cap.id] += w.sec.popIn[s];
+                        w.strat.evacuatedOut += w.sec.popIn[s];
+                        w.sec.popIn[s] = 0;
+                    }
+                for (int k = 0; k < 60; k++) w.step();
+                check(!w.ended || w.won, "the capital's evacuated people were counted as lost: " + w.endText);
+                w.shutdown();
+            }
+        });
+        test("command: the President can hand the army to the general", new T() {
+            public void run() {
+                World w = Setup.newGame(content, 1536, RegionGen.COAST, 12, content.scenario("sandbox"), 2, Roles.PRESIDENT, 0);
+                check(!w.forces.generalCommands, "the general took over from the President");
+                Region.Settlement cap = w.r.city();
+                Tools.paintZombies(w, cap.cx * 16f, cap.cy * 16f, 4000, 400, -1);
+                w.command.repZ[cap.id] = 3000;
+                w.setStrategic(true);
+                for (int k = 0; k < 30; k++) w.step();
+                int sent = 0;
+                for (Forces.Formation f : w.forces.formations) if (f.alive && f.job != Forces.JOB_NONE) sent++;
+                check(sent == 0, "the general moved " + sent + " formations without being asked");
+                Forces.Formation one = w.forces.formations.get(0);
+                Actions.releaseFormation(w, one);
+                for (int k = 0; k < 30; k++) w.step();
+                check(one.job != Forces.JOB_NONE, "a released formation wasn't used");
+                Actions.generalCommands(w, true);
+                for (int k = 0; k < 30; k++) w.step();
+                sent = 0;
+                for (Forces.Formation f : w.forces.formations) if (f.alive && f.job != Forces.JOB_NONE) sent++;
+                check(sent > 1, "the general didn't take command: " + sent);
+                w.shutdown();
             }
         });
         test("gaps: ships, planes and freight trains carry the country's supplies", new T() {

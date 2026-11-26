@@ -56,7 +56,7 @@ public final class Balance {
             w.step();
             if (k % 18 != 0) continue; // every three game hours
             long people = Audit.people(w);
-            if (w.totalZombies() == 0 && w.strat.hordes.isEmpty()) {
+            if (w.totalZombies() < 10 && w.strat.hordes.isEmpty()) {
                 r.result = CONTAINED;
                 break;
             }

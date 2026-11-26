@@ -32,6 +32,8 @@ public final class Strategic {
 
     private final World w;
     public boolean[] online;
+    /** Lost to the dead (repair crews can bring these back once it's quiet; not ones out for other reasons). */
+    public boolean[] byDead = new boolean[0];
     public float[] overrunT;
     public boolean[] supplyOnWay;
     public final boolean[] gridOn;
@@ -63,6 +65,7 @@ public final class Strategic {
         this.w = w;
         int nf = w.r.facilities.size();
         online = new boolean[nf];
+        byDead = new boolean[nf];
         overrunT = new float[nf];
         supplyOnWay = new boolean[nf];
         for (Region.Facility f : w.r.facilities) {
@@ -94,6 +97,7 @@ public final class Strategic {
         overrunT = java.util.Arrays.copyOf(overrunT, nf);
         supplyOnWay = java.util.Arrays.copyOf(supplyOnWay, nf);
         for (int i = old; i < nf; i++) online[i] = true;
+        byDead = java.util.Arrays.copyOf(byDead, nf);
     }
 
     public boolean online(int f) {
@@ -160,9 +164,10 @@ public final class Strategic {
                 // overrun: real numbers of the dead at the gates, more than the defenders can hold, for a good while
                 if (z >= need && a < z / 4) {
                     overrunT[f.id] += dt;
-                    if (overrunT[f.id] > 60) {
+                    if (overrunT[f.id] > (w.strategic ? 60 : 20)) {
                         online[f.id] = false;
                         overrunT[f.id] = 0;
+                        if (byDead.length > f.id) byDead[f.id] = true;
                         lost(f);
                     }
                 } else overrunT[f.id] = Math.max(0, overrunT[f.id] - dt);
@@ -171,13 +176,14 @@ public final class Strategic {
                 // the town's own people and repair crews once it's been quiet a few hours)
                 int zNear = z + (w.strategic ? 0 : w.sec.zIn[s]);
                 int t = f.settlement;
-                boolean crews = t >= 0 && w.stats.popBySettlement[t] > 200 && !w.command.isAbandoned(t) && w.stats.zBySettlement[t] < 20;
+                boolean crews = f.id < byDead.length && byDead[f.id] && t >= 0 && w.stats.popBySettlement[t] > 200 && !w.command.isAbandoned(t) && w.stats.zBySettlement[t] < 20;
                 boolean troops = (w.strategic ? defendersNear(f.x, f.y, 2000) : w.sp.secCop[s] + w.sp.secSol[s]) >= 3;
                 if (zNear == 0 && (troops || crews)) {
                     overrunT[f.id] += dt;
                     if (overrunT[f.id] > (troops ? 120 : 360)) {
                         online[f.id] = true;
                         overrunT[f.id] = 0;
+                        byDead[f.id] = false;
                         if (f.kind == Region.F_POWER && f.grid >= 0) {
                             gridOn[f.grid] = true;
                             w.news.headline("Power restored to " + gridName(f.grid), f.x, f.y);

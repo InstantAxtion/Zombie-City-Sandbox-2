@@ -382,6 +382,9 @@ public final class Game {
     }
 
     /** Takes a typed challenge code; false if it doesn't make sense. */
+    /** Set by applyCode when the code loaded with a caveat (shown instead of "Challenge loaded"). */
+    String codeNote;
+
     boolean applyCode(String code) {
         String[] p = code.trim().split("-");
         if (p.length < 4 || !p[0].equalsIgnoreCase("ZC2")) return false;
@@ -394,15 +397,20 @@ public final class Game {
             ngSize = si;
             ngPreset = preset;
             ngSeed = seed;
+            codeNote = null;
             if (p.length > 4) {
+                boolean found = false;
                 for (int tab = 0; tab < TABS.length; tab++) {
                     List<Content.Scenario> l = scenariosFor(tab);
                     for (int i = 0; i < l.size(); i++)
                         if (l.get(i).id.equals(p[4])) {
                             ngMode = tab;
                             ngScenario = i;
+                            found = true;
                         }
                 }
+                // a scenario made in someone else's editor isn't on this phone: say so, don't quietly swap it
+                if (!found) codeNote = "This challenge uses a scenario made on another phone (" + p[4] + "). The map is loaded; pick a scenario, or ask for theirs.";
             }
             ngRole = p.length > 5 ? Roles.byId(p[5]) : -1;
             return true;
@@ -1915,7 +1923,7 @@ public final class Game {
             case "code":
                 ask("A challenge code (map, seed, scenario, role)", challengeCode(), new Platform.TextAnswer() {
                     public void answer(String text) {
-                        if (applyCode(text)) toast("Challenge loaded");
+                        if (applyCode(text)) toast(codeNote != null ? codeNote : "Challenge loaded");
                         else toast("That code doesn't look right");
                     }
                 });
