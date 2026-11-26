@@ -355,6 +355,84 @@ public final class Tests {
     }
 
     private static void define() {
+        test("legible: the tracer says why a fighter died", new T() {
+            public void run() {
+                World w = game(45, 768, "sandbox", 2);
+                Region.Settlement c = w.r.city();
+                float[] at = w.r.openGroundNear(c.cx * 16f, c.cy * 16f, true);
+                camOver(w, at[0], at[1]);
+                Squads.Squad s = squadAt(w, Ents.COP, at[0], at[1], "patrol");
+                int cop = s.mem[0], uid = w.e.uid[cop];
+                String name = w.nameOf(cop);
+                w.e.ammo[cop] = 0;
+                play(w, 3, false);
+                check(w.stats.rec.traceLength(cop) > 0, "no samples for the officer");
+                w.e.hp[cop] = Math.min(w.e.hp[cop], 12);
+                Tools.paintZombies(w, at[0], at[1], 60, 30, w.c.ztype("walker").index);
+                for (int k = 0; k < 90 * 20 && w.e.loc[cop] == Ents.FREE && w.e.uid[cop] == uid; k++) w.step();
+                check(w.e.loc[cop] != Ents.FREE, "the officer outlived 40 of the dead with no ammunition");
+                String why = w.stats.rec.deathReason(uid);
+                check(why.contains("out of ammo"), "the reason doesn't say out of ammo: " + why);
+                check(why.contains("surrounded") || why.contains("caught"), "the reason doesn't say by whom: " + why);
+                String last = w.stats.fallen.get(w.stats.fallen.size() - 1);
+                check(last.contains(name + ": " + why), "the fallen list lacks the reason: " + last);
+                check(w.stats.rec.calloutSeq > 0, "no callout for the officer");
+                w.shutdown();
+            }
+        });
+        test("legible: a lost town records why", new T() {
+            public void run() throws Exception {
+                World w = game(46, 768, "sandbox", 2);
+                Region.Settlement town = null;
+                for (Region.Settlement t : w.r.settlements) if (t.kind == Region.S_TOWN && !t.capital && (town == null || t.residents > town.residents)) town = t;
+                check(town != null, "no town");
+                play(w, 6, false);
+                Tools.paintZombies(w, town.cx * 16f, town.cy * 16f, 200, 300, -1);
+                play(w, 6, false);
+                check(w.stats.rec.touched(town.id), "the dead never reached " + town.name);
+                w.command.abandon(null, town.id);
+                play(w, 7, false);
+                Records rc = w.stats.rec;
+                check(rc.townHow[town.id] == Records.T_ABANDONED, town.name + " not recorded as abandoned");
+                check(rc.townAt[town.id] >= 0, "no time");
+                check(rc.townWhy[town.id] != null && rc.townWhy[town.id].contains("police"), "the reason: " + rc.townWhy[town.id]);
+                boolean moment = false;
+                for (Records.Moment m : rc.moments) moment |= m.text.startsWith(town.name + " was abandoned");
+                check(moment, "no decisive moment for it");
+                // and it survives a save
+                ByteArrayOutputStream bo = new ByteArrayOutputStream();
+                SaveIO.save(w, bo);
+                World l = SaveIO.load(content, new ByteArrayInputStream(bo.toByteArray()), 2);
+                check(rc.townWhy[town.id].equals(l.stats.rec.townWhy[town.id]), "the reason didn't come back from the save");
+                check(l.stats.rec.townHow[town.id] == Records.T_ABANDONED, "abandoned didn't come back");
+                w.shutdown();
+                l.shutdown();
+            }
+        });
+        test("legible: the HUD's totals are the Stats totals, and the timeline's", new T() {
+            public void run() {
+                World w = game(47, 768, "lab_leak", 2);
+                camOver(w, Setup.originX, Setup.originY);
+                play(w, 2, false);
+                check(w.stats.rec.startPoliceAll == w.stats.policeAll() || w.stats.rec.startPoliceAll > 0, "no police at the start");
+                Tools.paintZombies(w, Setup.originX, Setup.originY, 200, 200, -1);
+                play(w, 40, false);
+                int[] h = Game.hudNumbers(w);
+                Stats s = w.stats;
+                check(h[2] == s.policeAll() && h[3] == s.soldiersAll(), "HUD totals differ from Stats");
+                check(h[2] == w.sq.count(Ents.COP) + w.forces.total(Ents.COP), "police in all isn't out + waiting");
+                check(s.policeOut() <= s.policeAll() && s.soldiersOut() <= s.soldiersAll(), "more out than in all");
+                check(h[0] == w.livingCivilians() && h[1] == w.totalZombies(), "people or the dead differ");
+                // a timeline sample taken now holds the same numbers
+                s.tTime[s.tN - 1] -= 1000;
+                s.update();
+                int k = s.tN - 1;
+                check(s.tPoliceAll[k] == h[2] && s.tArmyAll[k] == h[3], "timeline totals differ: " + s.tPoliceAll[k] + " vs " + h[2]);
+                check(s.tPolice[k] == s.policeOut() && s.tArmy[k] == s.soldiersOut(), "timeline out differ");
+                for (int i = 0; i < s.tN; i++) check(s.tPoliceAll[i] < 0 || s.tPoliceAll[i] >= s.tPolice[i], "sample " + i + ": more out than in all");
+                w.shutdown();
+            }
+        });
         test("content: everything refers to things that exist", new T() {
             public void run() {
                 check(content.weapons.size() >= 8, "weapons");
