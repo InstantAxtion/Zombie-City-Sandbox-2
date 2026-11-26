@@ -91,6 +91,19 @@ final class Icons {
                 g.line(x + h * 0.3f, y - h * 0.6f, x + h * 0.3f, y + h * 0.75f, lw * 0.7f);
                 break;
             }
+            case "build": { // a brick wall
+                float bw = h * 0.8f, bh = h * 0.42f, gp = Math.max(1, h * 0.1f);
+                for (int r = 0; r < 3; r++) {
+                    float off = (r % 2) * bw * 0.5f;
+                    for (int k = -1; k < 3; k++) {
+                        float x0 = x - h * 0.95f + off + k * (bw + gp), x1 = x0 + bw;
+                        x0 = Math.max(x0, x - h * 0.95f);
+                        x1 = Math.min(x1, x + h * 0.95f);
+                        if (x1 - x0 > gp) g.fillRect(x0, y - h * 0.75f + r * (bh + gp), x1 - x0, bh);
+                    }
+                }
+                break;
+            }
             case "people": // a person
                 g.fillCircle(x, y - h * 0.45f, h * 0.32f);
                 g.fillRoundRect(x - h * 0.5f, y - h * 0.05f, h, h * 0.85f, h * 0.35f);

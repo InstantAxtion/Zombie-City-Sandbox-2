@@ -77,6 +77,28 @@ public final class Game {
     int zType = -1; // -1 = mixed
     int brush = 10;
     String placeUnit = "patrol", placeVehicle;
+    /** A squad from content.ini's list to place (Police and Army tools), or null. */
+    String placeTemplate;
+    /** Each placing tool's open category (officers, vehicles, squads; defences, ground, people). */
+    final java.util.HashMap<String, String> palCat = new java.util.HashMap<String, String>();
+    /** The Build tool's choice: "bd:mg", "bd:road", "bu:civilian", "bv:bus"... */
+    String buildItem = "bd:barricade";
+    /** The Clear tool: "brush" (drag the dead away) or "town" (tap a town: its counted dead go). */
+    String eraseMode = "brush";
+    /** What a tap does with a squad picked in the Order tool: move, route, fall, cordon, clear, escort. */
+    String orderMode = "move";
+    /** A route being laid down (x, y pairs), and a cordon's first end. */
+    final java.util.ArrayList<Float> routePts = new java.util.ArrayList<Float>();
+    float cordonAX = -1, cordonAY;
+    /** A formation's order in the Order tool (Orders.FP_*; 0 = move and hold). */
+    int fpMode;
+    /** A vehicle under the player's orders (Order tool), and what a tap sends it to do (Orders.VO_*). */
+    int ordVeh = -1, vehMode = Orders.VO_GO;
+    /** The rules sheet over the New Game screen or the pause menu, and the rules picked for a new game. */
+    boolean rulesSheet;
+    final int[] ngRules = Rules.DEFAULTS.clone();
+    /** The last frame's drawing surface (the palette's rows wrap by their labels' widths). */
+    private Gfx lastG;
     boolean hideUi;
     float scroll;
     boolean saving; // the slots screen is for saving (else loading)
@@ -249,6 +271,7 @@ public final class Game {
     }
 
     private void frameInner(Gfx g, float dt) {
+        lastG = g;
         runPosted();
         dt = Math.min(dt, 0.1f);
         frameAcc += dt;
@@ -268,7 +291,7 @@ public final class Game {
             case S_NEW: newGame(g); break;
             case S_LOADING: loading(g, dt); break;
             case S_PLAY: play(g, dt); break;
-            case S_PAUSE: play(g, 0); pause(g); break;
+            case S_PAUSE: play(g, 0); pause(g); if (rulesSheet) rulesSheet(g); break;
             case S_SETTINGS: settingsScreen(g); break;
             case S_REPORT: report(g); break;
             case S_RADIO: radio(g); break;
@@ -617,9 +640,10 @@ public final class Game {
         float startH = ui.dp(52);
         float startY = H - startH - ui.dp(12);
         float codeY = startY - ui.dp(42);
-        float half = (rightW - ui.dp(8)) / 2;
-        ui.button("code", rightX, codeY, half, ui.dp(34), "Enter a code", false, 12);
-        ui.button("editor", rightX + half + ui.dp(8), codeY, half, ui.dp(34), "Make your own", false, 12);
+        float third = (rightW - ui.dp(16)) / 3;
+        ui.button("code", rightX, codeY, third, ui.dp(34), "Enter a code", false, 12);
+        ui.button("editor", rightX + third + ui.dp(8), codeY, third, ui.dp(34), "Make your own", false, 12);
+        ui.button("rules", rightX + (third + ui.dp(8)) * 2, codeY, third, ui.dp(34), ngRulesChanged() ? "Rules (changed)" : "Rules", ngRulesChanged(), 12);
         String best = bestText(challengeCode());
         g.color(best != null ? Ui.GOOD : 0xFF707A86);
         g.text(Ui.fit(g, best != null ? best : "Code " + challengeCode(), rightW, ui.dp(Ui.S), false), rightX, codeY - ui.dp(6), ui.dp(Ui.S), Gfx.ALIGN_LEFT, false);
@@ -635,6 +659,52 @@ public final class Game {
             if (ps > ui.dp(60)) drawPreview(g, rightX + (rightW - ps) / 2, ry, ps);
         }
         if (roleSheet) roleSheet(g, sc);
+        if (rulesSheet) rulesSheet(g);
+    }
+
+    /**
+     * The rules sheet: the dead's speed and infection, the forces' strength, civilians, fleeing, outside help, the
+     * weather and the time of day. On the New Game screen it sets the new game's rules; in God's pause menu each
+     * change is a recorded input (Actions.rule).
+     */
+    private void rulesSheet(Gfx g) {
+        int W = g.width(), H = g.height();
+        boolean ng = screen == S_NEW || w == null;
+        int[] v = ng ? ngRules : w.rules.v;
+        g.color(0xC0000000);
+        g.fillRect(0, 0, W, H);
+        ui.area("rules:close", 0, 0, W, H);
+        float m = ui.dp(12), rh = ui.dp(44), gap = ui.dp(6);
+        int cols = H < ui.dp(560) ? 2 : 1;
+        int rows = (Rules.KEYS + cols - 1) / cols;
+        float pw = Math.min(W - m * 2, ui.dp(cols == 2 ? 640 : 420));
+        float ph = Math.min(H - m * 2, ui.dp(58) + rows * (rh + gap) + ui.dp(66));
+        float x = (W - pw) / 2, y = (H - ph) / 2;
+        ui.panel(x, y, pw, ph);
+        g.color(Ui.TEXT);
+        g.text("Rules", x + ui.dp(16), y + ui.dp(32), ui.dp(Ui.XL - 2), Gfx.ALIGN_LEFT, true);
+        g.color(Ui.DIM);
+        g.text(Ui.fit(g, ng ? "For the new game" : "Changed from now on (kept in replays)", pw - ui.dp(120), ui.dp(Ui.S + 0.5f), false),
+                x + ui.dp(92), y + ui.dp(31), ui.dp(Ui.S + 0.5f), Gfx.ALIGN_LEFT, false);
+        ui.button("rules:close", x + pw - ui.dp(44), y + ui.dp(10), ui.dp(34), ui.dp(34), "✕", false, 13);
+        float cw = (pw - ui.dp(16) * 2 - ui.dp(12) * (cols - 1)) / cols, vw = Math.min(ui.dp(140), cw * 0.48f);
+        float y0 = y + ui.dp(54);
+        for (int k = 0; k < Rules.KEYS; k++) {
+            float cx = x + ui.dp(16) + (k / rows) * (cw + ui.dp(12)), cy = y0 + (k % rows) * (rh + gap);
+            g.color(Ui.TEXT);
+            g.text(Ui.fit(g, Rules.KEY_NAMES[k], cw - vw - ui.dp(10), ui.dp(Ui.M), false), cx, cy + rh / 2 + ui.dp(5), ui.dp(Ui.M), Gfx.ALIGN_LEFT, false);
+            boolean changed = v[k] != Rules.DEFAULTS[k];
+            ui.button("rule:" + k, cx + cw - vw, cy, vw, rh, Rules.CHOICES[k][v[k]] + "  ▸", changed, 13);
+        }
+        float by = y + ph - ui.dp(54), bw = (pw - ui.dp(16) * 2 - ui.dp(10)) / 2;
+        ui.button("rules:reset", x + ui.dp(16), by, bw, ui.dp(42), "Back to normal", false, 13);
+        ui.bigButton("rules:close", x + ui.dp(16) + bw + ui.dp(10), by, bw, ui.dp(42), "Done", Ui.ON);
+    }
+
+    /** Have the new game's rules been changed from normal? */
+    private boolean ngRulesChanged() {
+        for (int k = 0; k < Rules.KEYS; k++) if (ngRules[k] != Rules.DEFAULTS[k]) return true;
+        return false;
     }
 
     /** The roles as a list over the screen: each with what it can do. */
@@ -835,6 +905,8 @@ public final class Game {
                     previewKey = -1;
                     if (gen != loadGen) return;
                     World nw = Setup.newGame(content, size, preset, seed, sc, settings.simThreads(), role, settings.maxIndividuals, pre);
+                    // the rules sheet's choices, as recorded inputs (a replay plays by the same rules)
+                    for (int r = 0; r < Rules.KEYS; r++) Actions.rule(nw, r, ngRules[r]);
                     loadingText = "Putting everyone in place...";
                     startX = Setup.originX;
                     startY = Setup.originY;
@@ -1259,8 +1331,7 @@ public final class Game {
     /** The palette's height: a caption and its rows (the same for a tool whichever option is picked). */
     private float paletteFixedH() {
         String[][] p = palette();
-        int rows = 0;
-        if (p != null) for (String[] r : p) if (r.length > 0) rows++;
+        int rows = wrapped(p, (lastG != null ? lastG.width() : 0) - ui.dp(8)).size();
         return ui.dp(rows == 0 ? 30 : 22) + ui.dp(46) * rows + ui.dp(rows == 0 ? 0 : 8);
     }
 
@@ -1296,6 +1367,18 @@ public final class Game {
             g.strokeCircle(rippleX, rippleY, ui.dp(8 + 26 * k), ui.dp(2));
         }
         if (pingT < 2.5f) view.flag(g, cam.toScreenX(pingX), cam.toScreenY(pingY), 0xFFFFE040);
+        if (tool.equals("orders")) {
+            // a route being laid down, and a cordon's first end
+            for (int k = 0; k + 1 < routePts.size(); k += 2) {
+                float fx = cam.toScreenX(routePts.get(k)), fy = cam.toScreenY(routePts.get(k + 1));
+                if (k >= 2) {
+                    g.color(0xC0FFE040);
+                    g.line(cam.toScreenX(routePts.get(k - 2)), cam.toScreenY(routePts.get(k - 1)), fx, fy, ui.dp(2));
+                }
+                view.flag(g, fx, fy, 0xFFFFF0A0);
+            }
+            if (cordonAX >= 0) view.flag(g, cam.toScreenX(cordonAX), cam.toScreenY(cordonAY), 0xFF60A0FF);
+        }
         alertArrows(g);
         boolean goLive = outbreakMarker(g);
         topBar(g, W);
@@ -1341,7 +1424,12 @@ public final class Game {
             ui.button("handover", freeL + m + ui.dp(44), y + m, ui.dp(64), ui.dp(34), "P" + (w.roles.current + 1) + " ▸", false, 12);
         }
         bottomBars(g);
-        if (w.mode == World.MODE_SURVIVOR && w.playerEnt >= 0 && replay == null) joystick(g);
+        if (stickOn()) joystick(g);
+        if (replay == null && (w.orders.possessing || w.orders.driven >= 0)) {
+            // God's person or vehicle: the way back to watching
+            float bw = ui.dp(96), bh = ui.dp(36);
+            ui.bigButton("letgo", freeR - bw - ui.dp(10), freeB - bh - ui.dp(12), bw, bh, w.orders.possessing ? "Release" : "Let go", 0xE0B05010);
+        }
         // the bottom of the map, stacked upwards: the radio, a note, the way to the outbreak
         float top = radioFeed(g, W);
         top = cues(g, top);
@@ -1650,7 +1738,7 @@ public final class Game {
         float m = ui.dp(8);
         float x0 = freeL + m, x1 = freeR - m;
         // beside the survivor's stick, not over it
-        if (w.mode == World.MODE_SURVIVOR && w.playerEnt >= 0 && replay == null) x0 = joyCX + ui.dp(64);
+        if (stickOn()) x0 = joyCX + ui.dp(64);
         stackX0 = x0;
         stackX1 = x1;
         float ry = freeB - ui.dp(6);
@@ -1734,13 +1822,13 @@ public final class Game {
         if (replay != null) return new String[]{"look", "map"};
         switch (w.roles.role) {
             case Roles.PRESIDENT: return new String[]{"look", "orders", "strike", "town", "map"};
-            case Roles.MILITARY: return new String[]{"look", "orders", "strike", "map"};
-            case Roles.INCIDENT: return new String[]{"look", "orders", "town", "map"};
-            case Roles.PRECINCT: return new String[]{"look", "send", "orders", "map"};
-            case Roles.SQUAD: return new String[]{"look", "orders", "map"};
+            case Roles.MILITARY: return new String[]{"look", "orders", "build", "strike", "map"};
+            case Roles.INCIDENT: return new String[]{"look", "orders", "build", "town", "map"};
+            case Roles.PRECINCT: return new String[]{"look", "send", "orders", "build", "map"};
+            case Roles.SQUAD: return new String[]{"look", "orders", "build", "map"};
             case Roles.OFFICER:
             case Roles.SURVIVOR: return new String[]{"look", "fire", "map"};
-            default: return new String[]{"look", "dead", "police", "army", "strike", "orders", "town", "erase", "map"};
+            default: return new String[]{"look", "dead", "police", "army", "build", "strike", "orders", "town", "erase", "map"};
         }
     }
 
@@ -1767,7 +1855,8 @@ public final class Game {
             case "strike": return "Strike";
             case "orders": return "Order";
             case "town": return "Town";
-            case "erase": return "Erase";
+            case "erase": return "Clear";
+            case "build": return "Build";
             case "map": return "Map";
             case "fire": return "Shoot";
             case "send": return "Send";
@@ -1784,18 +1873,25 @@ public final class Game {
     /** A line saying what the current tool does with a tap. */
     private String paletteCaption() {
         switch (tool) {
-            case "dead": return "Drag on the map to paint the dead: pick a kind and how many";
-            case "police": return placeVehicle != null ? "Tap a road to place the vehicle" : "Tap the map to place a squad";
-            case "army": return placeVehicle != null ? "Tap a road to place the vehicle" : "Tap the map to place soldiers";
+            case "dead": return brush >= 10000 ? "Drag to paint " + fmt(brush) + " of the dead (" + fmt(Tools.MASS_INDIVIDUALS) + " as people, the rest counted)" : "Drag on the map to paint the dead: pick a kind and how many";
+            case "build": return buildCaption();
+            case "police": return placeTemplate != null ? "Tap the map to place the squad and its vehicle" : placeVehicle != null ? "Tap a road to place the vehicle" : "Tap the map to place a squad";
+            case "army": return placeTemplate != null ? "Tap the map to place the squad and its vehicle" : placeVehicle != null ? "Tap a road to place the vehicle" : "Tap the map to place soldiers";
             case "strike": return "Tap where to aim, then confirm";
             case "town": return "Tap a town: " + (townMode.equals("info") ? "see how it's doing" : townMode.equals("evac") ? "evacuate it" : townMode.equals("quar") ? "quarantine it" : "send the army");
             case "send": return "Pick who to send, then tap where they go";
             case "map": return "Layers of the national map";
-            case "erase": return "Drag to clear the dead away";
+            case "erase": return eraseMode.equals("town") ? "Tap a town: its counted dead are gone" : "Drag to clear the dead away, or clear everything of a kind";
             case "orders":
+                if (ordVeh >= 0 && w.veh.usable(ordVeh)) {
+                    String vn = w.veh.type(ordVeh).name;
+                    if (w.orders.drives(ordVeh)) return vn + ": drive it with the stick";
+                    return vn + ": tap where to " + (vehMode == Orders.VO_ORBIT ? "orbit" : vehMode == Orders.VO_ATTACK ? "attack" : "go");
+                }
                 if (inspFormation != null && inspFormation.alive)
-                    return Forces.shortName(inspFormation) + " (" + inspFormation.strength() + "): " + (underGeneral(inspFormation) ? "the general has it; tap where to send it to take it back" : "tap where to hold");
-                if (inspSquad != null && inspSquad.alive) return inspSquad.name + ": tap where to go";
+                    return Forces.shortName(inspFormation) + " (" + inspFormation.strength() + "): " + (underGeneral(inspFormation) ? "the general has it; tap where to send it to take it back"
+                            : fpMode == Orders.FP_ATTACK ? "tap where to attack" : fpMode == Orders.FP_DEFEND ? "tap where to defend" : fpMode == Orders.FP_SCREEN ? "tap where to screen" : "tap where to hold");
+                if (inspSquad != null && inspSquad.alive) return inspSquad.name + ": " + orderCaption();
                 if (generalToggle()) return w.forces.generalCommands ? "The general commands the army; tap a formation to take it back" : "Tap a formation or a squad, then where it goes";
                 return w.roles.commandsFormations() ? "Tap a formation or a squad, then where it goes" : "Tap one of your squads, then where it goes";
             default: return null;
@@ -1806,16 +1902,22 @@ public final class Game {
     private String[][] palette() {
         switch (tool) {
             case "dead": {
-                String[] types = {"z:-1", "Mixed", "z:walker", "Walker", "z:runner", "Runner", "z:dog", "Dogs", "z:bruiser", "Bruiser", "z:brute", "Brute", "z:armoured", "Armour", "z:giant", "Giant"};
-                String[] sizes = {"b:1", "1", "b:10", "10", "b:50", "50", "b:250", "250", "b:2000", "Horde 2k"};
-                return new String[][]{types, sizes};
+                // every kind of the dead in content.ini (a mod's own too), and the brush sizes up to a quarter million
+                java.util.List<String> types = new java.util.ArrayList<String>();
+                types.add("z:-1");
+                types.add("Mixed");
+                for (Content.ZType t : content.ztypes) {
+                    types.add("z:" + t.id);
+                    types.add(t.name.startsWith("Zombie ") ? Character.toUpperCase(t.name.charAt(7)) + t.name.substring(8) : t.name);
+                }
+                String[] sizes = {"b:1", "1", "b:10", "10", "b:50", "50", "b:250", "250", "b:2000", "2k", "b:10000", "10k", "b:50000", "50k", "b:250000", "250k"};
+                return new String[][]{types.toArray(new String[0]), sizes};
             }
             case "police":
-                return new String[][]{{"u:patrol", "Patrol", "u:swat", "SWAT", "u:riot", "Riot", "u:marksman", "Marksmen", "u:trooper", "Troopers"},
-                        {"v:patrol_car", "Car", "v:swat_van", "SWAT van", "v:police_heli", "Helicopter"}};
             case "army":
-                return new String[][]{{"u:rifleman", "Riflemen", "u:gunner", "Gunners", "u:grenadier", "Grenadiers", "u:sniper", "Snipers", "u:guard", "Guard"},
-                        {"v:humvee", "Humvee", "v:apc", "APC", "v:tank", "Tank", "v:gunship", "Gunship"}};
+                return forcePalette(tool.equals("police"));
+            case "build":
+                return buildPalette();
             case "strike":
                 return new String[][]{{"s:air", "Air strike" + (w.mil.strikesLeft >= 0 ? " (" + w.mil.strikesLeft + ")" : ""), "s:art", "Artillery", "s:bridge", "Blow a bridge"}};
             case "town": {
@@ -1853,14 +1955,30 @@ public final class Game {
                 return new String[][]{row1, row2};
             }
             case "orders":
+                if (ordVeh >= 0 && w.veh.usable(ordVeh)) {
+                    boolean flies = w.veh.type(ordVeh).flies, driving = w.orders.drives(ordVeh);
+                    return new String[][]{{"vo:1", "Go here", flies ? "vo:2" : "x:vo2", "Orbit", "vo:3", "Attack area", "vo:4", "Return"},
+                            {"vo:drive", driving ? "Let go of the wheel" : "Take the wheel", "vo:done", "Done"}};
+                }
                 if (inspFormation != null && inspFormation.alive)
-                    return new String[][]{{underGeneral(inspFormation) ? "o:ftake" : "o:frelease", underGeneral(inspFormation) ? "Take command" : "Release to the general", "o:fdone", "Done"}};
-                if (inspSquad != null && inspSquad.alive)
-                    return new String[][]{{"o:release", "Release", "o:home", "Send home"}};
+                    return new String[][]{{"fp:0", "Move", "fp:1", "Attack", "fp:2", "Defend", "fp:4", "Screen", "fp:3", "Withdraw", "fp:5", "Dig in"},
+                            {underGeneral(inspFormation) ? "o:ftake" : "o:frelease", underGeneral(inspFormation) ? "Take command" : "Release to the general", "o:fdone", "Done"}};
+                if (inspSquad != null && inspSquad.alive) {
+                    Squads.Squad sq = inspSquad;
+                    String[] modes = {"om:move", "Move", "om:route", "Route", "om:fall", "Fall back", "om:cordon", "Cordon", "om:clear", "Clear area", "om:escort", "Escort"};
+                    boolean car = sq.vehicle >= 0 && w.veh.usable(sq.vehicle);
+                    String[] stance = {"st:0", "Normal", "st:1", "Hold fire", "st:2", "Aggressive",
+                            car ? (sq.stayMounted ? "o:dismount" : "o:mount") : "x:mount", sq.stayMounted ? "Dismount" : "Mount up"};
+                    String[] rest = orderMode.equals("route") && routePts.size() >= 2
+                            ? new String[]{"o:go", "Go (" + routePts.size() / 2 + " points)", "o:undo", "Undo", "o:release", "Release", "o:home", "Send home"}
+                            : new String[]{"o:release", "Release", "o:home", "Send home"};
+                    return new String[][]{modes, stance, rest};
+                }
                 if (generalToggle()) return new String[][]{{"o:general", "Let the general command"}};
                 return new String[][]{{}};
             case "erase":
-                return new String[][]{{"b:10", "Small", "b:50", "Medium", "b:250", "Large"}};
+                return new String[][]{{"b:10", "Small", "b:50", "Medium", "b:250", "Large", "cl:town", "A town's dead"},
+                        {"cl:wrecks", "Wrecks", "cl:blood", "Blood and bodies", "cl:barricades", "Barricades", "cl:everyone", "Everyone"}};
             default:
                 return null;
         }
@@ -1869,11 +1987,147 @@ public final class Game {
     private String strikeMode = "air";
     String sendTemplate = "patrol";
 
+    /** A placing tool's open category. */
+    private String category(String t) {
+        String c = palCat.get(t);
+        if (c != null) return c;
+        return t.equals("build") ? "def" : "units";
+    }
+
+    /** The Police or Army tool: who to place (every unit, vehicle and squad of that side in content.ini). */
+    private String[][] forcePalette(boolean police) {
+        String t = police ? "police" : "army", cat = category(t);
+        String[] cats = {"cat:" + t + ":units", police ? "Officers" : "Soldiers", "cat:" + t + ":veh", "Vehicles", "cat:" + t + ":sq", "Squads"};
+        java.util.List<String> items = new java.util.ArrayList<String>();
+        if (cat.equals("veh")) {
+            for (Content.VType v : content.vtypes)
+                if (v.faction.equals(police ? "police" : "army") && !v.id.equals("jet")) {
+                    items.add("v:" + v.id);
+                    items.add(v.name);
+                }
+        } else if (cat.equals("sq")) {
+            for (Content.SquadT q : content.squads)
+                if (q.faction.equals(police ? "police" : "army")) {
+                    items.add("t:" + q.id);
+                    items.add(q.name + (q.vehicle != null && !q.vehicle.flies ? " +" : ""));
+                }
+        } else {
+            for (Content.Unit u : content.units)
+                if (u.kind == (police ? Content.COP : Content.SOLDIER)) {
+                    items.add("u:" + u.id);
+                    items.add(u.name);
+                }
+        }
+        return new String[][]{cats, items.toArray(new String[0])};
+    }
+
+    /** The Build tool: defences for every role that has it; the ground and people for God. */
+    private String[][] buildPalette() {
+        boolean god = w.roles.role == Roles.GOD;
+        String cat = god ? category("build") : "def";
+        java.util.List<String> items = new java.util.ArrayList<String>();
+        if (cat.equals("ground")) {
+            String[] g = {"bd:road", "Road", "bd:house", "House", "bd:clear", "Clear ground"};
+            for (String x : g) items.add(x);
+        } else if (cat.equals("people")) {
+            for (Content.Unit u : content.units)
+                if (u.kind == Content.CIV) {
+                    items.add("bu:" + u.id);
+                    items.add(u.name);
+                }
+            for (Content.VType v : content.vtypes)
+                if (!v.faction.equals("police") && !v.faction.equals("army")) {
+                    items.add("bv:" + v.id);
+                    items.add(v.name);
+                }
+        } else {
+            items.add("bd:barricade");
+            items.add("Barricade");
+            items.add("bd:wall");
+            items.add("Wall");
+            for (int k = 0; k < Defences.KINDS; k++) {
+                items.add("bd:" + Defences.IDS[k]);
+                items.add(Defences.NAMES[k]);
+            }
+        }
+        if (!god) return new String[][]{items.toArray(new String[0])};
+        return new String[][]{{"cat:build:def", "Defences", "cat:build:ground", "Ground", "cat:build:people", "People"}, items.toArray(new String[0])};
+    }
+
+    private String buildCaption() {
+        String b = buildItem;
+        if (b.startsWith("bu:")) return "Tap the map to put people on the street";
+        if (b.startsWith("bv:")) return "Tap a road to place the vehicle";
+        String k = b.substring(3);
+        if (k.equals("barricade") || k.equals("wall")) return "Drag to build a " + k + " the dead must smash through";
+        if (k.equals("road")) return "Drag to lay a road";
+        if (k.equals("clear")) return "Drag to clear rubble, trees and walls to open ground";
+        if (k.equals("house")) return "Tap open ground to build a house";
+        if (k.equals("mg")) return "Tap to dig in a machine gun (it faces the nearest of the dead)";
+        if (k.equals("sandbags")) return "Tap to put down sandbags: cover for the armed behind them";
+        if (k.equals("wire")) return "Tap to lay razor wire: it slows and cuts the dead";
+        if (k.equals("ammo")) return "Tap to drop an ammunition crate: restocks the armed near it";
+        if (k.equals("medkit")) return "Tap to drop a medical kit: patches up the armed near it";
+        if (k.equals("post")) return "Tap to set up a command post: steadier nerves round it";
+        return "Tap the map to build";
+    }
+
+    private String orderCaption() {
+        switch (orderMode) {
+            case "route": return routePts.isEmpty() ? "tap the route's points, then Go" : "tap the next point, or Go";
+            case "fall": return "tap where to fall back to";
+            case "cordon": return cordonAX < 0 ? "tap one end of the cordon line" : "tap the other end of the line";
+            case "clear": return "tap the area to clear";
+            case "escort": return "tap someone or a vehicle to escort";
+            default: return "tap where to go";
+        }
+    }
+
+    /** The palette's rows as drawn: a row too long for the width wraps onto more rows (labels never shrink). */
+    private java.util.List<String[]> wrapped(String[][] rows, float wdt) {
+        java.util.List<String[]> out = new java.util.ArrayList<String[]>();
+        if (rows == null) return out;
+        Gfx g = lastG;
+        float ts = ui.dp(12.5f), gap = ui.dp(4), min = ui.dp(44);
+        for (String[] row : rows) {
+            if (row.length == 0) continue;
+            if (g == null || landscape) {
+                out.add(row);
+                continue;
+            }
+            int start = 0;
+            float used = 0;
+            for (int i = 0; i < row.length / 2; i++) {
+                float bw = Math.max(min, g.textWidth(row[i * 2 + 1], ts, true) + ui.dp(18));
+                if (i > start && used + gap + bw > wdt) {
+                    out.add(java.util.Arrays.copyOfRange(row, start * 2, i * 2));
+                    start = i;
+                    used = 0;
+                }
+                used += (used > 0 ? gap : 0) + bw;
+            }
+            out.add(java.util.Arrays.copyOfRange(row, start * 2, row.length));
+        }
+        return out;
+    }
+
     private boolean paletteOn(String id) {
         if (id.startsWith("z:")) return id.substring(2).equals(zType < 0 ? "-1" : content.ztypes.get(zType).id);
-        if (id.startsWith("b:")) return Integer.parseInt(id.substring(2)) == brush;
-        if (id.startsWith("u:")) return placeVehicle == null && id.substring(2).equals(placeUnit);
-        if (id.startsWith("v:")) return id.substring(2).equals(placeVehicle);
+        if (id.startsWith("b:")) return Integer.parseInt(id.substring(2)) == brush && !(tool.equals("erase") && eraseMode.equals("town"));
+        if (id.startsWith("u:")) return placeVehicle == null && placeTemplate == null && id.substring(2).equals(placeUnit);
+        if (id.startsWith("v:")) return placeTemplate == null && id.substring(2).equals(placeVehicle);
+        if (id.startsWith("t:")) return id.substring(2).equals(placeTemplate);
+        if (id.startsWith("cat:")) {
+            String[] k = id.split(":");
+            return k[2].equals(category(k[1]));
+        }
+        if (id.startsWith("bd:") || id.startsWith("bu:") || id.startsWith("bv:")) return id.equals(buildItem);
+        if (id.equals("cl:town")) return eraseMode.equals("town");
+        if (id.startsWith("om:")) return id.substring(3).equals(orderMode);
+        if (id.startsWith("st:")) return inspSquad != null && inspSquad.stance == Integer.parseInt(id.substring(3));
+        if (id.startsWith("fp:")) return Integer.parseInt(id.substring(3)) == fpMode;
+        if (id.startsWith("vo:") && id.length() == 4) return ordVeh >= 0 && Integer.parseInt(id.substring(3)) == vehMode;
+        if (id.equals("vo:drive")) return ordVeh >= 0 && w.orders.drives(ordVeh);
         if (id.startsWith("s:")) return id.substring(2).equals(strikeMode);
         if (id.startsWith("tm:")) return id.substring(3).equals(townMode);
         if (id.startsWith("send:")) return id.substring(5).equals(sendTemplate);
@@ -1931,7 +2185,8 @@ public final class Game {
             g.text(Ui.fit(g, cap, W - ui.dp(20), ui.dp(Ui.S + 0.5f), false), ui.dp(10), py + ui.dp(16), ui.dp(Ui.S + 0.5f), Gfx.ALIGN_LEFT, false);
         }
         float rh = ui.dp(46);
-        for (int r = 0; r < rows.length; r++) paletteRow(g, rows[r], ui.dp(4), py + ui.dp(22) + r * rh, W - ui.dp(8), rh - ui.dp(6));
+        java.util.List<String[]> wr = wrapped(rows, W - ui.dp(8));
+        for (int r = 0; r < wr.size(); r++) paletteRow(g, wr.get(r), ui.dp(4), py + ui.dp(22) + r * rh, W - ui.dp(8), rh - ui.dp(6));
     }
 
     private void toolButton(String t, float x, float y, float w2, float h) {
@@ -2083,8 +2338,22 @@ public final class Game {
                 }
             }
             boolean squadable = e.squad[i] >= 0 && w.mode != World.MODE_SURVIVOR;
-            actions = squadable ? new String[]{"i:follow", cam.follow == i ? "Stop following" : "Follow", "i:squad", "Give orders", "i:close", "Close"}
-                    : new String[]{"i:follow", cam.follow == i ? "Stop following" : "Follow", "i:close", "Close"};
+            // God can take over anyone living (the stick moves them; Release gives them back)
+            boolean god = w.roles.role == Roles.GOD && replay == null && e.loc[i] == Ents.FREE && e.kind[i] != Ents.ZOMBIE && w.playerEnt < 0;
+            java.util.List<String> acts = new java.util.ArrayList<String>();
+            acts.add("i:follow");
+            acts.add(cam.follow == i ? "Stop following" : "Follow");
+            if (squadable) {
+                acts.add("i:squad");
+                acts.add("Orders");
+            }
+            if (god) {
+                acts.add("i:possess");
+                acts.add("Control");
+            }
+            acts.add("i:close");
+            acts.add("Close");
+            actions = acts.toArray(new String[0]);
         } else if (inspVeh >= 0) {
             int v = inspVeh;
             Vehicles vs = w.veh;
@@ -2106,7 +2375,11 @@ public final class Game {
                 Squads.Squad s = w.sq.get(vs.squad[v]);
                 body.append(s.name).append(": ").append(Squads.ORDER_NAMES[s.order]).append(". ");
             }
-            actions = new String[]{"i:followv", cam.followVehicle == v ? "Stop following" : "Follow", "i:close", "Close"};
+            if (w.roles.role == Roles.GOD && replay == null && vs.usable(v)) {
+                Orders.VOrder vo = w.orders.vorder(v);
+                if (vo != null) body.append(Orders.VO_NAMES[vo.kind]).append(" as ordered. ");
+                actions = new String[]{"i:followv", cam.followVehicle == v ? "Stop following" : "Follow", "i:vorders", "Orders", "i:drive", w.orders.drives(v) ? "Driving" : "Drive", "i:close", "Close"};
+            } else actions = new String[]{"i:followv", cam.followVehicle == v ? "Stop following" : "Follow", "i:close", "Close"};
         } else if (inspFac >= 0) {
             Region.Facility f = w.r.facilities.get(inspFac);
             title = f.name;
@@ -2315,6 +2588,13 @@ public final class Game {
         String[][] items = {{"report", "Report"}, {"radio", "Radio log"}, {"save", "Save"}, {"loadp", "Load"},
                 {"timelapse", "Timelapse"}, {"savereplay", "Save replay"}, {"sharecode", "Challenge code"}, {"players", "Players"},
                 {"settings", "Settings"}, {"shot", "Screenshot"}, {"hideui", "Hide buttons"}, {"tomenu", "Quit to the menu"}};
+        if (w.roles.role == Roles.GOD && replay == null) {
+            // God changes the rules as the game goes (each change recorded)
+            String[][] more = new String[items.length + 1][];
+            more[0] = new String[]{"rules", w.rules.isDefault() ? "Rules" : "Rules (changed)"};
+            System.arraycopy(items, 0, more, 1, items.length);
+            items = more;
+        }
         // the campaign: how it stands, and the days
         boolean goal = goalShown();
         int cols = land ? (goal ? 4 : 3) : 2;
@@ -3123,10 +3403,113 @@ public final class Game {
             case "o:general":
                 Actions.generalCommands(w, !w.forces.generalCommands);
                 return;
-            case "o:fdone": inspFormation = null; return;
+            case "o:fdone": inspFormation = null; fpMode = 0; return;
             case "pc:cordon": Actions.precinctCordon(w, !w.roles.cordon); return;
             case "pc:evac": Actions.precinctEvac(w, !w.roles.districtEvac); return;
             case "o:home": Actions.home(w, inspSquad); return;
+            case "o:mount":
+                if (inspSquad != null && !Actions.mount(w, inspSquad, true)) toast("No vehicle to mount up in");
+                return;
+            case "o:dismount": if (inspSquad != null) Actions.mount(w, inspSquad, false); return;
+            case "o:go": {
+                if (inspSquad == null || routePts.size() < 2) return;
+                float[] pts = new float[routePts.size()];
+                for (int k = 0; k < pts.length; k++) pts[k] = routePts.get(k);
+                Actions.route(w, inspSquad, pts);
+                routePts.clear();
+                orderMode = "move";
+                toast(inspSquad.name + " on the route");
+                return;
+            }
+            case "o:undo":
+                if (routePts.size() >= 2) {
+                    routePts.remove(routePts.size() - 1);
+                    routePts.remove(routePts.size() - 1);
+                }
+                return;
+            case "vo:drive":
+                if (ordVeh >= 0) {
+                    boolean on = !w.orders.drives(ordVeh);
+                    Actions.drive(w, on ? ordVeh : -1);
+                    cam.followVehicle = on ? ordVeh : -1;
+                    cam.follow = -1;
+                    if (on) toast("Drive with the stick");
+                }
+                return;
+            case "vo:done":
+                if (ordVeh >= 0 && w.orders.drives(ordVeh)) Actions.drive(w, -1);
+                ordVeh = -1;
+                return;
+            case "vo:4":
+                if (ordVeh >= 0) {
+                    Actions.vehicleOrder(w, ordVeh, Orders.VO_RETURN, 0, 0);
+                    toast(w.veh.type(ordVeh).name + " returning");
+                    ordVeh = -1;
+                }
+                return;
+            case "fp:3":
+            case "fp:5":
+                if (inspFormation != null && inspFormation.alive) {
+                    int fp = id.equals("fp:3") ? Orders.FP_WITHDRAW : Orders.FP_DIGIN;
+                    if (Actions.posture(w, inspFormation, fp, inspFormation.hq.x, inspFormation.hq.y)) toast(inspFormation.name + ": " + Orders.FP_NAMES[fp].toLowerCase());
+                    else toast("It can't do that from here");
+                    fpMode = 0;
+                }
+                return;
+            case "i:vorders":
+                ordVeh = inspVeh;
+                vehMode = Orders.VO_GO;
+                inspSquad = null;
+                inspFormation = null;
+                closeInspector();
+                tool = "orders";
+                return;
+            case "i:drive": {
+                int v = inspVeh;
+                closeInspector();
+                if (v >= 0 && Actions.drive(w, v)) {
+                    ordVeh = v;
+                    tool = "orders";
+                    cam.followVehicle = v;
+                    cam.follow = -1;
+                    toast("Drive with the stick");
+                }
+                return;
+            }
+            case "i:possess": {
+                int i = inspEnt;
+                closeInspector();
+                if (i >= 0 && Actions.possess(w, i)) {
+                    cam.follow = i;
+                    cam.followVehicle = -1;
+                    cam.flyTo(w.e.x[i], w.e.y[i], Math.max(cam.zoom, 1.0f));
+                    toast("Move with the stick; Release gives them back");
+                } else toast("You can't take them over");
+                return;
+            }
+            case "letgo":
+                if (w.orders.possessing) {
+                    Actions.possess(w, -1);
+                    cam.follow = -1;
+                }
+                if (w.orders.driven >= 0) {
+                    Actions.drive(w, -1);
+                    cam.followVehicle = -1;
+                }
+                return;
+            case "rules": rulesSheet = true; return;
+            case "rules:close": rulesSheet = false; return;
+            case "rules:reset":
+                for (int k = 0; k < Rules.KEYS; k++) {
+                    if (screen == S_NEW) ngRules[k] = Rules.DEFAULTS[k];
+                    else if (w != null) Actions.rule(w, k, Rules.DEFAULTS[k]);
+                }
+                return;
+            case "cl:town": eraseMode = eraseMode.equals("town") ? "brush" : "town"; return;
+            case "cl:wrecks": toast(fmt(Actions.clear(w, Tools.CLEAR_WRECKS, -1)) + " wrecks towed away"); return;
+            case "cl:blood": Actions.clear(w, Tools.CLEAR_BLOOD, -1); toast("Blood and bodies cleared"); return;
+            case "cl:barricades": toast(fmt(Actions.clear(w, Tools.CLEAR_BARRICADES, -1)) + " barricades, walls and defences taken down"); return;
+            case "cl:everyone": Actions.clear(w, Tools.CLEAR_EVERYONE, -1); toast("The streets are empty: the dead gone, the living indoors, the squads home"); return;
             case "i:quar": Actions.quarantine(w, inspSettle, !w.roles.quarantined(inspSettle)); return;
             case "i:army": Actions.requestArmy(w, inspSettle); return;
             case "i:close": closeInspector(); inspFormation = null; return;
@@ -3165,6 +3548,35 @@ public final class Game {
             ngScenario = Integer.parseInt(id.substring(5));
             ngRole = -1;
         } else if (id.startsWith("tm:")) townMode = id.substring(3);
+        else if (id.startsWith("cat:")) {
+            String[] k = id.split(":");
+            palCat.put(k[1], k[2]);
+            // the first of the category is picked, so a tap places something of what's shown
+            String[][] pal = palette();
+            if (pal != null && pal.length > 1 && pal[pal.length - 1].length >= 2) onButton(pal[pal.length - 1][0]);
+        } else if (id.startsWith("bd:") || id.startsWith("bu:") || id.startsWith("bv:")) buildItem = id;
+        else if (id.startsWith("t:")) {
+            placeTemplate = id.substring(2);
+            placeVehicle = null;
+        } else if (id.startsWith("om:")) {
+            orderMode = id.substring(3);
+            routePts.clear();
+            cordonAX = -1;
+        } else if (id.startsWith("st:")) {
+            if (inspSquad != null) {
+                int st = Integer.parseInt(id.substring(3));
+                Actions.stance(w, inspSquad, st);
+                toast(inspSquad.name + ": " + Squads.STANCE_NAMES[st].toLowerCase());
+            }
+        } else if (id.startsWith("fp:")) fpMode = Integer.parseInt(id.substring(3));
+        else if (id.startsWith("vo:")) vehMode = Integer.parseInt(id.substring(3));
+        else if (id.startsWith("rule:")) {
+            int k = Integer.parseInt(id.substring(5));
+            int[] cur = screen == S_NEW || w == null ? ngRules : w.rules.v;
+            int nv = (cur[k] + 1) % Rules.CHOICES[k].length;
+            if (screen == S_NEW || w == null) ngRules[k] = nv;
+            else Actions.rule(w, k, nv);
+        }
         else if (id.startsWith("send:")) sendTemplate = id.substring(5);
         else if (id.startsWith("ov:")) view.overlay = Integer.parseInt(id.substring(3));
         else if (id.startsWith("tool:")) {
@@ -3177,8 +3589,14 @@ public final class Game {
             view.aimX = -1;
             closeInspector();
             if (!t.equals("orders")) inspSquad = null;
-            if (t.equals("police") && (placeUnit == null || w.c.unit(placeUnit) == null || w.c.unit(placeUnit).kind != Content.COP)) { placeUnit = "patrol"; placeVehicle = null; }
-            if (t.equals("army") && (placeUnit == null || w.c.unit(placeUnit) == null || w.c.unit(placeUnit).kind != Content.SOLDIER)) { placeUnit = "rifleman"; placeVehicle = null; }
+            if (t.equals("police") && (placeUnit == null || w.c.unit(placeUnit) == null || w.c.unit(placeUnit).kind != Content.COP)) { placeUnit = "patrol"; placeVehicle = null; placeTemplate = null; palCat.put(t, "units"); }
+            if (t.equals("army") && (placeUnit == null || w.c.unit(placeUnit) == null || w.c.unit(placeUnit).kind != Content.SOLDIER)) { placeUnit = "rifleman"; placeVehicle = null; placeTemplate = null; palCat.put(t, "units"); }
+            if (t.equals("build") && w.roles.role != Roles.GOD && !buildItem.startsWith("bd:")) buildItem = "bd:barricade";
+            if (!t.equals("orders")) {
+                ordVeh = -1;
+                routePts.clear();
+                cordonAX = -1;
+            }
             if (t.equals("erase") && brush < 10) brush = 50;
         } else if (id.startsWith("z:")) {
             String z = id.substring(2);
@@ -3410,12 +3828,13 @@ public final class Game {
                 String hit = ui.at(x, y);
                 toUi = hit != null;
                 ui.pressed = hit;
-                if (screen == S_PLAY && w != null && w.mode == World.MODE_SURVIVOR && dist(x, y, joyCX, joyCY) < ui.dp(80)) {
+                if (screen == S_PLAY && w != null && stickOn() && dist(x, y, joyCX, joyCY) < ui.dp(80)) {
                     joyPtr = id;
                     toUi = true;
                     ui.pressed = null;
                     joy(x, y);
                 } else if (!toUi && screen == S_PLAY && brushTool()) {
+                    strokeMass = false;
                     lastPaintX = x;
                     lastPaintY = y;
                     paint(x, y);
@@ -3628,6 +4047,10 @@ public final class Game {
             clearError();
             return true;
         }
+        if (rulesSheet) {
+            rulesSheet = false;
+            return true;
+        }
         switch (screen) {
             case S_PLAY:
                 if (inspectorOpen()) closeInspector();
@@ -3646,11 +4069,35 @@ public final class Game {
         return (float) Math.sqrt(dx * dx + dy * dy);
     }
 
+    /** A horde was painted this stroke (one per stroke). */
+    private boolean strokeMass;
+
     private boolean brushTool() {
-        return tool.equals("dead") || tool.equals("erase");
+        return tool.equals("dead") || tool.equals("erase") && eraseMode.equals("brush") || tool.equals("build") && groundBuild();
+    }
+
+    /** A Build choice laid by dragging: barricades, walls, roads, clearing. */
+    private boolean groundBuild() {
+        return buildItem.equals("bd:barricade") || buildItem.equals("bd:wall") || buildItem.equals("bd:road") || buildItem.equals("bd:clear");
+    }
+
+    private int buildKind() {
+        switch (buildItem) {
+            case "bd:wall": return Tools.B_WALL;
+            case "bd:road": return Tools.B_ROAD;
+            case "bd:house": return Tools.B_HOUSE;
+            case "bd:clear": return Tools.B_CLEAR;
+            default: return Tools.B_BARRICADE;
+        }
+    }
+
+    /** Is the stick on screen: the survivor, someone God took over, or a vehicle driven? */
+    private boolean stickOn() {
+        return replay == null && (w.mode == World.MODE_SURVIVOR && w.playerEnt >= 0 || w.orders.possessing || w.orders.driven >= 0);
     }
 
     private float brushRadius() {
+        if (tool.equals("build")) return buildItem.equals("bd:clear") ? 40 : 24;
         if (tool.equals("erase")) return brush * 3 + 30;
         return brush <= 1 ? 6 : 14 + (float) Math.sqrt(brush) * 12;
     }
@@ -3665,6 +4112,27 @@ public final class Game {
         if (tool.equals("erase")) {
             view.brushColor = 0xC0E8E8E8;
             Actions.erase(w, x, y, brushRadius());
+            return;
+        }
+        if (tool.equals("build")) {
+            view.brushColor = 0xC0E0C060;
+            Actions.build(w, buildKind(), x, y);
+            return;
+        }
+        // a horde goes down once a stroke, not again at every step of the drag
+        if (brush >= 2000 && tool.equals("dead")) {
+            if (strokeMass) return;
+            strokeMass = true;
+        }
+        if (brush >= 10000) {
+            // tens of thousands: a few as people, the rest into the streets' counts
+            if (!w.r.walkablePx(x, y)) {
+                toast("The dead can't stand there");
+                return;
+            }
+            int ind = Actions.mass(w, x, y, brush, zType);
+            toast(fmt(brush) + " of the dead: " + (ind < brush ? "only " + fmt(ind) + " placed as individuals, the rest counted in the streets" : "all placed"));
+            view.brushColor = 0xC0E04040;
             return;
         }
         if (brush >= 2000) {
@@ -3690,9 +4158,43 @@ public final class Game {
         rippleT = 0;
         if (brushTool()) return; // painted on the way down
         switch (tool) {
+            case "build": {
+                if (buildItem.startsWith("bu:")) {
+                    Content.Unit u = w.c.unit(buildItem.substring(3));
+                    int n = u != null && u.weapon != null ? 3 : 6;
+                    toast(Actions.people(w, buildItem.substring(3), n, x, y) ? n + " " + u.name.toLowerCase() + (n > 1 ? "s" : "") + " placed" : "They can't stand there");
+                } else if (buildItem.startsWith("bv:")) {
+                    int v = Actions.vehicle(w, buildItem.substring(3), x, y);
+                    toast(v >= 0 ? w.c.vtype(buildItem.substring(3)).name + " placed" : "No road near there");
+                } else if (buildItem.equals("bd:house")) {
+                    if (Actions.build(w, Tools.B_HOUSE, x, y) == 0) toast("A house needs open ground, off the road");
+                } else {
+                    String k = buildItem.substring(3);
+                    int kind = -1;
+                    for (int d = 0; d < Defences.KINDS; d++) if (Defences.IDS[d].equals(k)) kind = d;
+                    if (kind >= 0) {
+                        if (Actions.defence(w, kind, x, y)) ping(x, y);
+                        else toast("It can't go there");
+                    }
+                }
+                return;
+            }
+            case "erase": {
+                if (!eraseMode.equals("town")) return;
+                int st = Tools.settlementAt(w, x, y);
+                if (st < 0) {
+                    toast("Tap a town or a city");
+                    return;
+                }
+                toast(fmt(Actions.clear(w, Tools.CLEAR_TOWN, st)) + " of the dead gone from " + w.r.settlements.get(st).name);
+                return;
+            }
             case "police":
             case "army": {
-                if (placeVehicle != null) {
+                if (placeTemplate != null) {
+                    Squads.Squad s = Actions.template(w, placeTemplate, x, y);
+                    toast(s != null ? s.label + " placed" + (s.vehicle >= 0 ? " with its " + w.veh.type(s.vehicle).name.toLowerCase() : "") : "They can't stand there");
+                } else if (placeVehicle != null) {
                     int v = Actions.vehicle(w, placeVehicle, x, y);
                     toast(v >= 0 ? w.c.vtype(placeVehicle).name + " placed" : "No road near there");
                 } else {
@@ -3730,11 +4232,26 @@ public final class Game {
                 return;
             }
             case "orders": {
+                if (ordVeh >= 0 && w.veh.usable(ordVeh)) {
+                    if (w.orders.drives(ordVeh)) return;
+                    if (Actions.vehicleOrder(w, ordVeh, vehMode, x, y)) ping(x, y);
+                    else toast(vehMode == Orders.VO_ORBIT ? "Only aircraft can orbit" : "It can't get there");
+                    return;
+                }
+                if (inspSquad != null && inspSquad.alive && !orderMode.equals("move") && w.roles.canOrder(inspSquad)) {
+                    squadOrder(x, y);
+                    return;
+                }
                 if (w.roles.commandsFormations()) {
                     Forces.Formation fm = w.forces.formationAt(x, y, Math.max(60, ui.dp(24) / cam.zoom));
                     if (fm != null && fm != inspFormation) {
                         inspFormation = fm;
                         inspSquad = null;
+                        return;
+                    }
+                    if (inspFormation != null && inspFormation.alive && fpMode != 0) {
+                        if (Actions.posture(w, inspFormation, fpMode, x, y)) ping(x, y);
+                        else toast("No road there");
                         return;
                     }
                     if (inspFormation != null && inspFormation.alive) {
@@ -3747,12 +4264,24 @@ public final class Game {
                     }
                 }
                 Squads.Squad s = Tools.squadAt(w, x, y, Math.max(40, ui.dp(22) / cam.zoom));
+                if (s == null && inspSquad == null && w.roles.role == Roles.GOD) {
+                    // God can send any vehicle too
+                    int v = vehicleAt(x, y);
+                    if (v >= 0) {
+                        ordVeh = v;
+                        vehMode = Orders.VO_GO;
+                        return;
+                    }
+                }
                 if (s != null && s != inspSquad) {
                     if (!w.roles.canOrder(s)) {
                         toast(s.name + " isn't yours to command");
                         return;
                     }
                     inspSquad = s;
+                    orderMode = "move";
+                    routePts.clear();
+                    cordonAX = -1;
                     return;
                 }
                 if (inspSquad == null && w.roles.role == Roles.SQUAD && w.roles.target >= 0 && w.roles.target < w.sq.list.size())
@@ -3797,6 +4326,81 @@ public final class Game {
             }
             default:
                 inspect(sx, sy, x, y);
+        }
+    }
+
+    /** The vehicle nearest a tap, or -1. */
+    private int vehicleAt(float x, float y) {
+        float reach = Math.max(ui.dp(26) / cam.zoom, 12);
+        int v = -1;
+        float bd = reach * reach;
+        for (int i = 0; i < w.veh.top; i++) {
+            if (!w.veh.usable(i)) continue;
+            float dx = w.veh.x[i] - x, dy = w.veh.y[i] - y, d = dx * dx + dy * dy;
+            if (d < bd) {
+                bd = d;
+                v = i;
+            }
+        }
+        return v;
+    }
+
+    /** A tap with a squad picked and an order mode other than move: a route point, a fall-back, a cordon... */
+    private void squadOrder(float x, float y) {
+        Squads.Squad s = inspSquad;
+        switch (orderMode) {
+            case "route":
+                if (!w.r.walkablePx(x, y)) {
+                    toast("They can't go there");
+                    return;
+                }
+                routePts.add(x);
+                routePts.add(y);
+                if (routePts.size() >= 16) onButton("o:go");
+                return;
+            case "fall":
+                if (Actions.fallBack(w, s, x, y)) ping(x, y);
+                orderMode = "move";
+                return;
+            case "cordon":
+                if (cordonAX < 0) {
+                    cordonAX = x;
+                    cordonAY = y;
+                    return;
+                }
+                Actions.cordon(w, s, cordonAX, cordonAY, x, y);
+                cordonAX = -1;
+                orderMode = "move";
+                return;
+            case "clear":
+                Actions.clearArea(w, s, x, y, 220);
+                orderMode = "move";
+                return;
+            case "escort": {
+                // whoever is nearest the tap: a person, else a vehicle
+                float reach = Math.max(ui.dp(20) / cam.zoom, 10);
+                int best = -1;
+                float bd = reach * reach;
+                Ents e = w.e;
+                for (int i = 0; i < e.top; i++) {
+                    if (e.loc[i] != Ents.FREE || e.kind[i] == Ents.ZOMBIE || e.squad[i] == s.id) continue;
+                    float dx = e.x[i] - x, dy = e.y[i] - y, d = dx * dx + dy * dy;
+                    if (d < bd) {
+                        bd = d;
+                        best = i;
+                    }
+                }
+                boolean ok;
+                if (best >= 0) ok = Actions.escort(w, s, best, false);
+                else {
+                    int v = vehicleAt(x, y);
+                    ok = v >= 0 && Actions.escort(w, s, v, true);
+                }
+                if (!ok) toast("Tap a person or a vehicle to escort");
+                else orderMode = "move";
+                return;
+            }
+            default:
         }
     }
 
