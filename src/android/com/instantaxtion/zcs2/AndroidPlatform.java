@@ -96,6 +96,7 @@ final class AndroidPlatform implements Platform {
     public GImage newImage(int w, int h) { return new AndroidImage(w, h); }
 
     public float density() { return act.getResources().getDisplayMetrics().density; }
+    public long maxMemory() { return Runtime.getRuntime().maxMemory(); }
 
     public InputStream openAsset(String name) throws IOException { return act.getAssets().open(name); }
 

@@ -19,7 +19,12 @@ public final class MapPainter {
     public static final float[] FROM = {0, 0.28f, 0.62f, 1.5f};
     public static final int LOW = 4, HIGH = 16; // kept for older callers
     private static final long BUDGET_BYTES = 80L << 20;
+    /** Today's maps: the region (null on a real-scale map). */
     private final Region r;
+    /** A real-scale map: its chunks come from here (null on today's maps). */
+    private final NationPainter.Source src;
+    private final Nation nat;
+    private final long seed;
     private final Platform pf;
     public GImage regionImage;
     private int[] regionPixels;
@@ -61,9 +66,113 @@ public final class MapPainter {
     public MapPainter(Region r, Platform pf, int maxChunks) {
         this.r = r;
         this.pf = pf;
+        src = null;
+        nat = null;
+        seed = r.seed;
         cache = new LinkedHashMap<Integer, GImage>(128, 0.75f, true);
         buildRegionImage();
         seenChanges = r.changes;
+    }
+
+    /**
+     * The street pictures of a real-scale map, painted from its cached chunks (a picture whose chunks aren't all in
+     * memory isn't painted: they are asked for in the background, and the district picture stands in). The far
+     * zooms' picture is the nation's country picture.
+     */
+    public MapPainter(NationPainter.Source src, Platform pf, GImage countryImage) {
+        r = null;
+        this.src = src;
+        this.pf = pf;
+        nat = src.nation();
+        seed = nat.seed;
+        cache = new LinkedHashMap<Integer, GImage>(128, 0.75f, true);
+        regionImage = countryImage;
+    }
+
+    /** The map's side in tiles. */
+    public int tiles() {
+        return r != null ? r.W : nat.size;
+    }
+
+    // ------------------------------------------------------------------ tiles: the region's, or the chunks' round the picture
+
+    /** The chunks round the picture being painted (3 x 3 from (winX, winY), in the nation's chunk grid). */
+    private final Chunk[] win = new Chunk[9];
+    private int winX, winY;
+
+    private int t(int x, int y) {
+        if (r != null) return r.t(x, y);
+        if (x < 0 || y < 0 || x >= nat.size || y >= nat.size) return Tile.DEEP;
+        int k = ((y >> 6) - winY) * 3 + (x >> 6) - winX;
+        if (k < 0 || k > 8 || win[k] == null) return Tile.GRASS;
+        return win[k].tile[(y & 63) << 6 | (x & 63)];
+    }
+
+    /**
+     * Gathers the chunks a picture at tile (tx0, ty0) reads (it and the margin round it). False if any isn't in memory
+     * yet; those are asked for.
+     */
+    private boolean window(int tx0, int ty0) {
+        winX = (tx0 >> 6) - 1;
+        winY = (ty0 >> 6) - 1;
+        boolean all = true;
+        int lo = -M - 2, hi = CHUNK + M + 2;
+        for (int j = 0; j < 3; j++)
+            for (int i = 0; i < 3; i++) {
+                int cx = winX + i, cy = winY + j;
+                win[j * 3 + i] = null;
+                // only the chunks the picture and its margin reach
+                if ((cx + 1) * 64 <= tx0 + lo || cx * 64 >= tx0 + hi || (cy + 1) * 64 <= ty0 + lo || cy * 64 >= ty0 + hi) continue;
+                if (cx < 0 || cy < 0 || cx >= nat.sw || cy >= nat.sw) continue;
+                Chunk c = src.chunk(cx, cy);
+                if (c == null) {
+                    src.want(cx, cy);
+                    all = false;
+                }
+                win[j * 3 + i] = c;
+            }
+        return all;
+    }
+
+    /** Whether a picture's chunks are all in memory (else they're asked for). */
+    public boolean ready(int pcx, int pcy) {
+        return r != null || window(pcx * CHUNK, pcy * CHUNK);
+    }
+
+    /** The colour of a tile as the far pictures show it: a roof for a building, darker at its edge. */
+    private int tileColorAt(int x, int y, boolean texture) {
+        if (r != null) return tileColor(r, x, y, texture);
+        int t = t(x, y);
+        int c = GROUND[t];
+        if (t == Tile.BUILDING) {
+            int k = ((y >> 6) - winY) * 3 + (x >> 6) - winX;
+            Chunk ch = k >= 0 && k <= 8 ? win[k] : null;
+            if (ch != null) {
+                int v = ch.bld[(y & 63) << 6 | (x & 63)];
+                int bx, by, bw, bh;
+                if (v > 0) {
+                    int b = v - 1;
+                    c = ch.broof[b];
+                    bx = ch.cx * 64 + ch.bx[b];
+                    by = ch.cy * 64 + ch.by[b];
+                    bw = ch.bw[b];
+                    bh = ch.bh[b];
+                } else if (v < 0) {
+                    int b = -v - 1;
+                    c = nat.broof[b];
+                    bx = nat.bx[b];
+                    by = nat.by[b];
+                    bw = nat.bw[b];
+                    bh = nat.bh[b];
+                } else bx = by = bw = bh = -10;
+                if (x == bx || y == by || x == bx + bw - 1 || y == by + bh - 1) c = shade(c, 0.8f);
+            }
+        }
+        if (texture && natural(t)) {
+            float n = (Rng.unit(seed, x >> 1, y >> 1) - 0.5f) * 0.07f + (Rng.unit(seed, x, y) - 0.5f) * 0.04f;
+            c = shade(c, 1 + n);
+        }
+        return c;
     }
 
     private static boolean natural(int t) {
@@ -122,7 +231,7 @@ public final class MapPainter {
 
     /** Redraws what changed on the map since last time (rubble, blown bridges): only the changed rectangles. */
     public void refresh() {
-        if (r.changes == seenChanges) return;
+        if (r == null || r.changes == seenChanges) return;
         seenChanges = r.changes;
         int st = step(), iw = r.W / st, ih = r.H / st;
         for (int[] d : r.dirty) {
@@ -175,6 +284,7 @@ public final class MapPainter {
         int ppt = PPT[lvl];
         int side = CHUNK * ppt;
         // a picture the cache let go of at this level is painted over rather than a new one made
+        if (r == null && !window(cx * CHUNK, cy * CHUNK)) return null;
         img = spare[lvl];
         spare[lvl] = null;
         if (img == null) img = pf.newImage(side, side);
@@ -284,6 +394,11 @@ public final class MapPainter {
         return mix(c1, c2, t);
     }
 
+    /** The water's colour at a distance from land (in tiles; 0.5 at the shore), as the ground paints it. */
+    public static int waterColorAt(float d) {
+        return waterColor(d);
+    }
+
     /** The water's colour at a distance from land (in tiles; 0.5 at the shore). */
     private static int waterColor(float d) {
         if (d < 1.6f) return lerp(SHALLOW, MIDWATER, (d - 0.5f) / 1.1f);
@@ -335,7 +450,7 @@ public final class MapPainter {
     void paintGround(int[] out, int tx0, int ty0, int p, int lvl) {
         tables(p);
         int side = CHUNK * p;
-        long seed = r.seed;
+        long seed = this.seed;
         if (rows == null || rows.length < NCLS * 5 * p) rows = new float[NCLS * 5 * p];
         int lgx = (tx0 - M) >> 2, lgy = (ty0 - M) >> 2;
         lumpyCorners(lumpA, seed + 17, lgx, lgy);
@@ -343,7 +458,7 @@ public final class MapPainter {
         for (int wy = 0; wy < WIN; wy++)
             for (int wx = 0; wx < WIN; wx++) {
                 int tx = tx0 - M + wx, ty = ty0 - M + wy, i = wy * WIN + wx;
-                int t = r.t(tx, ty);
+                int t = t(tx, ty);
                 byte c = SOFT[t];
                 wc[i] = c;
                 if (c >= 0) present |= 1 << c;
@@ -425,7 +540,7 @@ public final class MapPainter {
                         if (wx > 0) v = Math.min(v, wd[i + WIN - 1] + D);
                     }
                     v = Math.min(v, M + 1);
-                    if (r.t(tx0 - M + wx, ty0 - M + wy) == Tile.DEEP) v += 2.5f;
+                    if (t(tx0 - M + wx, ty0 - M + wy) == Tile.DEEP) v += 2.5f;
                     wd[i] = v;
                 }
         }
@@ -459,12 +574,12 @@ public final class MapPainter {
                 int base = y * p * side + x * p;
                 if (c0 < 0) {
                     // man-made: square, one colour (gardens and parks mottled smoothly)
-                    int t = r.t(tx, ty);
+                    int t = t(tx, ty);
                     if (realistic && natural(t)) {
                         fillPlain(out, base, side, p, wi, GROUND[t], false, false);
                         continue;
                     }
-                    int col = t == Tile.BUILDING && lvl >= 1 ? GROUND[Tile.BUILDING] : tileColor(r, tx, ty, realistic);
+                    int col = t == Tile.BUILDING && lvl >= 1 ? GROUND[Tile.BUILDING] : tileColorAt(tx, ty, realistic);
                     for (int j = 0; j < p; j++) {
                         int o = base + j * side;
                         for (int i = 0; i < p; i++) out[o + i] = col;
@@ -727,7 +842,7 @@ public final class MapPainter {
         for (int y = 0; y < CHUNK; y++)
             for (int x = 0; x < CHUNK; x++) {
                 int tx = tx0 + x, ty = ty0 + y;
-                int t = r.t(tx, ty);
+                int t = t(tx, ty);
                 float px = x * p, py = y * p;
                 int c = GROUND[t];
                 switch (t) {
@@ -742,8 +857,8 @@ public final class MapPainter {
                     case Tile.WATER:
                     case Tile.DEEP: {
                         // a few glints, away from the shore (the shallows are in the ground already)
-                        boolean shore = !Tile.water(r.t(tx - 1, ty)) || !Tile.water(r.t(tx + 1, ty)) || !Tile.water(r.t(tx, ty - 1)) || !Tile.water(r.t(tx, ty + 1));
-                        if (!shore && Rng.unit(r.seed, tx, ty * 3) < 0.07f) rect(out, side, px + p * 0.15f, py + p / 2f, p * 0.6f, lw, 0x40E8F4FF);
+                        boolean shore = !Tile.water(t(tx - 1, ty)) || !Tile.water(t(tx + 1, ty)) || !Tile.water(t(tx, ty - 1)) || !Tile.water(t(tx, ty + 1));
+                        if (!shore && Rng.unit(seed, tx, ty * 3) < 0.07f) rect(out, side, px + p * 0.15f, py + p / 2f, p * 0.6f, lw, 0x40E8F4FF);
                         break;
                     }
                     case Tile.LOT:
@@ -771,10 +886,10 @@ public final class MapPainter {
                         rect(out, side, px, py + p * 0.66f, p, lw, 0xFFB0B0B0);
                         break;
                     case Tile.BRIDGE:
-                        if (!Tile.roadish(r.t(tx, ty - 1)) && Tile.water(r.t(tx, ty - 1))) rect(out, side, px, py, p, lw * 2, 0xFF8A8480);
-                        if (!Tile.roadish(r.t(tx, ty + 1)) && Tile.water(r.t(tx, ty + 1))) rect(out, side, px, py + p - lw * 2, p, lw * 2, 0xFF8A8480);
-                        if (!Tile.roadish(r.t(tx - 1, ty)) && Tile.water(r.t(tx - 1, ty))) rect(out, side, px, py, lw * 2, p, 0xFF8A8480);
-                        if (!Tile.roadish(r.t(tx + 1, ty)) && Tile.water(r.t(tx + 1, ty))) rect(out, side, px + p - lw * 2, py, lw * 2, p, 0xFF8A8480);
+                        if (!Tile.roadish(t(tx, ty - 1)) && Tile.water(t(tx, ty - 1))) rect(out, side, px, py, p, lw * 2, 0xFF8A8480);
+                        if (!Tile.roadish(t(tx, ty + 1)) && Tile.water(t(tx, ty + 1))) rect(out, side, px, py + p - lw * 2, p, lw * 2, 0xFF8A8480);
+                        if (!Tile.roadish(t(tx - 1, ty)) && Tile.water(t(tx - 1, ty))) rect(out, side, px, py, lw * 2, p, 0xFF8A8480);
+                        if (!Tile.roadish(t(tx + 1, ty)) && Tile.water(t(tx + 1, ty))) rect(out, side, px + p - lw * 2, py, lw * 2, p, 0xFF8A8480);
                         break;
                     default:
                 }
@@ -784,12 +899,12 @@ public final class MapPainter {
         for (int y = 0; y < CHUNK; y++)
             for (int x = 0; x < CHUNK; x++) {
                 int tx = tx0 + x, ty = ty0 + y;
-                int t = r.t(tx, ty);
+                int t = t(tx, ty);
                 if (!Tile.roadish(t) || t == Tile.BRIDGE) continue;
                 float px = x * p, py = y * p;
                 for (int d = 0; d < 4; d++) {
                     int nx = tx + (d == 0 ? -1 : d == 1 ? 1 : 0), ny = ty + (d == 2 ? -1 : d == 3 ? 1 : 0);
-                    int n = r.t(nx, ny);
+                    int n = t(nx, ny);
                     if (Tile.roadish(n)) continue;
                     if (d == 0) rect(out, side, px, py, kw, p, 0x50000000);
                     else if (d == 1) rect(out, side, px + p - kw, py, kw, p, 0x50000000);
@@ -807,18 +922,18 @@ public final class MapPainter {
         for (int y = 0; y < CHUNK; y++)
             for (int x = 0; x < CHUNK; x++) {
                 int tx = tx0 + x, ty = ty0 + y;
-                int t = r.t(tx, ty);
-                boolean tree = t == Tile.TREE || (t == Tile.FOREST && Rng.unit(r.seed, tx * 7, ty) < 0.7f)
-                        || ((t == Tile.PARK || t == Tile.YARD) && Rng.unit(r.seed, tx * 5, ty * 3) < 0.06f);
+                int t = t(tx, ty);
+                boolean tree = t == Tile.TREE || (t == Tile.FOREST && Rng.unit(seed, tx * 7, ty) < 0.7f)
+                        || ((t == Tile.PARK || t == Tile.YARD) && Rng.unit(seed, tx * 5, ty * 3) < 0.06f);
                 if (!tree) continue;
                 // the beach stays clear
-                if (t == Tile.FOREST && (Tile.water(r.t(tx - 1, ty)) || Tile.water(r.t(tx + 1, ty)) || Tile.water(r.t(tx, ty - 1)) || Tile.water(r.t(tx, ty + 1)))) continue;
-                float jx = (Rng.unit(r.seed, tx, ty + 11) - 0.5f) * p * 0.6f, jy = (Rng.unit(r.seed, tx + 5, ty) - 0.5f) * p * 0.6f;
-                float rad = p * (0.5f + Rng.unit(r.seed, tx + 1, ty + 1) * 0.35f);
+                if (t == Tile.FOREST && (Tile.water(t(tx - 1, ty)) || Tile.water(t(tx + 1, ty)) || Tile.water(t(tx, ty - 1)) || Tile.water(t(tx, ty + 1)))) continue;
+                float jx = (Rng.unit(seed, tx, ty + 11) - 0.5f) * p * 0.6f, jy = (Rng.unit(seed, tx + 5, ty) - 0.5f) * p * 0.6f;
+                float rad = p * (0.5f + Rng.unit(seed, tx + 1, ty + 1) * 0.35f);
                 float cx = x * p + p / 2f + jx, cy = y * p + p / 2f + jy;
                 boolean forest = t == Tile.FOREST;
                 int base = forest ? 0xFF33502F : 0xFF3D6034;
-                if (Rng.unit(r.seed, tx + 3, ty + 9) < 0.25f) base = forest ? 0xFF2D4A33 : 0xFF4A6A36;
+                if (Rng.unit(seed, tx + 3, ty + 9) < 0.25f) base = forest ? 0xFF2D4A33 : 0xFF4A6A36;
                 disc(out, side, cx + rad * 0.35f, cy + rad * 0.45f, rad * 1.05f, 0x48000000);
                 disc(out, side, cx, cy, rad, shade(base, 0.85f));
                 if (high) {
@@ -829,12 +944,53 @@ public final class MapPainter {
             }
     }
 
+    private RoadGraph roads() {
+        return r != null ? r.roads : nat.roads;
+    }
+
+    // the edges near a picture on a real-scale map (from the nation's per-chunk buckets), each once
+    private int[] edgeList, edgeStamp;
+    private int edgeN, edgeStampN;
+
+    /**
+     * How many edges to look at for a picture at (tx0, ty0): on today's maps every edge (edgeList null: edge q is q),
+     * on a real-scale map those bucketed in the chunks the picture and 60 px round it touch.
+     */
+    private int laneEdges(int tx0, int ty0) {
+        RoadGraph rg = roads();
+        if (r != null) {
+            edgeList = null;
+            return rg.edgeCount;
+        }
+        if (edgeList == null) edgeList = new int[256];
+        if (edgeStamp == null || edgeStamp.length < rg.edgeCount) edgeStamp = new int[rg.edgeCount];
+        edgeStampN++;
+        edgeN = 0;
+        if (rg.chunkEdgeStart == null || rg.chunkW != nat.sw) return 0;
+        int cx0 = Math.max(0, (tx0 - 4) >> 6), cy0 = Math.max(0, (ty0 - 4) >> 6);
+        int cx1 = Math.min(nat.sw - 1, (tx0 + CHUNK + 4) >> 6), cy1 = Math.min(nat.sw - 1, (ty0 + CHUNK + 4) >> 6);
+        for (int cy = cy0; cy <= cy1; cy++)
+            for (int cx = cx0; cx <= cx1; cx++) {
+                int c = cy * nat.sw + cx;
+                for (int k = rg.chunkEdgeStart[c]; k < rg.chunkEdgeStart[c + 1]; k++) {
+                    int e = rg.chunkEdge[k];
+                    if (edgeStamp[e] == edgeStampN) continue;
+                    edgeStamp[e] = edgeStampN;
+                    if (edgeN == edgeList.length) edgeList = java.util.Arrays.copyOf(edgeList, edgeN * 2);
+                    edgeList[edgeN++] = e;
+                }
+            }
+        return edgeN;
+    }
+
     /** Does any road with markings at this level pass near the chunk? (Else the canvas needn't be touched.) */
     boolean hasLanes(int tx0, int ty0, int lvl) {
         if (lvl < 1) return false;
-        RoadGraph rg = r.roads;
+        RoadGraph rg = roads();
         float ox = tx0 * 16f, oy = ty0 * 16f, size = CHUNK * 16f;
-        for (int e = 0; e < rg.edgeCount; e++) {
+        int ne = laneEdges(tx0, ty0);
+        for (int q = 0; q < ne; q++) {
+            int e = edgeList == null ? q : edgeList[q];
             if (!rg.ealive[e] || rg.ekind[e] == RoadGraph.STREET && lvl < 2) continue;
             float ax = rg.nx[rg.ea[e]], ay = rg.ny[rg.ea[e]], bx = rg.nx[rg.eb[e]], by = rg.ny[rg.eb[e]];
             if (Math.max(ax, bx) < ox - 60 || Math.min(ax, bx) > ox + size + 60 || Math.max(ay, by) < oy - 60 || Math.min(ay, by) > oy + size + 60) continue;
@@ -846,9 +1002,11 @@ public final class MapPainter {
     /** Lane markings and crossings from the road graph, on the canvas (over everything else). */
     void paintLanes(Gfx g, int tx0, int ty0, int p, int lvl) {
         boolean high = lvl >= 2;
-        RoadGraph rg = r.roads;
+        RoadGraph rg = roads();
         float ox = tx0 * 16f, oy = ty0 * 16f, sc = p / 16f, size = CHUNK * 16f;
-        for (int e = 0; e < rg.edgeCount; e++) {
+        int ne = laneEdges(tx0, ty0);
+        for (int q = 0; q < ne; q++) {
+            int e = edgeList == null ? q : edgeList[q];
             if (!rg.ealive[e]) continue;
             float ax = rg.nx[rg.ea[e]], ay = rg.ny[rg.ea[e]], bx = rg.nx[rg.eb[e]], by = rg.ny[rg.eb[e]];
             if (Math.max(ax, bx) < ox - 60 || Math.min(ax, bx) > ox + size + 60 || Math.max(ay, by) < oy - 60 || Math.min(ay, by) > oy + size + 60) continue;
@@ -924,6 +1082,6 @@ public final class MapPainter {
         }
         cache.clear();
         cacheBytes = 0;
-        if (regionImage != null) regionImage.recycle();
+        if (regionImage != null && r != null) regionImage.recycle();
     }
 }
