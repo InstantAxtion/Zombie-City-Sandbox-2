@@ -1095,6 +1095,7 @@ public final class Strategic {
         int x0 = Integer.MAX_VALUE, y0 = Integer.MAX_VALUE, x1 = 0, y1 = 0;
         for (int e : span) {
             g.ealive[e] = false;
+            g.changed();
             float ax = g.nx[g.ea[e]], ay = g.ny[g.ea[e]], bx = g.nx[g.eb[e]], by = g.ny[g.eb[e]];
             int steps = (int) (dist(ax, ay, bx, by) / 8) + 1;
             for (int sidx = 0; sidx <= steps; sidx++) {

@@ -42,6 +42,8 @@ public final class Roles extends Module {
     public float heldFor;
     /** The campaign's starting figure (taken once the first count is in), and how long its losing condition has held. */
     public int baseline = -1;
+    /** hold_city on a national map: the share of the capital's people who must still be in it. */
+    static final float HOLD_HOME_MIN = 0.4f;
     public float lowT;
     /** The goal's progress for the HUD: 0..1 towards winning, and a line saying where things stand. */
     public float progress;
@@ -741,13 +743,23 @@ public final class Roles extends Module {
         Region.Settlement cap = w.r.city();
         if (g.equals("holdcity")) {
             // the capital's own people alive: at home, or safe somewhere else (evacuated, sheltering in another town)
-            int alive = Math.max(0, w.strat.cityAlive() - w.strat.hosted(cap.id)) + w.strat.awayFrom(cap.id);
+            int home = Math.max(0, w.strat.cityAlive() - w.strat.hosted(cap.id));
+            int alive = home + w.strat.awayFrom(cap.id);
             if (baseline < 0) baseline = Math.max(1, alive);
-            progress = alive / (float) baseline;
-            progressText = News.num(alive) + " of " + News.num(baseline) + " of the capital's people alive (half must live)";
-            lowT = alive < baseline * 0.5f ? lowT + dt : 0;
-            if (lowT >= 360) end(false, "The capital has fallen", "Fewer than half its people are left, " + days() + " in.");
-            else if (late) end(true, "The capital held", News.num(alive) + " of " + News.num(baseline) + " of its people lived through " + sc.days + " days.");
+            // a real-scale capital (five highways out) can evacuate half its people in a few days whatever the war:
+            // holding it means holding it, so its own people must also stay in it (holdHomeMin of them; 0 on
+            // today's maps, where the goal is as it was)
+            float homeMin = w.rule("holdHomeMin", w.national ? HOLD_HOME_MIN : 0);
+            progress = Math.min(alive / (float) baseline, homeMin > 0 ? home / (baseline * homeMin * 2) : 1);
+            progressText = News.num(alive) + " of " + News.num(baseline) + " of the capital's people alive (half must live)"
+                    + (homeMin > 0 ? "; " + News.num(home) + " still in it (at least " + News.num((int) (baseline * homeMin)) + ")" : "");
+            boolean emptied = homeMin > 0 && home < baseline * homeMin;
+            lowT = alive < baseline * 0.5f || emptied ? lowT + dt : 0;
+            if (lowT >= 360) end(false, emptied && alive >= baseline * 0.5f ? "The capital is abandoned" : "The capital has fallen",
+                    emptied && alive >= baseline * 0.5f ? "Fewer than " + Math.round(homeMin * 10) + " in 10 of its people are still in it, " + days() + " in."
+                            : "Fewer than half its people are left, " + days() + " in.");
+            else if (late) end(true, "The capital held", News.num(alive) + " of " + News.num(baseline) + " of its people lived through " + sc.days + " days"
+                    + (homeMin > 0 ? ", " + News.num(home) + " of them in the capital." : "."));
         } else if (g.equals("evaccoast") || g.equals("evacmil")) {
             if (baseline < 0) baseline = Math.max(1, coastalNow());
             int safe = coastalSafe(), need = (int) (baseline * w.c.rule("evacNeed", 0.5f));

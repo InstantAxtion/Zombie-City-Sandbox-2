@@ -725,8 +725,10 @@ public final class Region {
                     if (tileAtPx(sx, sy) == Tile.BARRICADE) blocked = true;
                 }
             }
+            float was = g.epen[e];
             if (blocked) g.epen[e] = Math.max(g.epen[e], 1e6f);
             else if (g.epen[e] >= 1e6f) g.epen[e] = 0;
+            if (g.epen[e] != was) g.changed();
         }
     }
 
