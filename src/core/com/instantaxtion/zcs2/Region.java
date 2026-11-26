@@ -156,6 +156,71 @@ public final class Region {
         return Tile.walkable(tileAtPx(x, y));
     }
 
+    /** True when the tile and its eight neighbours can all be walked on (room to stand a few people). */
+    private boolean openAround(int tx, int ty) {
+        for (int dy = -1; dy <= 1; dy++)
+            for (int dx = -1; dx <= 1; dx++) if (!Tile.walkable(t(tx + dx, ty + dy))) return false;
+        return true;
+    }
+
+    /**
+     * Open ground near (x, y): the nearest walkable tile (if (x, y) is inside something), then, walking from
+     * there, the nearest spot with room round it, or (road) the nearest street. Returns a tile's middle, or
+     * the best found within about 30 tiles.
+     */
+    public float[] openGroundNear(float x, float y, boolean road) {
+        int tx0 = (int) Math.floor(x / Tile.SIZE), ty0 = (int) Math.floor(y / Tile.SIZE);
+        int sx = tx0, sy = ty0;
+        if (!Tile.walkable(t(sx, sy))) {
+            boolean found = false;
+            for (int rad = 1; rad <= 30 && !found; rad++)
+                for (int dy = -rad; dy <= rad && !found; dy++)
+                    for (int dx = -rad; dx <= rad; dx++) {
+                        if (Math.max(Math.abs(dx), Math.abs(dy)) != rad) continue;
+                        if (Tile.walkable(t(tx0 + dx, ty0 + dy))) {
+                            sx = tx0 + dx;
+                            sy = ty0 + dy;
+                            found = true;
+                            break;
+                        }
+                    }
+            if (!found) return road ? null : new float[]{x, y};
+        }
+        // breadth-first over walkable tiles from there
+        int R = 30, D = R * 2 + 1;
+        int[] q = new int[D * D];
+        boolean[] seen = new boolean[D * D];
+        int head = 0, tail = 0;
+        q[tail++] = (sy - ty0 + R) * D + (sx - tx0 + R);
+        seen[q[0]] = true;
+        int[] DX = {1, -1, 0, 0}, DY = {0, 0, 1, -1};
+        while (head < tail) {
+            int c = q[head++];
+            int cx = c % D - R + tx0, cy = c / D - R + ty0;
+            int tt = t(cx, cy);
+            if (road ? (tt == Tile.ROAD || tt == Tile.HIGHWAY) : openAround(cx, cy))
+                return new float[]{cx * Tile.SIZE + Tile.SIZE / 2f, cy * Tile.SIZE + Tile.SIZE / 2f};
+            for (int d = 0; d < 4; d++) {
+                int nx = cx + DX[d] - tx0 + R, ny = cy + DY[d] - ty0 + R;
+                if (nx < 0 || ny < 0 || nx >= D || ny >= D) continue;
+                int k = ny * D + nx;
+                if (seen[k] || !Tile.walkable(t(cx + DX[d], cy + DY[d]))) continue;
+                seen[k] = true;
+                q[tail++] = k;
+            }
+        }
+        return road ? null : new float[]{sx * Tile.SIZE + Tile.SIZE / 2f, sy * Tile.SIZE + Tile.SIZE / 2f};
+    }
+
+    /** Moves a facility's yard (where its people come out) onto open ground if it's inside a building. */
+    public void snapToOpenGround(Facility f) {
+        int tx = (int) Math.floor(f.x / Tile.SIZE), ty = (int) Math.floor(f.y / Tile.SIZE);
+        if (openAround(tx, ty)) return;
+        float[] p = openGroundNear(f.x, f.y, false);
+        f.x = p[0];
+        f.y = p[1];
+    }
+
     public int sectorOfPx(float x, float y) {
         int sx = (int) (x / (Tile.SIZE * SECT)), sy = (int) (y / (Tile.SIZE * SECT));
         if (sx < 0) sx = 0;
@@ -295,17 +360,27 @@ public final class Region {
 
     /** Roads crossed by a barricade are closed to routing (and opened again when it's gone). */
     public void closeBarricadedRoads() {
+        closeBarricadedRoads(-1, -1, -1, -1);
+    }
+
+    /** The same, only for roads passing near the tiles (x0, y0)-(x1, y1) (all of them when x1 < 0). */
+    public void closeBarricadedRoads(int x0, int y0, int x1, int y1) {
         RoadGraph g = roads;
+        float px0 = x0 * Tile.SIZE - 48, py0 = y0 * Tile.SIZE - 48, px1 = (x1 + 1) * Tile.SIZE + 48, py1 = (y1 + 1) * Tile.SIZE + 48;
         for (int e = 0; e < g.edgeCount; e++) {
             float ax = g.nx[g.ea[e]], ay = g.ny[g.ea[e]], bx = g.nx[g.eb[e]], by = g.ny[g.eb[e]];
+            if (x1 >= 0 && (Math.max(ax, bx) < px0 || Math.min(ax, bx) > px1 || Math.max(ay, by) < py0 || Math.min(ay, by) > py1)) continue;
             float dx = bx - ax, dy = by - ay, len = (float) Math.sqrt(dx * dx + dy * dy);
             int steps = (int) (len / 8) + 1;
             boolean blocked = false;
-            for (int k = 0; k <= steps && !blocked; k++) {
-                float x = ax + dx * k / steps, y = ay + dy * k / steps;
-                // across the whole width of the road
-                float h = g.ehalf[e] * 0.8f, px = -dy / (len + 0.01f) * h, py = dx / (len + 0.01f) * h;
-                for (int j = -1; j <= 1 && !blocked; j++) if (tileAtPx(x + px * j, y + py * j) == Tile.BARRICADE) blocked = true;
+            float ux = dx / (len + 0.01f), uy = dy / (len + 0.01f);
+            float h = g.ehalf[e] * 0.9f;
+            // along the road and a little past each junction (a wall across the corner), across its whole width
+            for (int k = -1; k <= steps + 1 && !blocked; k++) {
+                float along = k < 0 ? -h * 0.5f : k > steps ? len + h * 0.5f : len * k / steps;
+                float x = ax + ux * along, y = ay + uy * along;
+                for (int j = -2; j <= 2 && !blocked; j++)
+                    if (tileAtPx(x - uy * h * j * 0.5f, y + ux * h * j * 0.5f) == Tile.BARRICADE) blocked = true;
             }
             if (blocked) g.epen[e] = Math.max(g.epen[e], 1e6f);
             else if (g.epen[e] >= 1e6f) g.epen[e] = 0;

@@ -144,8 +144,9 @@ public final class Engineers extends Module {
     private void barricades() {
         int max = (int) w.c.rule("maxBarricades", 40);
         if (barricades >= max) return;
+        int walled = 0;
         for (Dispatch.Post p : w.disp.posts) {
-            if (p.squad < 0 || barricades >= max) continue;
+            if (p.squad < 0 || barricades >= max || walled >= 3) continue;
             long key = ((long) (int) p.x << 32) ^ (int) p.y;
             boolean done = false;
             for (long[] b : built) if (b[0] == key) done = true;
@@ -157,26 +158,29 @@ public final class Engineers extends Module {
                 if (dx * dx + dy * dy < 6000f * 6000f) have = true;
             }
             if (!have) continue;
-            if (wall(p.x + p.fx * 28, p.y + p.fy * 28, -p.fy, p.fx)) {
+            if (wall(p.x + p.fx * 28, p.y + p.fy * 28, -p.fy, p.fx, p.fx, p.fy)) {
                 built.add(new long[]{key});
                 barricades++;
+                walled++;
                 if (barricades <= 3) w.news.radio("Engineers have barricaded a street on the cordon", p.x, p.y, News.COMMAND);
             }
         }
     }
 
-    /** A wall across the street at (x, y) along (ax, ay); true if anything was built. */
-    private boolean wall(float x, float y, float ax, float ay) {
+    /**
+     * A wall across the street at (x, y) along (ax, ay), the dead being towards (fx, fy); true if anything was
+     * built. Only across the street and its pavements; anyone standing there steps to their own side first.
+     */
+    private boolean wall(float x, float y, float ax, float ay, float fx, float fy) {
         Region r = w.r;
         int x0 = Integer.MAX_VALUE, y0 = Integer.MAX_VALUE, x1 = -1, y1 = -1;
         for (int side = -1; side <= 1; side += 2)
-            for (int k = 0; k <= 9; k++) {
+            for (int k = side < 0 ? 1 : 0; k <= 9; k++) {
                 float px = x + ax * side * k * Tile.SIZE, py = y + ay * side * k * Tile.SIZE;
                 int tx = (int) (px / Tile.SIZE), ty = (int) (py / Tile.SIZE);
                 int t = r.t(tx, ty);
-                if (t == Tile.BUILDING || t == Tile.WALL || t == Tile.FENCE || Tile.water(t)) break;
-                if (t != Tile.ROAD && t != Tile.PAVEMENT && t != Tile.LOT && t != Tile.PLAZA && t != Tile.BARRICADE) break;
-                // (people standing there step aside: only build on tiles nobody is on)
+                if (t != Tile.ROAD && t != Tile.PAVEMENT && t != Tile.BARRICADE) break;
+                stepAside(tx, ty, fx, fy);
                 r.set(tx, ty, Tile.BARRICADE);
                 x0 = Math.min(x0, tx);
                 y0 = Math.min(y0, ty);
@@ -186,8 +190,33 @@ public final class Engineers extends Module {
         if (x1 < 0) return false;
         r.rebuildNav(x0 - 1, y0 - 1, x1 + 1, y1 + 1);
         w.sec.connectivity();
-        w.r.closeBarricadedRoads();
+        w.r.closeBarricadedRoads(x0, y0, x1, y1);
         return true;
+    }
+
+    /** Everyone on a tile about to be walled moves off it: the living to the near side, the dead to theirs. */
+    private void stepAside(int tx, int ty, float fx, float fy) {
+        Ents e = w.e;
+        Spatial sp = w.sp;
+        float cx = tx * Tile.SIZE + Tile.SIZE / 2f, cy = ty * Tile.SIZE + Tile.SIZE / 2f;
+        int c = sp.cellOf(cx, cy);
+        for (int pass = 0; pass < 2; pass++) {
+            int a = pass == 0 ? sp.lStart[c] : sp.zStart[c], b = pass == 0 ? sp.lEnd[c] : sp.zEnd[c];
+            int[] L = pass == 0 ? sp.lList : sp.zList;
+            for (int j = a; j < b; j++) {
+                int i = L[j];
+                if (e.loc[i] != Ents.FREE || (int) Math.floor(e.x[i] / Tile.SIZE) != tx || (int) Math.floor(e.y[i] / Tile.SIZE) != ty) continue;
+                float dir = e.kind[i] == Ents.ZOMBIE ? 1 : -1;
+                for (float d = 20; d <= 52; d += 16) {
+                    float nx = cx + fx * dir * d, ny = cy + fy * dir * d;
+                    if (w.r.walkablePx(nx, ny)) {
+                        e.x[i] = nx;
+                        e.y[i] = ny;
+                        break;
+                    }
+                }
+            }
+        }
     }
 
     @Override

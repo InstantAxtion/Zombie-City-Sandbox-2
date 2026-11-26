@@ -45,6 +45,7 @@ final class ArmedAI {
         float dirX = 0, dirY = 0, speed = 0;
         // too close: get out of reach first (faster than the dead, so backing off works)
         float keep = u.weapon != null && u.weapon.range < 100 ? 18 : 30;
+        if (wp != null && e.ammo[i] <= 0) keep = 110; // nothing to shoot with: stay well clear
         if (z >= 0 && zd < keep) {
             // away from the dead, but not into a wall
             dirX = -zx / zd;
@@ -68,7 +69,8 @@ final class ArmedAI {
                 e.intentArg[i] = z;
             }
             e.face[i] = (float) Math.atan2(zy, zx);
-            if (gd > 50) {
+            // edge towards my place if I'm far off it, but not into a pack
+            if (gd > 50 && (gx * zx + gy * zy <= 0 || w.sp.zombiesNear(e, x, y, 100, 6) < 6)) {
                 dirX = gx / gd;
                 dirY = gy / gd;
                 speed = u.walk * 0.6f;
@@ -78,6 +80,11 @@ final class ArmedAI {
             dirY = gy / gd;
             speed = gd > 70 || urgent ? u.run : u.walk;
             if (gd < 20) speed *= gd / 20;
+            // the dead close ahead that I can't shoot yet: don't walk into them, wait for them to show
+            if (z >= 0 && zd < 110 && e.ammo[i] > 0 && (gx * zx + gy * zy) > 0.3f * gd * zd && w.sp.zombiesNear(e, x, y, 110, 6) >= 6) {
+                speed = 0;
+                e.face[i] = (float) Math.atan2(zy, zx);
+            }
         }
         // recover slowly out of the fight
         if ((z < 0 || zd > 200) && e.hp[i] < e.maxHp[i]) e.hp[i] = Math.min(e.maxHp[i], e.hp[i] + 0.6f * World.DT * 2);

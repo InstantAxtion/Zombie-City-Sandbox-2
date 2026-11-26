@@ -315,14 +315,21 @@ public final class World {
                 nx = x;
                 ny = y;
                 vx = vy = 0;
-                // stuck inside something (a building fell on them): step to any open neighbour
+                // stuck inside something (a building fell on them, or put down inside one): out to the nearest
+                // open ground, looking further each ring
                 if (!r.walkablePx(x, y)) {
-                    for (int d = 0; d < 8; d++) {
-                        float ax = x + (float) Math.cos(d * 0.785) * 16, ay = y + (float) Math.sin(d * 0.785) * 16;
-                        if (r.walkablePx(ax, ay)) {
-                            nx = ax;
-                            ny = ay;
-                            break;
+                    boolean out = false;
+                    for (int ring = 1; ring <= 12 && !out; ring++) {
+                        int dirs = 8 + ring * 4;
+                        for (int d = 0; d < dirs; d++) {
+                            double a = d * 6.2831853 / dirs;
+                            float ax = x + (float) Math.cos(a) * ring * 12, ay = y + (float) Math.sin(a) * ring * 12;
+                            if (r.walkablePx(ax, ay)) {
+                                nx = ax;
+                                ny = ay;
+                                out = true;
+                                break;
+                            }
                         }
                     }
                 }

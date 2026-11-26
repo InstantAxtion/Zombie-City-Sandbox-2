@@ -53,7 +53,7 @@ public final class Dispatch {
         float now = (float) w.time;
         // new calls: the dead where people can see them, after the time it takes someone to call
         for (int s = 0; s < sec.n; s++) {
-            int zHere = sp.secZ[s] + (sec.zIn[s] > 0 ? Math.max(1, sec.zIn[s] / 3) : 0);
+            int zHere = sp.secZ[s] + (sec.zIn[s] >= 2 ? Math.max(1, sec.zIn[s] / 3) : 0);
             if (zHere == 0) continue;
             boolean witnesses = sp.secCiv[s] > 0 || sec.popIn[s] > 0 || sp.secCop[s] + sp.secSol[s] > 0;
             if (!witnesses) continue;
@@ -85,7 +85,7 @@ public final class Dispatch {
         for (Incident in : incidents) {
             if (!in.open) continue;
             int s = in.sector;
-            in.zombies = sp.secZ[s] + sec.zIn[s];
+            in.zombies = sp.secZ[s] + (sec.zIn[s] >= 2 ? sec.zIn[s] : 0);
             if (in.zombies > 0) {
                 in.lastSeen = now;
                 place(in, s);
@@ -117,8 +117,11 @@ public final class Dispatch {
         for (int cy = cy0; cy <= cy1; cy++)
             for (int cx = cx0; cx <= cx1; cx++) {
                 int c = cy * w.sp.cw + cx;
-                for (int j = w.sp.zStart[c]; j < w.sp.zEnd[c] && n < 200; j++) {
+                int a = w.sp.zStart[c], b = w.sp.zEnd[c];
+                int stride = Math.max(1, (b - a) / 6);
+                for (int j = a; j < b; j += stride) {
                     int z = w.sp.zList[j];
+                    if (w.r.sectorOfPx(e.x[z], e.y[z]) != s) continue;
                     sx += e.x[z];
                     sy += e.y[z];
                     n++;
@@ -172,10 +175,16 @@ public final class Dispatch {
                 Squads.Squad s = w.sq.get(in.squads.get(k));
                 if (!s.alive || s.incident != in.id) in.squads.remove(k);
             }
-            int have = 0;
+            int have = 0, armed = 0;
+            boolean armyClose = false;
             for (int id : in.squads) {
                 Squads.Squad s = w.sq.get(id);
                 if (s.faction == Ents.COP) have += s.n;
+                armed += s.n;
+                if (s.faction == Ents.SOLDIER) {
+                    float[] p = w.sq.where(s);
+                    if (dist2(p[0], p[1], in.x, in.y) < 500 * 500) armyClose = true;
+                }
             }
             in.assigned = have;
             boolean big = perimeterMode(in.settlement) && in.zombies >= 4;
@@ -183,36 +192,95 @@ public final class Dispatch {
             in.needed = big ? 0 : Math.min(48, 2 + in.zombies / 2);
             if (in.zombies >= 8 && !big) w.mil.considerCall(in);
             if (big) {
-                // inside the perimeter: police come away, the army comes in
-                for (int k = in.squads.size() - 1; k >= 0; k--) {
-                    Squads.Squad s = w.sq.get(in.squads.get(k));
-                    if (s.faction == Ents.COP) {
-                        s.incident = -1;
-                        w.sq.goHome(s);
-                        in.squads.remove(k);
-                    }
-                }
                 w.mil.considerCall(in);
+                // inside the perimeter: police come away once the army is there to take over
+                if (armyClose || w.sp.secSol[in.sector] >= 4)
+                    for (int k = in.squads.size() - 1; k >= 0; k--) {
+                        Squads.Squad s = w.sq.get(in.squads.get(k));
+                        if (s.faction == Ents.COP) {
+                            s.incident = -1;
+                            w.sq.goHome(s);
+                            in.squads.remove(k);
+                        }
+                    }
+                aim(in);
                 continue;
             }
+            // too many for what's left: the ones furthest away and not in a fight go back
             int guard = 0;
-            while (have < in.needed && guard++ < 6) {
+            while (armed > in.needed * 3 / 2 + 4 && guard++ < 4) {
+                Squads.Squad far = null;
+                float fd = -1;
+                for (int id : in.squads) {
+                    Squads.Squad s = w.sq.get(id);
+                    if (s.player || s.faction != Ents.COP) continue;
+                    float[] p = w.sq.where(s);
+                    if (w.sp.nearestZombie(w.e, p[0], p[1], 160) >= 0) continue;
+                    float d = dist2(p[0], p[1], in.x, in.y);
+                    if (d > fd) {
+                        fd = d;
+                        far = s;
+                    }
+                }
+                if (far == null) break;
+                armed -= far.n;
+                if (far.faction == Ents.COP) have -= far.n;
+                far.incident = -1;
+                in.squads.remove(Integer.valueOf(far.id));
+                w.sq.goHome(far);
+            }
+            in.assigned = have;
+            // officers and soldiers already in the streets there count too
+            int present = Math.max(armed, w.sp.secCop[in.sector] + w.sp.secSol[in.sector]);
+            guard = 0;
+            while (present < in.needed && guard++ < 6) {
                 Squads.Squad s = nearestFree(in, Ents.COP, 9000);
                 if (s == null) break;
                 send(s, in);
                 have += s.n;
+                present += s.n;
+            }
+            in.assigned = have;
+            aim(in);
+        }
+    }
+
+    private static float dist2(float ax, float ay, float bx, float by) {
+        float dx = ax - bx, dy = ay - by;
+        return dx * dx + dy * dy;
+    }
+
+    /** The dead have moved: squads on foot that have drifted far from the call (and aren't falling back) go again. */
+    private void aim(Incident in) {
+        float stand = standoff(in);
+        for (int k = 0; k < in.squads.size(); k++) {
+            Squads.Squad s = w.sq.get(in.squads.get(k));
+            if (s.player || s.mode != Squads.M_FOOT || s.fallT > 0) continue;
+            if (s.order != Squads.O_RESPOND && s.order != Squads.O_HOLD) continue;
+            if (w.sq.ammoShare(s) < 0.25f) continue; // fetching ammunition
+            if (dist2(s.gx, s.gy, in.x, in.y) > (stand + 300) * (stand + 300)) {
+                in.squads.remove(k);
+                send(s, in);
+                k--;
             }
         }
+    }
+
+    /** How far short of the dead to stop: further for a bigger pack. */
+    private static float standoff(Incident in) {
+        return 90 + 4 * (float) Math.sqrt(Math.max(0, in.zombies));
     }
 
     /** Sends a squad to a call. */
     public void send(Squads.Squad s, Incident in) {
         s.incident = in.id;
+        in.squads.remove(Integer.valueOf(s.id));
         in.squads.add(s.id);
         float[] p = w.sq.where(s);
         float dx = in.x - p[0], dy = in.y - p[1], d = (float) Math.sqrt(dx * dx + dy * dy) + 0.01f;
-        // hold a little short of the dead, facing them
-        float hx = in.x - dx / d * 90, hy = in.y - dy / d * 90;
+        // hold short of the dead, facing them
+        float stand = Math.min(standoff(in), d * 0.8f);
+        float hx = in.x - dx / d * stand, hy = in.y - dy / d * stand;
         if (!w.r.walkablePx(hx, hy)) {
             hx = in.x;
             hy = in.y;
@@ -320,7 +388,17 @@ public final class Dispatch {
                 if (p.squad < 0 && Math.abs(p.x - old.x) < 1 && Math.abs(p.y - old.y) < 1) keep = p;
             if (old.squad < 0) continue;
             Squads.Squad s = w.sq.get(old.squad);
-            if (keep != null && s.alive && s.order == Squads.O_CORDON) keep.squad = old.squad;
+            if (keep != null && s.alive && s.order == Squads.O_CORDON) {
+                keep.squad = old.squad;
+                // pushed off the post by a fight that's over: back to it
+                float px = keep.x - keep.fx * 40, py = keep.y - keep.fy * 40;
+                float[] at = w.sq.where(s);
+                if (s.mode == Squads.M_FOOT && dist2(s.gx, s.gy, px, py) > 80 * 80 && w.sp.nearestZombie(w.e, at[0], at[1], 150) < 0) {
+                    s.faceX = keep.fx;
+                    s.faceY = keep.fy;
+                    w.sq.order(s, Squads.O_CORDON, px, py);
+                }
+            }
             else if (s.alive && s.order == Squads.O_CORDON) {
                 s.task = -1;
                 w.sq.goHome(s);

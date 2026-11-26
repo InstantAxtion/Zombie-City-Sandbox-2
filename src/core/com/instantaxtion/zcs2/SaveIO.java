@@ -280,6 +280,7 @@ public final class SaveIO {
             for (int k = 0; k < s.n; k++) o.writeInt(s.mem[k]);
             o.writeFloat(s.gx); o.writeFloat(s.gy); o.writeFloat(s.faceX); o.writeFloat(s.faceY); o.writeFloat(s.timer);
             o.writeFloat(s.boardT); o.writeFloat(s.fallT); o.writeFloat(s.replanT); o.writeFloat(s.hold);
+            o.writeFloat(s.idleT); o.writeInt(s.template);
             floatArr(o, s.path);
             o.writeInt(s.pathI);
             o.writeUTF(s.name); o.writeUTF(s.label);
@@ -300,6 +301,7 @@ public final class SaveIO {
             for (int k = 0; k < s.n; k++) s.mem[k] = in.readInt();
             s.gx = in.readFloat(); s.gy = in.readFloat(); s.faceX = in.readFloat(); s.faceY = in.readFloat(); s.timer = in.readFloat();
             s.boardT = in.readFloat(); s.fallT = in.readFloat(); s.replanT = in.readFloat(); s.hold = in.readFloat();
+            s.idleT = in.readFloat(); s.template = in.readInt();
             s.path = readFloatArr(in);
             s.pathI = in.readInt();
             s.name = in.readUTF(); s.label = in.readUTF();

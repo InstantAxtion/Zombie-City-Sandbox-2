@@ -26,7 +26,6 @@ final class AndroidPlatform implements Platform {
     private final Synth synth = new Synth();
     private final Mixer mixer = new Mixer(synth);
     private final short[][] tracks = new short[2][];
-    private volatile boolean audioOn = true;
     private Thread audio;
     private int wantTrack = -1;
     private float wantVolume;
@@ -46,9 +45,22 @@ final class AndroidPlatform implements Platform {
         startAudio();
     }
 
+    /** Each audio thread runs while the generation it was started with is current; stopping moves it on. */
+    private volatile int audioGen;
+    private boolean audioRunning;
+
     void startAudio() {
-        audioOn = true;
-        if (audio != null) return;
+        if (audioRunning) return;
+        audioRunning = true;
+        // a quick pause and resume: let the old thread finish its last buffer before a new one mixes
+        Thread old = audio;
+        if (old != null) {
+            try {
+                old.join(300);
+            } catch (InterruptedException ignored) {
+            }
+        }
+        final int my = ++audioGen;
         audio = new Thread(new Runnable() {
             public void run() {
                 int min = AudioTrack.getMinBufferSize(Synth.RATE, AudioFormat.CHANNEL_OUT_STEREO, AudioFormat.ENCODING_PCM_16BIT);
@@ -62,20 +74,26 @@ final class AndroidPlatform implements Platform {
                     return;
                 }
                 short[] buf = new short[frames * 2];
-                while (audioOn) {
-                    mixer.mix(buf, frames);
-                    t.write(buf, 0, buf.length);
+                try {
+                    while (audioGen == my) {
+                        mixer.mix(buf, frames);
+                        t.write(buf, 0, buf.length);
+                    }
+                } finally {
+                    try {
+                        t.stop();
+                    } catch (Throwable ignored) {
+                    }
+                    t.release();
                 }
-                t.stop();
-                t.release();
             }
         }, "audio");
         audio.start();
     }
 
     void stopAudio() {
-        audioOn = false;
-        audio = null;
+        audioRunning = false;
+        audioGen++;
     }
 
     public GImage newImage(int w, int h) { return new AndroidImage(w, h); }
@@ -91,6 +109,20 @@ final class AndroidPlatform implements Platform {
     public boolean exists(String name) { return new File(act.getFilesDir(), name).exists(); }
 
     public void delete(String name) { new File(act.getFilesDir(), name).delete(); }
+
+    public boolean rename(String from, String to) {
+        File t = new File(act.getFilesDir(), to);
+        t.delete();
+        return new File(act.getFilesDir(), from).renameTo(t);
+    }
+
+    public String[] list() {
+        File[] fs = act.getFilesDir().listFiles();
+        if (fs == null) return new String[0];
+        java.util.List<String> out = new java.util.ArrayList<String>();
+        for (File f : fs) if (f.isFile()) out.add(f.getName());
+        return out.toArray(new String[0]);
+    }
 
     public String pref(String key, String def) { return prefs.getString(key, def); }
 

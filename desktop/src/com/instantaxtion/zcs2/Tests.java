@@ -54,6 +54,28 @@ public final class Tests {
         }
     }
 
+    private static final java.awt.image.BufferedImage SCREEN = new java.awt.image.BufferedImage(540, 1170, java.awt.image.BufferedImage.TYPE_INT_RGB);
+
+    static void frames(Game g, int n) {
+        for (int k = 0; k < n; k++) g.frame(new DesktopGfx(SCREEN.createGraphics(), 540, 1170), 1 / 30f);
+    }
+
+    /** Where the button with this id is on the last frame drawn, or null. */
+    static float[] findId(Game g, String id) {
+        for (int y = 4; y < 1170; y += 6)
+            for (int x = 4; x < 540; x += 6)
+                if (id.equals(g.hitAt(x, y))) return new float[]{x + 3, y + 3};
+        return null;
+    }
+
+    static boolean tapId(Game g, String id) {
+        float[] p = findId(g, id);
+        if (p == null) return false;
+        g.touch(Game.DOWN, 0, p[0], p[1]);
+        g.touch(Game.UP, 0, p[0], p[1]);
+        return true;
+    }
+
     public static void main(String[] args) throws Exception {
         content = Content.load(new FileInputStream("assets/content.ini"));
         define();
@@ -996,6 +1018,227 @@ public final class Tests {
                 w.shutdown();
                 l.shutdown();
                 r.w.shutdown();
+            }
+        });
+        test("workability: a damaged save is put aside and back leaves the error", new T() {
+            public void run() throws Exception {
+                java.io.File dir = new java.io.File("build/test-work1");
+                dir.mkdirs();
+                for (java.io.File f : dir.listFiles()) f.delete();
+                DesktopPlatform pf = new DesktopPlatform(dir);
+                java.io.OutputStream out = pf.openWrite("autosave.sav");
+                out.write("this is not a save".getBytes("UTF-8"));
+                out.close();
+                Game g = new Game(pf);
+                frames(g, 1);
+                check(tapId(g, "continue"), "no Continue button");
+                for (int k = 0; k < 200 && g.error == null; k++) {
+                    frames(g, 1);
+                    Thread.sleep(20);
+                }
+                check(g.error != null && g.error.contains("damaged"), "no error for a damaged save: " + g.error);
+                check(pf.exists("autosave.bad") && !pf.exists("autosave.sav"), "the damaged save wasn't put aside");
+                frames(g, 1);
+                check(findId(g, "errmenu") != null, "the error screen has no way out");
+                check(g.back(), "back closed the app from the error screen");
+                check(g.error == null && g.screen() == Game.S_MENU, "back didn't leave the error screen");
+                frames(g, 1);
+                check(findId(g, "continue") == null, "Continue is still offered for the damaged save");
+            }
+        });
+        test("workability: speed, touches, dialogs and cancelling a load", new T() {
+            public void run() throws Exception {
+                java.io.File dir = new java.io.File("build/test-work2");
+                dir.mkdirs();
+                for (java.io.File f : dir.listFiles()) f.delete();
+                DesktopPlatform pf = new DesktopPlatform(dir);
+                Game g = new Game(pf);
+                // an officer: the speed button goes round the speeds a person allows, back to 1x
+                World w = Setup.newGame(content, 1536, RegionGen.COAST, 12, content.scenario("sandbox"), 1, Roles.OFFICER, 60000);
+                g.w = w;
+                g.view = new WorldView(w, pf);
+                g.screen = Game.S_PLAY;
+                frames(g, 2);
+                boolean back1x = false;
+                for (int k = 0; k < 8; k++) {
+                    check(tapId(g, "speed"), "no speed button");
+                    frames(g, 2);
+                    check(!w.strategic && g.speedIdx <= g.maxSpeedIdx(), "an officer got fast-forward: " + g.speedIdx);
+                    if (g.speedIdx == 0) back1x = true;
+                }
+                check(back1x, "the speed never came back to 1x");
+                int recorded = w.director.events.size();
+                g.key('8');
+                frames(g, 5);
+                check(!w.strategic && w.director.events.size() <= recorded + 1, "fast-forward attempts were recorded every frame");
+                // a lost UP doesn't leave the game thinking a finger is down
+                float cx = 300, cy = 600;
+                g.touch(Game.DOWN, 0, cx, cy);
+                g.touch(Game.DOWN, 0, cx, cy); // the UP was lost; the same finger again
+                g.touch(Game.UP, 0, cx, cy);
+                check(g.pointersDown() == 0, "pointer count stuck at " + g.pointersDown());
+                g.touch(Game.DOWN, 0, cx, cy);
+                g.touch(Game.DOWN, 1, cx + 50, cy); // two lost UPs
+                g.resetTouches(); // the platform's first-finger-down
+                g.touch(Game.DOWN, 2, cx, cy);
+                check(g.pointersDown() == 1, "reset didn't clear lost pointers: " + g.pointersDown());
+                g.touch(Game.UP, 2, cx, cy);
+                check(g.pointersDown() == 0, "pointer count stuck after reset");
+                // a dialog's answer is carried out on the game's thread, at the next frame
+                final boolean[] got = {false};
+                pf.answers.add("hello");
+                g.ask("test", "", new Platform.TextAnswer() {
+                    public void answer(String text) {
+                        got[0] = text.equals("hello");
+                    }
+                });
+                check(!got[0], "the answer ran on the dialog's thread, not the game's");
+                frames(g, 1);
+                check(got[0], "the answer never reached the game");
+                // the role's speed is kept if the game is handed a world that can't fast-forward
+                w.shutdown();
+                // back during loading cancels it, and the world it was building is thrown away
+                Game g2 = new Game(pf);
+                g2.ngSize = 0;
+                g2.screen = Game.S_NEW;
+                frames(g2, 1);
+                check(tapId(g2, "start"), "no Start button");
+                check(g2.screen() == Game.S_LOADING, "not loading");
+                check(g2.back(), "back during loading closed the app");
+                check(g2.screen() == Game.S_NEW, "back didn't cancel the loading: " + g2.screen());
+                for (int k = 0; k < 150; k++) {
+                    frames(g2, 1);
+                    Thread.sleep(20);
+                }
+                check(g2.world() == null && g2.screen() == Game.S_NEW, "a cancelled load still started the game");
+            }
+        });
+        test("workability: a survivor starts away from the outbreak", new T() {
+            public void run() throws Exception {
+                for (long seed = 1; seed <= 3; seed++) {
+                    World w = Setup.newGame(content, 1536, RegionGen.COAST, seed, content.scenario("sandbox"), 1, Roles.SURVIVOR, 60000);
+                    int me = w.playerEnt;
+                    check(me >= 0, "no survivor");
+                    float dx = w.e.x[me] - Setup.outbreakX, dy = w.e.y[me] - Setup.outbreakY;
+                    check(dx * dx + dy * dy > 1500f * 1500f, "the survivor starts at the outbreak (seed " + seed + ")");
+                    play(w, 60, true);
+                    check(w.e.loc[me] == Ents.FREE && w.e.kind[me] == Ents.CIV, "the survivor died within a minute (seed " + seed + ")");
+                    w.shutdown();
+                }
+            }
+        });
+        test("street: cars drive round corners to where they're sent, never in circles", new T() {
+            public void run() {
+                World w = game(31, 1024, "sandbox", 1);
+                RoadGraph g = w.r.roads;
+                Region.Settlement c = w.r.city();
+                java.util.List<Integer> nodes = new java.util.ArrayList<Integer>();
+                for (int n = 0; n < g.nodeCount; n++) if (g.nset[n] == c.id && g.nodeLive(n)) nodes.add(n);
+                check(nodes.size() > 20, "too few junctions in the city");
+                int cars = 24;
+                int[] v = new int[cars];
+                for (int k = 0; k < cars; k++) {
+                    int a = nodes.get(Rng.hashInt(77, k, 1, nodes.size())), b = nodes.get(Rng.hashInt(77, k, 2, nodes.size()));
+                    v[k] = w.veh.add(w.c.vtype("patrol_car"), g.nx[a], g.ny[a], 0, -1);
+                    w.veh.driveTo(v[k], g.nx[b], g.ny[b], 0);
+                }
+                float[][] hx = new float[cars][20], hy = new float[cars][20], hh = new float[cars][20];
+                int circling = 0;
+                for (int sec = 0; sec < 150; sec++) {
+                    play(w, 1, false);
+                    for (int k = 0; k < cars; k++) {
+                        int q = sec % 20;
+                        hx[k][q] = w.veh.x[v[k]];
+                        hy[k][q] = w.veh.y[v[k]];
+                        hh[k][q] = w.veh.head[v[k]];
+                        if (sec < 20 || w.veh.state[v[k]] != Vehicles.V_DRIVE) continue;
+                        float turn = 0;
+                        for (int j = 1; j < 20; j++) {
+                            float dh = hh[k][(sec + 1 + j) % 20] - hh[k][(sec + j) % 20];
+                            while (dh > Math.PI) dh -= 2 * Math.PI;
+                            while (dh < -Math.PI) dh += 2 * Math.PI;
+                            turn += dh;
+                        }
+                        float net = (float) Math.hypot(hx[k][q] - hx[k][(sec + 1) % 20], hy[k][q] - hy[k][(sec + 1) % 20]);
+                        if (Math.abs(turn) > 2 * Math.PI && net < 150) circling++;
+                    }
+                }
+                int there = 0;
+                for (int k = 0; k < cars; k++) if (w.veh.state[v[k]] != Vehicles.V_DRIVE) there++;
+                check(circling == 0, circling + " car-seconds spent going round in circles");
+                check(there >= cars * 9 / 10, "only " + there + " of " + cars + " cars got there in 150 s");
+                w.shutdown();
+            }
+        });
+        test("street: stations and bases send their people out onto open ground", new T() {
+            public void run() {
+                World w = game(6, 1024, "sandbox", 1);
+                int tried = 0;
+                for (int fi = 0; fi < w.r.facilities.size(); fi++) {
+                    Region.Facility f = w.r.facilities.get(fi);
+                    if (f.pool == null) continue;
+                    for (Content.SquadT t : w.c.squads) {
+                        boolean home = false;
+                        for (String h : t.homes) if (h.equals(Forces.homeKind(f))) home = true;
+                        if (!home) continue;
+                        Squads.Squad s = w.forces.deploy(f, t);
+                        if (s == null) continue;
+                        tried++;
+                        for (int k = 0; k < s.n; k++) {
+                            int m = s.mem[k];
+                            check(w.r.walkablePx(w.e.x[m], w.e.y[m]), t.id + " from " + f.name + " put down inside " + Tile.NAMES[w.r.tileAtPx(w.e.x[m], w.e.y[m])]);
+                        }
+                        if (s.vehicle >= 0) {
+                            int vt = w.r.tileAtPx(w.veh.x[s.vehicle], w.veh.y[s.vehicle]);
+                            check(Tile.walkable(vt), t.id + "'s vehicle from " + f.name + " put down on " + Tile.NAMES[vt]);
+                        }
+                        w.forces.standDown(s);
+                    }
+                }
+                check(tried > 10, "only " + tried + " squads deployed");
+                check(Audit.check(w).isEmpty(), Audit.check(w));
+                w.shutdown();
+            }
+        });
+        test("street: the response goes home and stands down, and never drives off empty", new T() {
+            public void run() {
+                World w = Setup.newGame(content, 1024, RegionGen.COAST, 31, content.scenario("sandbox"), 2, Roles.GOD, 60000);
+                float x = Setup.originX, y = Setup.originY;
+                Tools.paintZombies(w, x, y, 500, 400, -1);
+                int empty = 0, inBuilding = 0;
+                for (int sec = 0; sec < 600; sec++) {
+                    float cx = x, cy = y;
+                    for (Dispatch.Incident in : w.disp.incidents)
+                        if (in.open) {
+                            cx = in.x;
+                            cy = in.y;
+                            break;
+                        }
+                    camOver(w, cx, cy);
+                    play(w, 1, sec % 30 == 0);
+                    for (int v = 0; v < w.veh.top; v++)
+                        if (w.veh.state[v] == Vehicles.V_DRIVE && w.veh.squad[v] >= 0 && w.veh.crewN[v] == 0 && w.veh.type(v).seats > 0) empty++;
+                    for (Squads.Squad s : w.sq.list) {
+                        if (!s.alive) continue;
+                        for (int k = 0; k < s.n; k++) {
+                            int m = s.mem[k];
+                            if (w.e.loc[m] == Ents.FREE && !w.r.walkablePx(w.e.x[m], w.e.y[m])) inBuilding++;
+                        }
+                    }
+                }
+                check(w.totalZombies() == 0, "still " + w.totalZombies() + " of the dead after 10 minutes");
+                check(empty <= 10, empty + " vehicle-seconds driving for a squad with nobody in it");
+                check(inBuilding <= 20, inBuilding + " officer-seconds inside walls");
+                int out = 0;
+                for (Squads.Squad s : w.sq.list)
+                    if (s.alive && !s.player && s.order != Squads.O_PATROL && s.order != Squads.O_GUARD) out++;
+                check(out == 0, out + " squads still out ten minutes after it began (the dead were gone long before)");
+                int parked = 0;
+                for (int v = 0; v < w.veh.top; v++)
+                    if (w.veh.state[v] == Vehicles.V_ARRIVED && w.veh.squad[v] < 0 && w.veh.type(v).seats > 0 && !w.veh.type(v).flies) parked++;
+                check(parked == 0, parked + " abandoned squad vehicles left in the streets");
+                check(Audit.check(w).isEmpty(), Audit.check(w));
+                w.shutdown();
             }
         });
         test("perf: 20,000 of the dead", new T() {

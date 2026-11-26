@@ -57,6 +57,8 @@ public final class RegionGen {
         g.r.rails.finish(g.r.px());
         g.r.rebuildNav(0, 0, g.W - 1, g.H - 1);
         g.r.dirty.clear();
+        // every facility's yard on open ground (people and vehicles come out there)
+        for (Region.Facility f : g.r.facilities) g.r.snapToOpenGround(f);
         g.powerGrids();
         g.states();
         g.populations();
