@@ -582,6 +582,8 @@ public final class Game {
     }
 
     /** The preview of the chosen map in a square; returns false while it's still being drawn. */
+    private final float[] prevBox = new float[32 * 4];
+
     boolean drawPreview(Gfx g, float pxx, float y, float ps) {
         return drawPreview(g, pxx, y, ps, true);
     }
@@ -611,12 +613,27 @@ public final class Game {
         g.image(previewImg, pxx, y, ps, ps);
         if (!captions) return true;
         float k = ps / pr.W;
-        for (Region.Settlement s : pr.settlements) {
-            if (s.kind != Region.S_CITY && (s.kind != Region.S_TOWN || ps < ui.dp(260))) continue;
-            float size = ui.dp(s.capital ? 13 : s.kind == Region.S_CITY ? 11.5f : 10);
-            g.color(0xFFFFFFFF);
-            g.textHalo((s.capital ? "★ " : "") + s.name, pxx + s.cx * k, y + s.cy * k, size, Gfx.ALIGN_CENTER, true, 0xD0000000, ui.dp(1.3f));
-        }
+        int placed = 0;
+        for (int pass = 0; pass < 3; pass++)
+            for (Region.Settlement s : pr.settlements) {
+                int rank = s.capital ? 0 : s.kind == Region.S_CITY ? 1 : 2;
+                if (rank != pass || (rank == 2 && (s.kind != Region.S_TOWN || ps < ui.dp(260)))) continue;
+                float size = ui.dp(s.capital ? 13 : s.kind == Region.S_CITY ? 11.5f : 10);
+                String name = (s.capital ? "★ " : "") + s.name;
+                float tw = g.textWidth(name, size, true), lx = Math.max(pxx + tw / 2 + ui.dp(2), Math.min(pxx + ps - tw / 2 - ui.dp(2), pxx + s.cx * k));
+                float ly = Math.max(y + size + ui.dp(2), y + s.cy * k);
+                boolean free = true;
+                for (int q = 0; q < placed && free; q++)
+                    free = lx + tw / 2 < prevBox[q * 4] || lx - tw / 2 > prevBox[q * 4 + 2] || ly < prevBox[q * 4 + 1] || ly - size > prevBox[q * 4 + 3];
+                if (!free || placed >= 32) continue;
+                prevBox[placed * 4] = lx - tw / 2;
+                prevBox[placed * 4 + 1] = ly - size;
+                prevBox[placed * 4 + 2] = lx + tw / 2;
+                prevBox[placed * 4 + 3] = ly;
+                placed++;
+                g.color(0xFFFFFFFF);
+                g.textHalo(name, lx, ly, size, Gfx.ALIGN_CENTER, true, 0xD0000000, ui.dp(1.3f));
+            }
         long people = 0;
         for (Region.Settlement s : pr.settlements) people += s.residents;
         g.color(0xD0000000);
@@ -1305,8 +1322,8 @@ public final class Game {
         if (h <= 0) h = 0;
         float yy = y + h;
         if (legendOpen) {
-            String[] marks = {"Pulsing ring: a 911 call, the dead counted there", "Blue bar: a police cordon post", "Frame with a cross: an army or police formation",
-                    "Red bleed: where the dead are", "Striped bar: people holding out", "Flag: where you sent them"};
+            String[] marks = {"Pulsing ring: a 911 call", "Number in it: the dead there", "Blue bar: a police cordon", "Framed cross: a formation",
+                    "Red bleed: where the dead are", "Striped bar: a holdout", "Flag: where you sent them"};
             float lh = ui.dp(16), ph = marks.length * lh + ui.dp(30);
             g.color(0xE0101318);
             g.fillRoundRect(x, yy + ui.dp(4), wdt, ph, ui.dp(8));
@@ -1478,8 +1495,8 @@ public final class Game {
             case "police": return "Police";
             case "army": return "Army";
             case "strike": return "Strike";
-            case "orders": return "Orders";
-            case "town": return "Towns";
+            case "orders": return "Order";
+            case "town": return "Town";
             case "erase": return "Erase";
             case "map": return "Map";
             case "fire": return "Shoot";
@@ -1657,14 +1674,14 @@ public final class Game {
     private void paletteRow(Gfx g, String[] row, float x, float y, float wdt, float h) {
         int n = row.length / 2;
         if (n == 0) return;
-        float ts = ui.dp(12.5f), gap = ui.dp(4), min = ui.dp(52);
+        float ts = ui.dp(12.5f), gap = ui.dp(4), min = ui.dp(44);
         float want = 0;
         for (int i = 0; i < n; i++) want += Math.max(min, g.textWidth(row[i * 2 + 1], ts, true) + ui.dp(18));
+        // each as wide as its label wants, in proportion: a long name gets the room it needs
         float k = (wdt - gap * (n - 1)) / want;
         float bx = x;
         for (int i = 0; i < n; i++) {
-            float bw = Math.max(min, g.textWidth(row[i * 2 + 1], ts, true) + ui.dp(18));
-            bw = k < 1 ? (wdt - gap * (n - 1)) / n : bw * k;
+            float bw = Math.max(min, g.textWidth(row[i * 2 + 1], ts, true) + ui.dp(18)) * k;
             option(row[i * 2], row[i * 2 + 1], bx, y, bw, h);
             bx += bw + gap;
         }
@@ -1899,7 +1916,9 @@ public final class Game {
         float textW = sw - (landscape ? m : m * 2) - pad * 2;
         int bl = text.length() == 0 ? 0 : Ui.lines(ui.g, text, textW, ui.dp(12.5f));
         float barH = ui.dp(26);
-        float contentH = ui.dp(58) + bars * barH + (bl > 0 ? bl * ui.dp(16.5f) + ui.dp(6) : 0) + ui.dp(60);
+        int acts = 0;
+        for (int k = 0; k < actions.length / 2; k++) if (!actions[k * 2].equals("i:close")) acts++;
+        float contentH = ui.dp(58) + bars * barH + (bl > 0 ? bl * ui.dp(16.5f) + ui.dp(6) : 0) + ui.dp(acts > 0 ? 60 : 8);
         float x, y, pw, ph;
         if (landscape) {
             x = sx + ui.dp(4);
@@ -1940,7 +1959,7 @@ public final class Game {
             yy += barH;
         }
         if (bl > 0) {
-            int maxLines = Math.max(1, (int) ((y + ph - ui.dp(60) - yy) / ui.dp(16.5f)));
+            int maxLines = Math.max(1, (int) ((y + ph - ui.dp(acts > 0 ? 60 : 8) - yy) / ui.dp(16.5f)));
             yy += ui.wrap(text, x + pad, yy + ui.dp(13), textW, ui.dp(12.5f), Ui.TEXT, maxLines) + ui.dp(6);
         }
         // the actions (Close is the button in the corner)
