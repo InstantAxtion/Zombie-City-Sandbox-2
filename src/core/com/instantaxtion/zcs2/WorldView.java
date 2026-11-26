@@ -2079,6 +2079,10 @@ public final class WorldView {
                     boolean street = false;
                     for (int k = rg.adjStart[n]; k < rg.adjStart[n + 1]; k++) if (rg.ekind[rg.adjEdge[k]] != RoadGraph.HIGHWAY) street = true;
                     if (!street) continue;
+                    // only where an avenue or arterial crosses (not every street the lattice runs up to it)
+                    boolean avenue = false;
+                    for (int k = rg.adjStart[n]; k < rg.adjStart[n + 1]; k++) if (rg.ekind[rg.adjEdge[k]] == RoadGraph.AVENUE) avenue = true;
+                    if (!avenue) continue;
                     float dx = rg.nx[rg.eb[e]] - rg.nx[rg.ea[e]], dy = rg.ny[rg.eb[e]] - rg.ny[rg.ea[e]], d = (float) Math.sqrt(dx * dx + dy * dy) + 1e-3f;
                     // not two within a kilometre: one interchange each
                     boolean near = false;
@@ -2096,20 +2100,19 @@ public final class WorldView {
             for (float[] q : ichg) {
                 if (q[0] + 3 * r < x0 || q[0] - 3 * r > x1 || q[1] + 3 * r < y0 || q[1] - 3 * r > y1) continue;
                 float hx = q[2], hy = q[3], px = -hy, py = hx;
-                for (int a = -1; a <= 1; a += 2)
-                    for (int b = -1; b <= 1; b += 2) {
-                        float cx = q[0] + (hx * a + px * b) * r * 1.05f, cy = q[1] + (hy * a + py * b) * r * 1.05f;
-                        float prevX = 0, prevY = 0;
-                        // a loop of three quarters, open towards the crossing (where it joins the roads)
-                        double toNode = Math.atan2(q[1] - cy, q[0] - cx);
-                        for (int k = 0; k <= 18; k++) {
-                            double ang = toNode + Math.PI / 4 + k * Math.PI * 1.5 / 18;
-                            float sx = cam.toScreenX(cx + (float) Math.cos(ang) * r), sy = cam.toScreenY(cy + (float) Math.sin(ang) * r);
-                            if (k > 0) g.line(prevX, prevY, sx, sy, pass == 0 ? lw + 1.2f * dp : lw);
-                            prevX = sx;
-                            prevY = sy;
-                        }
-                    }
+                // a diamond: on each side a slip road leaves the carriageway, meets the street below, and rejoins
+                for (int side = -1; side <= 1; side += 2) {
+                    float off = 60 * side, wx = q[0] + px * r * side, wy = q[1] + py * r * side;
+                    float ax = q[0] - hx * r * 2.6f + px * off, ay = q[1] - hy * r * 2.6f + py * off;
+                    float bx = q[0] + hx * r * 2.6f + px * off, by = q[1] + hy * r * 2.6f + py * off;
+                    float mx0 = q[0] - hx * r * 0.9f + px * r * 0.8f * side, my0 = q[1] - hy * r * 0.9f + py * r * 0.8f * side;
+                    float mx1 = q[0] + hx * r * 0.9f + px * r * 0.8f * side, my1 = q[1] + hy * r * 0.9f + py * r * 0.8f * side;
+                    float lww = pass == 0 ? lw + 1.2f * dp : lw;
+                    g.line(cam.toScreenX(ax), cam.toScreenY(ay), cam.toScreenX(mx0), cam.toScreenY(my0), lww);
+                    g.line(cam.toScreenX(mx0), cam.toScreenY(my0), cam.toScreenX(wx), cam.toScreenY(wy), lww);
+                    g.line(cam.toScreenX(wx), cam.toScreenY(wy), cam.toScreenX(mx1), cam.toScreenY(my1), lww);
+                    g.line(cam.toScreenX(mx1), cam.toScreenY(my1), cam.toScreenX(bx), cam.toScreenY(by), lww);
+                }
                 if (pass == 0) {
                     // the carriageway's shadow where it passes over the street
                     g.color(0x50000000);
