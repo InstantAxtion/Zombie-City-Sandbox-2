@@ -671,7 +671,7 @@ public final class Survival extends Module {
         Ents e = w.e;
         int p = w.playerEnt;
         if (!needsOn) return;
-        float hungerDays = w.rule("survHungerDays", 2f), thirstDays = w.rule("survThirstDays", 1f), tiredDays = w.rule("survTiredDays", 1.5f);
+        float hungerDays = w.rule("survHungerDays", 4f), thirstDays = w.rule("survThirstDays", 2f), tiredDays = w.rule("survTiredDays", 2f);
         float exert = sprinting ? 1.6f : 1;
         food = Math.max(0, food - dt * exert / (hungerDays * 1440f));
         water = Math.max(0, water - dt * exert * (w.weather.temperature() > 25 ? 1.3f : 1) / (thirstDays * 1440f));

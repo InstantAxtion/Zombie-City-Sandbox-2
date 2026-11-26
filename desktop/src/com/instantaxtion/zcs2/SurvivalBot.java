@@ -20,6 +20,8 @@ public final class SurvivalBot {
     private int stuck;
     private float lastX, lastY;
     public String log = "";
+    static final int DEBUG_EVERY = Integer.parseInt(System.getenv().containsKey("BOTEVERY") ? System.getenv("BOTEVERY") : "120");
+    static final boolean DEBUG = System.getenv("BOTDEBUG") != null;
 
     public SurvivalBot(World w) {
         this.w = w;
@@ -114,7 +116,7 @@ public final class SurvivalBot {
                 else Actions.survival(w, Survival.CAR);
                 return;
             }
-            if (s.safeD >= 0) toward(s.safeX, s.safeY, 120);
+            if (s.safeD >= 0) drive(v, s.safeX, s.safeY);
             return;
         }
         // the dead close: fight, or hide when there are too many
@@ -172,6 +174,58 @@ public final class SurvivalBot {
         }
         if (s.safeD >= 0) toward(s.safeX, s.safeY, 60);
         else Actions.joy(w, 0, 0);
+    }
+
+    private int[] route;
+    private int routeAt, slowT, backT;
+    private long routed = -1000;
+
+    /** At the wheel: along the roads to (x, y), backing off whatever it runs into. */
+    private void drive(int v, float x, float y) {
+        Vehicles vh = w.veh;
+        RoadGraph g = w.r.roads;
+        float cx = vh.x[v], cy = vh.y[v];
+        if (backT > 0) {
+            backT--;
+            float h = vh.head[v];
+            Actions.joy(w, -(float) Math.cos(h + 0.6f), -(float) Math.sin(h + 0.6f));
+            return;
+        }
+        if (Math.abs(vh.spd[v]) < 6) slowT++;
+        else slowT = 0;
+        if (slowT > 30) {
+            slowT = 0;
+            backT = 30;
+            return;
+        }
+        boolean off = route != null && routeAt < route.length && Math.abs(g.nx[route[routeAt]] - cx) + Math.abs(g.ny[route[routeAt]] - cy) > 260;
+        if (route == null || off || w.tick - routed > 600) {
+            int a = g.nearestNode(cx, cy, 800), b = g.nearestNode(x, y, 1500);
+            route = a >= 0 && b >= 0 ? g.route(a, b) : null;
+            routeAt = 0;
+            routed = w.tick;
+            // the second junction, when the first is behind us
+            if (route != null && route.length > 1) {
+                float h = vh.head[v];
+                float ax = g.nx[route[0]] - cx, ay = g.ny[route[0]] - cy;
+                if (ax * (float) Math.cos(h) + ay * (float) Math.sin(h) < 0) routeAt = 1;
+            }
+        }
+        float tx = x, ty = y;
+        if (route != null) {
+            while (routeAt < route.length - 1 && Math.abs(g.nx[route[routeAt]] - cx) + Math.abs(g.ny[route[routeAt]] - cy) < 40) routeAt++;
+            if (routeAt < route.length) {
+                tx = g.nx[route[routeAt]];
+                ty = g.ny[route[routeAt]];
+            }
+        }
+        float dx = tx - cx, dy = ty - cy, d = (float) Math.sqrt(dx * dx + dy * dy) + 0.01f;
+        // slow for a sharp turn (a car turns tighter slowly), and coming up to a junction
+        float err = (float) Math.atan2(dy, dx) - vh.head[v];
+        while (err > Math.PI) err -= 2 * Math.PI;
+        while (err < -Math.PI) err += 2 * Math.PI;
+        float slow = Math.abs(err) > 0.5f ? 0.35f : d < 60 ? 0.6f : 1;
+        Actions.joy(w, dx / d * slow, dy / d * slow);
     }
 
     private int carWithin(float x, float y, float r) {
@@ -234,6 +288,12 @@ public final class SurvivalBot {
             if (k % 20 == 0) camOn(w);
             if (competent) b.competent();
             w.step();
+            if (DEBUG && k % (DEBUG_EVERY * 20) == 0 && w.playerAlive()) {
+                Survival s = w.surv;
+                System.out.printf("  t=%.0f loc=%d at %.0f,%.0f hp=%.0f safe %s %.0f px  food %.2f water %.2f rest %.2f st %.2f items %s gun %d/%d comp %d car %d spd %.1f fuel %.2f joy %.2f,%.2f driven %d%n", w.time,
+                        w.e.loc[w.playerEnt], w.playerX(), w.playerY(), w.e.hp[w.playerEnt], s.safeKind >= 0 ? Strategic.SAFE_NAMES[s.safeKind] : "-", s.safeD,
+                        s.food, s.water, s.rest, s.stamina, java.util.Arrays.toString(s.items), s.gun, s.rounds(s.gun), s.compN, s.car, s.car >= 0 ? w.veh.spd[s.car] : 0f, s.car >= 0 ? w.veh.fuel[s.car] : 0f, w.strat.playerJoyX, w.strat.playerJoyY, w.orders.driven);
+            }
         }
         reached = w.ended && w.won && w.endTitle != null && w.endTitle.contains("safety");
         boolean alive = w.playerAlive();

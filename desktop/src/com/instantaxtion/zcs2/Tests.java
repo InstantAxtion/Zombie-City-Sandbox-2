@@ -2211,11 +2211,13 @@ public final class Tests {
                 // six game hours (inside, quiet: nothing else wears on them)
                 for (int k = 0; k < 360 * 20 && w.playerAlive(); k++) w.step();
                 check(w.playerAlive(), "died sitting indoors");
-                check(s.food < f0 - 0.08f && s.water < w0 - 0.2f && s.rest < r0 - 0.1f, "needs didn't decay: food " + s.food + " water " + s.water + " rest " + s.rest);
+                check(s.food < f0 - 0.04f && s.water < w0 - 0.09f && s.rest < r0 - 0.1f, "needs didn't decay: food " + s.food + " water " + s.water + " rest " + s.rest);
                 check(s.water < s.food, "thirst isn't quicker than hunger");
                 s.items[Survival.I_FOOD] = 1;
                 s.items[Survival.I_WATER] = 1;
                 s.items[Survival.I_MEDS] = 1;
+                s.food = 0.3f;
+                s.water = 0.3f;
                 float f1 = s.food, w1 = s.water;
                 check(Actions.survival(w, Survival.USE, Survival.I_FOOD, 0) && s.food > f1 + 0.3f, "food didn't help");
                 check(Actions.survival(w, Survival.USE, Survival.I_WATER, 0) && s.water > w1 + 0.3f, "water didn't help");
@@ -2237,6 +2239,44 @@ public final class Tests {
                 float st1 = s.stamina;
                 for (int k = 0; k < 10 * 20; k++) w.step();
                 check(s.stamina > st1 + 0.2f, "stamina didn't come back: " + s.stamina);
+                w.shutdown();
+            }
+        });
+        test("survival: the officer takes the melee, the weapons and the cars", new T() {
+            public void run() throws Exception {
+                World w = Setup.newGame(content, 768, RegionGen.COAST, 14, content.scenario("officer"), 2, Roles.OFFICER, 60000);
+                check(w.surv.enabled, "no survival for the officer");
+                SurvivalBot.camOn(w);
+                steps(w, 2);
+                Survival s = w.surv;
+                int p = w.playerEnt;
+                check(!s.needsOn && s.owns(Survival.W_BATON) && s.gun == Survival.W_PISTOL, "the officer isn't kitted out");
+                check(!s.can(Survival.ENTER), "the officer can hide (a patrol member can't leave the street)");
+                for (int k = 0; k < 30 * 20 && w.e.loc[p] != Ents.FREE; k++) w.step();
+                check(w.e.loc[p] == Ents.FREE, "the officer isn't on foot: " + w.e.loc[p]);
+                // hand to hand (holding fire): blows until it's down
+                Actions.fire(w, false);
+                float[] q = w.r.openGroundNear(w.e.x[p] + 14, w.e.y[p], false);
+                Actions.paint(w, q[0], q[1], 8, 4, w.c.ztype("walker").index);
+                steps(w, 0.1f);
+                int z = w.sp.nearestZombie(w.e, w.e.x[p], w.e.y[p], 60);
+                check(z >= 0, "no zombie by the officer (" + w.e.loc[p] + ", " + w.stats.zombieKills + " killed)");
+                float hp = w.e.hp[z];
+                int uid = w.e.uid[z];
+                for (int k = 0; k < 10 && w.e.loc[z] == Ents.FREE && w.e.uid[z] == uid; k++) {
+                    Actions.survival(w, Survival.MELEE, 1, 0);
+                    steps(w, 1);
+                }
+                check(w.e.loc[z] != Ents.FREE || w.e.hp[z] < hp, "the baton did nothing (" + s.meleeKills + " kills)");
+                Actions.fire(w, true);
+                int v = Actions.vehicle(w, "car", w.e.x[p], w.e.y[p]);
+                check(v >= 0, "no car");
+                putAt(w, w.veh.x[v] + 10, w.veh.y[v]);
+                check(Actions.survival(w, Survival.CAR), "the officer couldn't take the car");
+                Actions.joy(w, 1, 0);
+                play(w, 20, true);
+                check(Actions.survival(w, Survival.CAR) && w.e.loc[p] == Ents.FREE, "the officer couldn't get out");
+                play(w, 10, true);
                 w.shutdown();
             }
         });
