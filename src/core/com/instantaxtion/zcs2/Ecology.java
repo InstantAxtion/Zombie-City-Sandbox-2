@@ -53,11 +53,11 @@ public final class Ecology extends Module {
         Region r = w.r;
         int sw = w.sec.sw;
         for (int s = 0; s < w.sec.n; s++) {
-            int x0 = (s % sw) * Region.SECT, y0 = (s / sw) * Region.SECT;
+            int x0 = (s % sw) * w.r.sect, y0 = (s / sw) * w.r.sect;
             float sum = 0;
             int n = 0, roads = 0;
-            for (int y = y0; y < y0 + Region.SECT; y += 4)
-                for (int x = x0; x < x0 + Region.SECT; x += 4) {
+            for (int y = y0; y < y0 + w.r.sect; y += 4)
+                for (int x = x0; x < x0 + w.r.sect; x += 4) {
                     int t = r.t(x, y);
                     float c;
                     if (Tile.roadish(t) || t == Tile.RAIL) {
@@ -167,7 +167,11 @@ public final class Ecology extends Module {
         int nestMin = (int) w.c.rule("nestMin", 400);
         float overrun = w.c.rule("overrunRatio", 20);
         float strainDays = w.c.rule("strainDays", 1.5f) * 1440f;
-        for (int s = 0; s < sec.n; s++) {
+        // (only awake sectors: a sleeping one has no dead, no hunger, no nest and no strain, and stays so)
+        SectorIndex idx = sec.idx;
+        float dt0 = dt;
+        for (int s = idx.firstDue(); s >= 0; s = idx.nextDue(s)) {
+            dt = dt0 * idx.scale(s);
             int z = sec.zIn[s] + w.sp.secZ[s];
             if (z <= 0) {
                 hunger[s] = Math.max(0, hunger[s] - dt / hungerTime);
@@ -214,7 +218,7 @@ public final class Ecology extends Module {
                 if (nest[s] && (sec.zIn[s] < nestMin / 4 || sec.popIn[s] > 0)) nest[s] = false;
             }
         }
-        infectedFormations(dt);
+        infectedFormations(dt0);
         splitHordes();
     }
 
@@ -280,7 +284,14 @@ public final class Ecology extends Module {
             int s = w.r.sectorOfPx(h.x, h.y), sx = s % sec.sw, sy = s / sec.sw;
             int best = -1, second = -1;
             float ba = 0, sa = 0;
-            for (int t = 0; t < sec.n; t++) {
+            // (within 24 sectors: the box round it, in the same order as a scan of the map, skipping empty districts)
+            int y0 = Math.max(0, sy - 24), y1 = Math.min(sec.sh - 1, sy + 24), x0 = Math.max(0, sx - 24), x1 = Math.min(sec.sw - 1, sx + 24);
+            for (int yy = y0; yy <= y1; yy++) for (int xx = x0; xx <= x1; xx++) {
+                int t = yy * sec.sw + xx;
+                if (!sec.idx.mayLive(t)) {
+                    xx |= SectorIndex.D - 1;
+                    continue;
+                }
                 if (sec.popIn[t] == 0) continue;
                 int dx = t % sec.sw - sx, dy = t / sec.sw - sy;
                 float d = (float) Math.sqrt(dx * dx + dy * dy);
@@ -381,8 +392,9 @@ public final class Ecology extends Module {
     public void draw(Gfx g, Camera cam, WorldView view) {
         // nests, from high up: a dark red ring round the sector, the strain's number in it
         if (cam.zoom > 0.5f) return;
-        float cs = Region.SECT * Tile.SIZE, dp = cam.dp;
-        for (int s = 0; s < w.sec.n; s++) {
+        float cs = w.r.sect * Tile.SIZE, dp = cam.dp;
+        // (a nest keeps its district awake)
+        for (int s = w.sec.idx.first(); s >= 0; s = w.sec.idx.next(s)) {
             if (!nest[s]) continue;
             float x = cam.toScreenX(w.sec.cx(s)), y = cam.toScreenY(w.sec.cy(s));
             if (x < -50 * dp || y < -50 * dp || x > cam.sw + 50 * dp || y > cam.sh + 50 * dp) continue;

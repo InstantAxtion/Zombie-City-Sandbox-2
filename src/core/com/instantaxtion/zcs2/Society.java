@@ -110,7 +110,9 @@ public final class Society extends Module {
         Sectors sec = w.sec;
         float after = w.c.rule("holdoutAfter", 1440);
         int announced = 0;
-        for (int s = 0; s < sec.n; s++) {
+        // (awake sectors only: a holdout keeps its district awake, and a threat wakes the district and the ring
+        // round it; a sleeping sector's hold timer stands still)
+        for (int s = sec.idx.first(); s >= 0; s = sec.idx.next(s)) {
             if (sec.home[s] < 200) continue;
             if (sec.holdout[s]) {
                 if (sec.popIn[s] < sec.home[s] * 0.08f) {
@@ -144,9 +146,10 @@ public final class Society extends Module {
         float window = w.c.rule("familyWindow", 240), rate = w.c.rule("familyRate", 0.002f);
         for (int st = 0; st < firstAlert.length; st++)
             if (firstAlert[st] < 0 && w.command.alerted[st]) firstAlert[st] = w.time;
-        for (int s = 0; s < sec.n; s++) {
-            int st = sec.settlement[s];
-            if (st < 0 || firstAlert[st] < 0 || w.time - firstAlert[st] > window) continue;
+        // (town by town: each moves people only within its own streets, so the order between towns is immaterial)
+        for (int st = 0; st < firstAlert.length; st++) {
+            if (firstAlert[st] < 0 || w.time - firstAlert[st] > window) continue;
+            for (int s : sec.idx.bySettlement[st]) {
             if (sec.popIn[s] == 0 && sec.inf[s] < 1) continue;
             int d = Rng.hashInt(w.seed, w.tick, s, 8);
             int t = sec.neighbour(s, d);
@@ -158,6 +161,7 @@ public final class Society extends Module {
             int c = Math.min((int) sec.inf[s], stoch(carry, s * 29L + 2));
             sec.inf[s] -= c;
             sec.inf[sec.touch(t)] += c;
+            }
         }
     }
 
@@ -198,7 +202,8 @@ public final class Society extends Module {
             }
         Content.Unit mu = w.c.units.get(militiaUnit);
         Sectors sec = w.sec;
-        for (int s = 0; s < sec.n; s++) {
+        // (hot sectors only: awake)
+        for (int s = sec.idx.first(); s >= 0; s = sec.idx.next(s)) {
             int st = sec.settlement[s];
             if (st < 0 || militia[st] == 0 || sec.hot[s] <= 0 || w.sp.secZ[s] == 0 || sec.popIn[s] < 20) continue;
             int want = Math.min(militia[st], 16) - out[st];
@@ -220,11 +225,13 @@ public final class Society extends Module {
         Sectors sec = w.sec;
         float kill = w.c.rule("aggregateKill", 0.05f) * 0.5f, loss = w.c.rule("aggregateLoss", 0.0004f) * 2;
         int[] engaged = new int[militia.length];
-        for (int s = 0; s < sec.n; s++) {
+        // (sectors with the dead indoors only: awake)
+        SectorIndex idx = sec.idx;
+        for (int s = idx.first(); s >= 0; s = idx.next(s)) {
             int st = sec.settlement[s];
             if (st >= 0 && militia[st] > 0 && sec.zIn[s] > 0 && sec.hot[s] <= 0) engaged[st]++;
         }
-        for (int s = 0; s < sec.n; s++) {
+        for (int s = idx.first(); s >= 0; s = idx.next(s)) {
             int st = sec.settlement[s];
             if (st < 0 || militia[st] <= 0 || sec.zIn[s] <= 0 || sec.hot[s] > 0) continue;
             float share = militia[st] / (float) engaged[st];
@@ -323,10 +330,12 @@ public final class Society extends Module {
             int move = Math.min(arrivals[st], excess);
             Sectors sec = w.sec;
             long total = 0;
-            for (int k = 0; k < sec.n; k++) if (sec.settlement[k] == st) total += sec.popIn[k];
+            int[] sl = sec.idx.bySettlement[st];
+            for (int k : sl) total += sec.popIn[k];
             int moved = 0;
-            for (int k = 0; k < sec.n && total > 0; k++) {
-                if (sec.settlement[k] != st || sec.popIn[k] == 0) continue;
+            for (int j = 0; j < sl.length && total > 0; j++) {
+                int k = sl[j];
+                if (sec.popIn[k] == 0) continue;
                 int m = Math.min(sec.popIn[k], (int) ((long) sec.popIn[k] * move / total));
                 sec.popIn[k] -= m;
                 moved += m;
@@ -335,8 +344,9 @@ public final class Society extends Module {
             c.people += moved;
             // the bitten among them come too
             int inf = arrivalsInf[st];
-            for (int k = 0; k < sec.n && inf > 0; k++) {
-                if (sec.settlement[k] != st || sec.inf[k] < 1) continue;
+            for (int j = 0; j < sl.length && inf > 0; j++) {
+                int k = sl[j];
+                if (sec.inf[k] < 1) continue;
                 int m = Math.min(inf, (int) sec.inf[k]);
                 sec.inf[k] -= m;
                 sec.inf[sec.touch(c.sector)] += m;
@@ -394,7 +404,7 @@ public final class Society extends Module {
             if (s.residents < 3000 || pop > s.residents * 0.15f || pop < 100 || w.stats.zBySettlement[st] < s.residents * 0.02f) continue;
             colonyMade[st] = true;
             // somewhere quiet in the country round about
-            int sx = (int) (s.cx * 16f / (Region.SECT * Tile.SIZE)), sy = (int) (s.cy * 16f / (Region.SECT * Tile.SIZE));
+            int sx = (int) (s.cx * 16f / (w.r.sect * Tile.SIZE)), sy = (int) (s.cy * 16f / (w.r.sect * Tile.SIZE));
             int best = -1;
             for (int k = 0; k < 80 && best < 0; k++) {
                 int dx = Rng.hashInt(w.seed, st, k * 2L, 25) - 12, dy = Rng.hashInt(w.seed, st, k * 2L + 1, 25) - 12;
@@ -408,8 +418,10 @@ public final class Society extends Module {
             if (best < 0) continue;
             int want = Math.min(2500, pop / 2);
             int got = 0;
-            for (int k = 0; k < sec.n && got < want; k++) {
-                if (sec.settlement[k] != st || sec.popIn[k] == 0 || sec.zIn[k] > 0) continue;
+            int[] sl = sec.idx.bySettlement[st];
+            for (int j = 0; j < sl.length && got < want; j++) {
+                int k = sl[j];
+                if (sec.popIn[k] == 0 || sec.zIn[k] > 0) continue;
                 int m = Math.min(sec.popIn[k], want - got);
                 sec.popIn[k] -= m;
                 got += m;
@@ -527,7 +539,7 @@ public final class Society extends Module {
         Sectors sec = w.sec;
         // holdouts only from close enough that they don't tile the map, and never over a label
         if (z < 1.2f && z > 0.2f) {
-            float cs = Region.SECT * Tile.SIZE;
+            float cs = w.r.sect * Tile.SIZE;
             int sx0 = Math.max(0, (int) (cam.x0() / cs)), sy0 = Math.max(0, (int) (cam.y0() / cs));
             int sx1 = Math.min(sec.sw - 1, (int) (cam.x1() / cs)), sy1 = Math.min(sec.sh - 1, (int) (cam.y1() / cs));
             for (int sy = sy0; sy <= sy1; sy++)

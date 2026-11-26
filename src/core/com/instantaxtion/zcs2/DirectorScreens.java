@@ -163,7 +163,7 @@ final class DirectorScreens {
             lapseImg.setPixels(lapsePx, sec.sw, sec.sh);
             lapseShown = frame;
         }
-        g.image(lapseImg, x0, y0, size * sec.sw * Region.SECT / w.r.W, size * sec.sh * Region.SECT / w.r.H);
+        g.image(lapseImg, x0, y0, size * sec.sw * w.r.sect / w.r.W, size * sec.sh * w.r.sect / w.r.H);
         for (Region.Settlement s : w.r.settlements) {
             if (s.kind != Region.S_CITY) continue;
             g.color(0xFFFFFFFF);

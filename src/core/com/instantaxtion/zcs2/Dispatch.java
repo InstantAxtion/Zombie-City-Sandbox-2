@@ -124,7 +124,7 @@ public final class Dispatch {
         Ents e = w.e;
         float sx = 0, sy = 0;
         int n = 0;
-        float cs = Tile.SIZE * Region.SECT;
+        float cs = Tile.SIZE * w.r.sect;
         float x0 = (s % w.sec.sw) * cs, y0 = (s / w.sec.sw) * cs;
         int cx0 = w.sp.cellX(x0), cy0 = w.sp.cellY(y0), cx1 = w.sp.cellX(x0 + cs - 1), cy1 = w.sp.cellY(y0 + cs - 1);
         for (int cy = cy0; cy <= cy1; cy++)

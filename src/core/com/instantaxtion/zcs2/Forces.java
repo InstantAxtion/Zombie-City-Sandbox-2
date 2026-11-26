@@ -529,7 +529,7 @@ public final class Forces extends Module {
         int best = -1;
         float bscore = 0;
         Sectors sec = w.sec;
-        float cs = Region.SECT * Tile.SIZE;
+        float cs = w.r.sect * Tile.SIZE;
         int sx0 = Math.max(0, (int) ((f.hq.x - range) / cs)), sx1 = Math.min(sec.sw - 1, (int) ((f.hq.x + range) / cs));
         int sy0 = Math.max(0, (int) ((f.hq.y - range) / cs)), sy1 = Math.min(sec.sh - 1, (int) ((f.hq.y + range) / cs));
         for (int sy = sy0; sy <= sy1; sy++)

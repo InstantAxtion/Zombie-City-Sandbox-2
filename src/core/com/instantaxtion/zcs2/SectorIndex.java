@@ -170,6 +170,15 @@ public final class SectorIndex {
         return awake[d];
     }
 
+    /**
+     * False only if sector s certainly has nobody in it (popIn and secCiv both 0): its district is asleep and held
+     * nobody when it was last awake. For searches round a point that skip whole districts.
+     */
+    public boolean mayLive(int s) {
+        int d = district(s);
+        return awake[d] || living[d] > 0;
+    }
+
     public int awakeDistricts() {
         return awakeN;
     }

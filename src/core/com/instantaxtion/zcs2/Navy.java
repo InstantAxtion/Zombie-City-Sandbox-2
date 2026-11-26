@@ -42,10 +42,10 @@ public final class Navy extends Module {
         // which sectors touch open water (boats can come in)
         Region r = w.r;
         for (int s = 0; s < w.sec.n; s++) {
-            int x0 = (s % w.sec.sw) * Region.SECT, y0 = (s / w.sec.sw) * Region.SECT;
+            int x0 = (s % w.sec.sw) * w.r.sect, y0 = (s / w.sec.sw) * w.r.sect;
             int water = 0, deep = 0, all = 0;
-            for (int y = y0; y < y0 + Region.SECT; y += 4)
-                for (int x = x0; x < x0 + Region.SECT; x += 4) {
+            for (int y = y0; y < y0 + w.r.sect; y += 4)
+                for (int x = x0; x < x0 + w.r.sect; x += 4) {
                     int t = r.t(x, y);
                     if (Tile.water(t)) water++;
                     if (t == Tile.DEEP) deep++;
@@ -57,9 +57,9 @@ public final class Navy extends Module {
         }
         wet = new boolean[w.sec.n];
         for (int s = 0; s < w.sec.n; s++) {
-            int x0 = (s % w.sec.sw) * Region.SECT, y0 = (s / w.sec.sw) * Region.SECT;
-            for (int y = y0 - 8; y < y0 + Region.SECT + 8 && !wet[s]; y += 4)
-                for (int x = x0 - 8; x < x0 + Region.SECT + 8; x += 4)
+            int x0 = (s % w.sec.sw) * w.r.sect, y0 = (s / w.sec.sw) * w.r.sect;
+            for (int y = y0 - 8; y < y0 + w.r.sect + 8 && !wet[s]; y += 4)
+                for (int x = x0 - 8; x < x0 + w.r.sect + 8; x += 4)
                     if (Tile.water(r.t(x, y))) {
                         wet[s] = true;
                         break;
@@ -68,9 +68,9 @@ public final class Navy extends Module {
         // a shore with deep water off it (in the next sector out) is reachable by boat too
         for (int s = 0; s < w.sec.n; s++) {
             if (coastal[s]) continue;
-            int x0 = (s % w.sec.sw) * Region.SECT, y0 = (s / w.sec.sw) * Region.SECT, water = 0, all = 0;
-            for (int y = y0; y < y0 + Region.SECT; y += 8)
-                for (int x = x0; x < x0 + Region.SECT; x += 8) {
+            int x0 = (s % w.sec.sw) * w.r.sect, y0 = (s / w.sec.sw) * w.r.sect, water = 0, all = 0;
+            for (int y = y0; y < y0 + w.r.sect; y += 8)
+                for (int x = x0; x < x0 + w.r.sect; x += 8) {
                     if (Tile.water(r.t(x, y))) water++;
                     all++;
                 }

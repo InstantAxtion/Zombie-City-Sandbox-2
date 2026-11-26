@@ -75,9 +75,9 @@ public final class Infrastructure extends Module {
         float perTile = w.c.rule("farmYield", 2f);
         Sectors sec = w.sec;
         for (int k = 0; k < sec.n; k++) {
-            int x0 = (k % sec.sw) * Region.SECT, y0 = (k / sec.sw) * Region.SECT, farm = 0;
-            for (int y = y0; y < y0 + Region.SECT; y += 2)
-                for (int x = x0; x < x0 + Region.SECT; x += 2) if (r.t(x, y) == Tile.FARM) farm++;
+            int x0 = (k % sec.sw) * w.r.sect, y0 = (k / sec.sw) * w.r.sect, farm = 0;
+            for (int y = y0; y < y0 + w.r.sect; y += 2)
+                for (int x = x0; x < x0 + w.r.sect; x += 2) if (r.t(x, y) == Tile.FARM) farm++;
             if (farm == 0) continue;
             int best = -1;
             float bd = Float.MAX_VALUE;

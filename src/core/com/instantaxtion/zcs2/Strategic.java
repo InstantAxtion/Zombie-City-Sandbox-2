@@ -361,7 +361,14 @@ public final class Strategic {
             if (h.target < 0 || (w.tick % 600 == 0 && h.keepT <= 0)) {
                 float best = 0;
                 int sx = s % sec.sw, sy = s / sec.sw;
-                for (int t = 0; t < sec.n; t++) {
+                // (within 24 sectors: the box round it, in map order, skipping districts nobody is in)
+                int y0 = Math.max(0, sy - 24), y1 = Math.min(sec.sh - 1, sy + 24), x0 = Math.max(0, sx - 24), x1 = Math.min(sec.sw - 1, sx + 24);
+                for (int yy = y0; yy <= y1; yy++) for (int xx = x0; xx <= x1; xx++) {
+                    int t = yy * sec.sw + xx;
+                    if (!sec.idx.mayLive(t)) {
+                        xx |= SectorIndex.D - 1;
+                        continue;
+                    }
                     if (sec.popIn[t] == 0 && w.sp.secCiv[t] == 0) continue;
                     int dx = t % sec.sw - sx, dy = t / sec.sw - sy;
                     float d = (float) Math.sqrt(dx * dx + dy * dy);
@@ -628,8 +635,8 @@ public final class Strategic {
             int popNow = Math.max(1, w.stats.popBySettlement[st]);
             float share = Math.min(0.02f * dt, left / popNow);
             int moved = 0;
-            for (int s = 0; s < sec.n; s++) {
-                if (sec.settlement[s] != st || sec.popIn[s] == 0 || sec.zIn[s] > 0) continue;
+            for (int s : sec.idx.bySettlement[st]) {
+                if (sec.popIn[s] == 0 || sec.zIn[s] > 0) continue;
                 float want = sec.popIn[s] * share;
                 int m = Math.min(sec.popIn[s], (int) want + (Rng.unit(w.seed, w.tick, s) < want % 1f ? 1 : 0));
                 sec.popIn[s] -= m;
@@ -721,15 +728,17 @@ public final class Strategic {
                 // take them from the host town's streets
                 Sectors sec = w.sec;
                 long total = 0;
-                for (int s = 0; s < sec.n; s++) if (sec.settlement[s] == b && sec.zIn[s] == 0) total += sec.popIn[s];
+                int[] bl = sec.idx.bySettlement[b];
+                for (int s : bl) if (sec.zIn[s] == 0) total += sec.popIn[s];
                 if (total <= 0) {
                     refuge[a][b] = 0;
                     continue;
                 }
                 n = (int) Math.min(n, total);
                 int got = 0;
-                for (int s = 0; s < sec.n && got < n; s++) {
-                    if (sec.settlement[s] != b || sec.zIn[s] > 0 || sec.popIn[s] == 0) continue;
+                for (int j = 0; j < bl.length && got < n; j++) {
+                    int s = bl[j];
+                    if (sec.zIn[s] > 0 || sec.popIn[s] == 0) continue;
                     int m = (int) Math.min(sec.popIn[s], Math.max(1, (long) sec.popIn[s] * n / total));
                     m = Math.min(m, n - got);
                     sec.popIn[s] -= m;
@@ -762,8 +771,8 @@ public final class Strategic {
     private int home(int st) {
         Region.Settlement s = w.r.settlements.get(st);
         int best = -1;
-        for (int k = 0; k < w.sec.n; k++)
-            if (w.sec.settlement[k] == st && w.sec.zIn[k] == 0 && (best < 0 || w.sec.home[k] > w.sec.home[best])) best = k;
+        for (int k : w.sec.idx.bySettlement[st])
+            if (w.sec.zIn[k] == 0 && (best < 0 || w.sec.home[k] > w.sec.home[best])) best = k;
         if (best < 0) best = s.hubNode >= 0 ? w.r.sectorOfPx(w.r.roads.nx[s.hubNode], w.r.roads.ny[s.hubNode]) : w.r.sectorOfPx(s.cx * 16f, s.cy * 16f);
         return best;
     }
@@ -820,10 +829,11 @@ public final class Strategic {
     private void settleHome(int st, int count) {
         Sectors sec = w.sec;
         long room = 0;
-        for (int s = 0; s < sec.n; s++) if (sec.settlement[s] == st && sec.zIn[s] == 0) room += Math.max(1, sec.home[s] - sec.popIn[s]);
+        int[] sl = sec.idx.bySettlement[st];
+        for (int s : sl) if (sec.zIn[s] == 0) room += Math.max(1, sec.home[s] - sec.popIn[s]);
         if (room <= 0) {
             List<Integer> any = new ArrayList<Integer>();
-            for (int s = 0; s < sec.n; s++) if (sec.settlement[s] == st) any.add(s);
+            for (int s : sl) any.add(s);
             if (any.isEmpty()) {
                 leftCountry(st, count);
                 return;
@@ -832,8 +842,8 @@ public final class Strategic {
         } else {
             int put = 0;
             int last = -1;
-            for (int s = 0; s < sec.n; s++) {
-                if (sec.settlement[s] != st || sec.zIn[s] > 0) continue;
+            for (int s : sl) {
+                if (sec.zIn[s] > 0) continue;
                 int m = (int) ((long) count * Math.max(1, sec.home[s] - sec.popIn[s]) / room);
                 sec.popIn[sec.touch(s)] += m;
                 put += m;
@@ -956,7 +966,7 @@ public final class Strategic {
     private void settle(int st, int count, int infected, int from) {
         Sectors sec = w.sec;
         List<Integer> homes = new ArrayList<Integer>();
-        for (int s = 0; s < sec.n; s++) if (sec.settlement[s] == st && sec.home[s] > 0 && sec.zIn[s] == 0) homes.add(s);
+        for (int s : sec.idx.bySettlement[st]) if (sec.home[s] > 0 && sec.zIn[s] == 0) homes.add(s);
         int healthy = count - infected;
         if (homes.isEmpty()) {
             leftCountry(from, count);
@@ -1119,8 +1129,8 @@ public final class Strategic {
             out.add(new float[]{p[0], p[1], SAFE_EVAC});
             int best = -1;
             float bd = Float.MAX_VALUE;
-            for (int q = 0; q < w.sec.n; q++) {
-                if (w.sec.settlement[q] != s.id || !w.navy.pickup(q)) continue;
+            for (int q : w.sec.idx.bySettlement[s.id]) {
+                if (!w.navy.pickup(q)) continue;
                 float d = dist(w.sec.cx(q), w.sec.cy(q), s.cx * 16f, s.cy * 16f);
                 if (d < bd) {
                     bd = d;
@@ -1142,7 +1152,7 @@ public final class Strategic {
     public int cityAlive() {
         Region.Settlement c = w.r.city();
         int n = 0;
-        for (int s = 0; s < w.sec.n; s++) if (w.sec.settlement[s] == c.id) n += w.sec.popIn[s] + w.sp.secCiv[s];
+        for (int s : w.sec.idx.bySettlement[c.id]) n += w.sec.popIn[s] + w.sp.secCiv[s];
         return n;
     }
 
