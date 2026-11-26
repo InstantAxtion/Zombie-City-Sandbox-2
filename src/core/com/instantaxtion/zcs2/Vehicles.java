@@ -9,9 +9,9 @@ import java.util.Arrays;
  */
 public final class Vehicles {
     public static final byte V_NONE = 0, V_PARKED = 1, V_DRIVE = 2, V_ARRIVED = 3, V_WRECK = 4, V_FLY = 5, V_ORBIT = 6,
-            V_RTB = 7, V_STRIKE = 8, V_PARKING = 9;
+            V_RTB = 7, V_STRIKE = 8, V_PARKING = 9, V_PULLIN = 10;
     public static final String[] STATE_NAMES = {"", "Parked", "Driving", "On scene", "Wrecked", "Flying", "Over the fight",
-            "Returning", "Strike run", "Parking"};
+            "Returning", "Strike run", "Parking", "Pulling in"};
     public static final byte R_SQUAD = 0, R_PATROL = 1, R_SUPPLY = 2, R_AIR = 3, R_STRIKE = 4, R_TRANSPORT = 5;
 
     private final World w;
@@ -20,6 +20,8 @@ public final class Vehicles {
             destX = new float[64], destY = new float[64], homeX = new float[64], homeY = new float[64], fuel = new float[64],
             stuck = new float[64], wpnT = new float[64], wpn2T = new float[64], timer = new float[64], mobT = new float[64],
             seg = new float[64], orbitA = new float[64], ghost = new float[64], alt = new float[64];
+    /** Where a vehicle is pulling in to (a place at the kerb), and how long it has waited for room to move. */
+    public float[] slotX = new float[64], slotY = new float[64], slotH = new float[64], wait = new float[64];
     public short[] type = new short[64], kills = new short[64];
     public byte[] state = new byte[64], role = new byte[64];
     public int[] squad = new int[64], home = new int[64], ri = new int[64], crewN = new int[64], ammo = new int[64],
@@ -83,6 +85,16 @@ public final class Vehicles {
         siren[v] = false;
         returning[v] = false;
         uid[v] = nextUid++;
+        slotX[v] = slotY[v] = slotH[v] = wait[v] = 0;
+        // a car or truck put down where another already stands moves along the kerb to a free place
+        if (onRoad(v) && !freeAt(v, px, py, heading, 2)) {
+            int n = w.r.roads.nearestNode(px, py, 300);
+            if (n >= 0 && findSlot(v, n, px, py, 400)) {
+                x[v] = homeX[v] = slotX[v];
+                y[v] = homeY[v] = slotY[v];
+                head[v] = slotH[v];
+            }
+        }
         return v;
     }
 
@@ -93,6 +105,7 @@ public final class Vehicles {
         stuck = Arrays.copyOf(stuck, n); wpnT = Arrays.copyOf(wpnT, n); wpn2T = Arrays.copyOf(wpn2T, n);
         timer = Arrays.copyOf(timer, n); mobT = Arrays.copyOf(mobT, n); seg = Arrays.copyOf(seg, n);
         orbitA = Arrays.copyOf(orbitA, n); ghost = Arrays.copyOf(ghost, n); alt = Arrays.copyOf(alt, n);
+        slotX = Arrays.copyOf(slotX, n); slotY = Arrays.copyOf(slotY, n); slotH = Arrays.copyOf(slotH, n); wait = Arrays.copyOf(wait, n);
         type = Arrays.copyOf(type, n); kills = Arrays.copyOf(kills, n); state = Arrays.copyOf(state, n);
         role = Arrays.copyOf(role, n); squad = Arrays.copyOf(squad, n); home = Arrays.copyOf(home, n);
         ri = Arrays.copyOf(ri, n); crewN = Arrays.copyOf(crewN, n); ammo = Arrays.copyOf(ammo, n);
@@ -256,7 +269,7 @@ public final class Vehicles {
         return !s.alive || s.vehicle != v;
     }
 
-    /** Stops where it is (nobody left aboard to drive on). */
+    /** Stops (nobody left aboard to drive on): at the kerb close by if there is room, else where it is. */
     public void halt(int v) {
         if (state[v] == V_DRIVE || state[v] == V_PARKING) {
             state[v] = V_ARRIVED;
@@ -264,6 +277,11 @@ public final class Vehicles {
             spd[v] = 0;
             siren[v] = false;
             timer[v] = 0;
+            // not in the middle of the road: to the kerb if there's a place close by
+            if (onRoad(v)) {
+                int n = w.r.roads.nearestNode(x[v], y[v], 300);
+                if (n >= 0 && findSlot(v, n, x[v], y[v], 90)) state[v] = V_PULLIN;
+            }
         }
     }
 
@@ -391,6 +409,7 @@ public final class Vehicles {
                 case V_NONE: continue;
                 case V_DRIVE: drive(v, dt); break;
                 case V_PARKING: park(v, dt); break;
+                case V_PULLIN: pullIn(v, dt); break;
                 case V_FLY:
                 case V_RTB:
                 case V_ORBIT:
@@ -472,6 +491,8 @@ public final class Vehicles {
         float sx = bx - ax, sy = by - ay, len = (float) Math.sqrt(sx * sx + sy * sy) + 0.001f;
         float ux = sx / len, uy = sy / len;
         float lane = e >= 0 ? Math.min(g.ehalf[e] * 0.45f, 14) : 8;
+        // squeezing past something stopped in the lane: out towards the middle of the road
+        if (ghost[v] > 0) lane -= t.width + 4;
         float rx = -uy * lane, ry = ux * lane;
         // progress along this road
         float px = x[v] - ax, py = y[v] - ay;
@@ -551,6 +572,7 @@ public final class Vehicles {
             }
             return;
         }
+        float oldHead = head[v];
         head[v] += Math.max(-turnRate * dt, Math.min(turnRate * dt, diff));
         // speed: road kind, corners, traffic ahead, the dead in the way
         float limit = t.speed * (g.ekind[e >= 0 ? e : 0] == RoadGraph.HIGHWAY ? 1f : g.ekind[e >= 0 ? e : 0] == RoadGraph.AVENUE ? 0.72f : 0.58f);
@@ -576,6 +598,29 @@ public final class Vehicles {
             }
         } else stuck[v] = 0;
         float nx = x[v] + fx * spd[v] * dt, ny = y[v] + fy * spd[v] * dt;
+        // never into another vehicle: wait for room (after a long wait it gives up and stops where it is)
+        int blk = blocker(v, nx, ny, head[v], oldHead);
+        if (blk >= 0) {
+            head[v] = oldHead;
+            spd[v] = 0;
+            wait[v] += dt;
+            stuck[v] += dt;
+            // two vehicles in each other's way (at a corner, nose to nose): the newer one backs off a little
+            if (wait[v] > 1 && state[blk] == V_DRIVE && wait[blk] > 0.5f && uid[v] > uid[blk]) {
+                float bx2 = x[v] - fx * 12 * dt, by2 = y[v] - fy * 12 * dt;
+                if (roomFor(v, bx2, by2, head[v])) {
+                    x[v] = bx2;
+                    y[v] = by2;
+                }
+            }
+            // no way through for a long while: stop here (to the kerb if there's room) rather than drive over it
+            if (wait[v] > 10) {
+                wait[v] = 0;
+                arrive(v);
+            }
+            return;
+        }
+        wait[v] = Math.max(0, wait[v] - dt * 2);
         x[v] = nx;
         y[v] = ny;
         fuel[v] -= spd[v] * dt / 400000f;
@@ -613,7 +658,9 @@ public final class Vehicles {
                     float dx = x[o] - x[v], dy = y[o] - y[v];
                     float along = dx * fx + dy * fy, lat = Math.abs(dx * fy - dy * fx);
                     float gap = (t.length + type(o).length) * 0.5f + 6;
-                    if (along > 0 && along < gap + 30 && lat < 11) {
+                    // exactly alongside (started from the same place): the later one waits
+                    if (along == 0 && o < v) along = 0.01f;
+                    if (along > 0 && along < gap + 30 && lat < Math.max(11, (t.width + type(o).width) * 0.5f - 1)) {
                         float l = Math.max(0, (along - gap) * 3);
                         if (state[o] == V_DRIVE) l = Math.max(l, Math.min(spd[o], l + spd[o]));
                         limit = Math.min(limit, l);
@@ -680,6 +727,18 @@ public final class Vehicles {
         timer[v] = 0;
         if (returning[v]) {
             state[v] = V_PARKING;
+            // home, or the nearest free place to it at the kerb when another vehicle is standing there
+            slotX[v] = homeX[v];
+            slotY[v] = homeY[v];
+            slotH[v] = head[v];
+            if (onRoad(v) && !freeAt(v, homeX[v], homeY[v], head[v], 1)) {
+                int n = w.r.roads.nearestNode(homeX[v], homeY[v], 300);
+                if (n < 0 || !findSlot(v, n, homeX[v], homeY[v], 400)) {
+                    slotX[v] = homeX[v];
+                    slotY[v] = homeY[v];
+                    slotH[v] = head[v];
+                }
+            }
             return;
         }
         if (role[v] == R_SUPPLY) {
@@ -691,11 +750,171 @@ public final class Vehicles {
             }
         }
         state[v] = V_ARRIVED;
+        // a place of its own at the kerb near where the route ended, so cars arriving together don't pile up
+        if (onRoad(v)) {
+            int n = w.r.roads.nearestNode(x[v], y[v], 200);
+            if (n >= 0 && findSlot(v, n, x[v], y[v], 260)) state[v] = V_PULLIN;
+        }
+    }
+
+    /** The last few metres to its place at the kerb; then it's on scene. */
+    private void pullIn(int v, float dt) {
+        timer[v] += dt;
+        if (moveToSlot(v, dt) || timer[v] > 15) {
+            state[v] = V_ARRIVED;
+            spd[v] = 0;
+            timer[v] = 0;
+        }
+    }
+
+    /** Creeps towards (slotX, slotY), turning to slotH at the end; true once there. */
+    private boolean moveToSlot(int v, float dt) {
+        float dx = slotX[v] - x[v], dy = slotY[v] - y[v], d = (float) Math.sqrt(dx * dx + dy * dy);
+        if (d < 1.5f) {
+            x[v] = slotX[v];
+            y[v] = slotY[v];
+            head[v] = slotH[v];
+            spd[v] = 0;
+            return true;
+        }
+        float s = Math.min(36, d * 2.5f + 4) * dt;
+        if (s > d) s = d;
+        float nx = x[v] + dx / d * s, ny = y[v] + dy / d * s;
+        // facing the way it moves, and the way it will be parked over the last few metres
+        float hh = d > 14 ? (float) Math.atan2(dy, dx) : slotH[v];
+        float nh = head[v] + Math.max(-3 * dt, Math.min(3 * dt, angle(hh - head[v])));
+        if (!roomFor(v, nx, ny, nh)) {
+            spd[v] = 0;
+            wait[v] += dt;
+            // its way in is blocked: it stays where it is
+            if (wait[v] > 3) {
+                wait[v] = 0;
+                return true;
+            }
+            return false;
+        }
+        wait[v] = 0;
+        x[v] = nx;
+        y[v] = ny;
+        head[v] = nh;
+        spd[v] = s / dt;
+        return false;
+    }
+
+    // ------------------------------------------------------------------ room on the road
+
+    /** Would v at (px, py) facing h stay clear of every other road vehicle (or at least not get closer to one it's touching)? */
+    private boolean roomFor(int v, float px, float py, float h) {
+        return blocker(v, px, py, h, head[v]) < 0;
+    }
+
+    /** The road vehicle v (now facing oldH) would run into at (px, py) facing h, or -1. */
+    private int blocker(int v, float px, float py, float h, float oldH) {
+        Content.VType t = type(v);
+        float hl = t.length * 0.5f, hw = t.width * 0.5f;
+        int cx = (int) (px / GC), cy = (int) (py / GC);
+        for (int yy = cy - 1; yy <= cy + 1; yy++)
+            for (int xx = cx - 1; xx <= cx + 1; xx++) {
+                if (xx < 0 || yy < 0 || xx >= gw || yy >= gw) continue;
+                int c = yy * gw + xx;
+                for (int j = gStart[c]; j < gEnd[c]; j++) {
+                    int o = gList[j];
+                    if (o == v || !onRoad(o)) continue;
+                    Content.VType to = type(o);
+                    if (!boxesOverlap(px, py, h, hl, hw, x[o], y[o], head[o], to.length * 0.5f, to.width * 0.5f)) continue;
+                    // already overlapping (put down on top of each other): moving apart is allowed, closer isn't
+                    float d0 = (x[o] - x[v]) * (x[o] - x[v]) + (y[o] - y[v]) * (y[o] - y[v]);
+                    float d1 = (x[o] - px) * (x[o] - px) + (y[o] - py) * (y[o] - py);
+                    if (d1 > d0 && boxesOverlap(x[v], y[v], oldH, hl - 1, hw - 1, x[o], y[o], head[o], to.length * 0.5f - 1, to.width * 0.5f - 1)) continue;
+                    return o;
+                }
+            }
+        return -1;
+    }
+
+    /** Is there room for v at (px, py) facing h, with a margin, clear of every road vehicle and every place being pulled in to? */
+    private boolean freeAt(int v, float px, float py, float h, float margin) {
+        Content.VType t = type(v);
+        float hl = t.length * 0.5f + margin, hw = t.width * 0.5f + margin;
+        for (int o = 0; o < top; o++) {
+            if (o == v || !onRoad(o)) continue;
+            Content.VType to = type(o);
+            float reach = hl + hw + to.length;
+            float dx = x[o] - px, dy = y[o] - py;
+            if (dx * dx + dy * dy < reach * reach
+                    && boxesOverlap(px, py, h, hl, hw, x[o], y[o], head[o], to.length * 0.5f, to.width * 0.5f)) return false;
+            if (state[o] == V_PULLIN || state[o] == V_PARKING) {
+                dx = slotX[o] - px;
+                dy = slotY[o] - py;
+                if (dx * dx + dy * dy < reach * reach
+                        && boxesOverlap(px, py, h, hl, hw, slotX[o], slotY[o], slotH[o], to.length * 0.5f, to.width * 0.5f)) return false;
+            }
+        }
+        return true;
+    }
+
+    /** Can a vehicle stand here (road, pavement or open ground under its whole footprint)? */
+    private boolean standable(float px, float py, float h, float hl, float hw) {
+        float c = (float) Math.cos(h), sn = (float) Math.sin(h);
+        for (int k = 0; k < 5; k++) {
+            float a = k == 0 ? 0 : (k & 1) == 0 ? hl : -hl, b = k == 0 ? 0 : k < 3 ? hw : -hw;
+            float qx = px + c * a - sn * b, qy = py + sn * a + c * b;
+            int tt = w.r.tileAtPx(qx, qy);
+            if (!Tile.walkable(tt) && !Tile.roadish(tt)) return false;
+        }
+        return true;
+    }
+
+    /**
+     * Finds v a free place at the kerb along the roads out of junction n (or the junctions next to it), nearest to
+     * (px, py) and within maxDist of it: half on the pavement, facing the way its side of the road runs, clear of the
+     * junction. Sets slotX, slotY, slotH; false if there's none.
+     */
+    private boolean findSlot(int v, int n, float px, float py, float maxDist) {
+        RoadGraph g = w.r.roads;
+        Content.VType t = type(v);
+        float hl = t.length * 0.5f, hw = t.width * 0.5f;
+        float best = maxDist * maxDist;
+        boolean found = false;
+        for (int ring = 0; ring < 2 && !found; ring++) {
+            int a0 = g.adjStart[n], a1 = g.adjStart[n + 1];
+            int nodes = ring == 0 ? 1 : a1 - a0;
+            for (int q = 0; q < nodes; q++) {
+                int m = ring == 0 ? n : g.other(g.adjEdge[a0 + q], n);
+                float maxHalf = 0;
+                for (int k = g.adjStart[m]; k < g.adjStart[m + 1]; k++) maxHalf = Math.max(maxHalf, g.ehalf[g.adjEdge[k]]);
+                for (int k = g.adjStart[m]; k < g.adjStart[m + 1]; k++) {
+                    int e = g.adjEdge[k];
+                    if (!g.ealive[e]) continue;
+                    int o = g.other(e, m);
+                    float ux = g.nx[o] - g.nx[m], uy = g.ny[o] - g.ny[m], len = (float) Math.sqrt(ux * ux + uy * uy);
+                    if (len < 1) continue;
+                    ux /= len;
+                    uy /= len;
+                    float kerb = g.ehalf[e] + hw - 4;
+                    float d0 = maxHalf + hl + 4, d1 = Math.min(len * 0.5f, 220);
+                    for (float d = d0; d <= d1; d += t.length + 5)
+                        for (int side = -1; side <= 1; side += 2) {
+                            float sx = g.nx[m] + ux * d - uy * kerb * side, sy = g.ny[m] + uy * d + ux * kerb * side;
+                            float dx = sx - px, dy = sy - py, score = dx * dx + dy * dy;
+                            if (score >= best) continue;
+                            float h = side > 0 ? (float) Math.atan2(uy, ux) : (float) Math.atan2(-uy, -ux);
+                            if (!standable(sx, sy, h, hl, hw) || !freeAt(v, sx, sy, h, 2)) continue;
+                            best = score;
+                            found = true;
+                            slotX[v] = sx;
+                            slotY[v] = sy;
+                            slotH[v] = h;
+                        }
+                }
+            }
+        }
+        return found;
     }
 
     /** The last few metres from the road into a parking place. */
     private void park(int v, float dt) {
-        float dx = homeX[v] - x[v], dy = homeY[v] - y[v], d = (float) Math.sqrt(dx * dx + dy * dy);
+        float dx = slotX[v] - x[v], dy = slotY[v] - y[v], d = (float) Math.sqrt(dx * dx + dy * dy);
         returning[v] = false;
         if (d < 3) {
             state[v] = V_PARKED;
@@ -705,9 +924,22 @@ public final class Vehicles {
             return;
         }
         float s = Math.min(40, d * 2);
-        x[v] += dx / d * s * dt;
-        y[v] += dy / d * s * dt;
-        head[v] = (float) Math.atan2(dy, dx);
+        float nx = x[v] + dx / d * s * dt, ny = y[v] + dy / d * s * dt, nh = (float) Math.atan2(dy, dx);
+        timer[v] += dt;
+        if (onRoad(v) && !roomFor(v, nx, ny, nh)) {
+            wait[v] += dt;
+            // no way in: parked where it is
+            if (wait[v] > 4) {
+                wait[v] = 0;
+                slotX[v] = x[v];
+                slotY[v] = y[v];
+            }
+            return;
+        }
+        wait[v] = 0;
+        x[v] = nx;
+        y[v] = ny;
+        head[v] = nh;
     }
 
     private void fly(int v, float dt) {
@@ -854,6 +1086,59 @@ public final class Vehicles {
         alt[v] = 1;
         w.fx.sound("jet", tx, ty);
         return v;
+    }
+
+    /** A road vehicle (not an aircraft, not a ship at sea, not off the map). */
+    private boolean onRoad(int v) {
+        if (state[v] == V_NONE || flying(v)) return false;
+        Content.VType t = type(v);
+        return !t.flies && t.length < 80;
+    }
+
+    /** Do the footprints of two road vehicles (rectangles length x width round their centres) overlap, with a margin? */
+    boolean overlaps(int a, int b, float margin) {
+        return boxesOverlap(x[a], y[a], head[a], type(a).length * 0.5f + margin, type(a).width * 0.5f + margin,
+                x[b], y[b], head[b], type(b).length * 0.5f + margin, type(b).width * 0.5f + margin);
+    }
+
+    /** Separating axes for two rectangles given by centre, heading and half sizes. */
+    static boolean boxesOverlap(float ax, float ay, float ah, float al, float aw, float bx, float by, float bh, float bl, float bw) {
+        float dx = bx - ax, dy = by - ay;
+        float r = al + aw + bl + bw;
+        if (dx * dx + dy * dy > r * r) return false;
+        float ca = (float) Math.cos(ah), sa = (float) Math.sin(ah), cb = (float) Math.cos(bh), sb = (float) Math.sin(bh);
+        float[][] axes = {{ca, sa}, {-sa, ca}, {cb, sb}, {-sb, cb}};
+        for (float[] u : axes) {
+            float d = Math.abs(dx * u[0] + dy * u[1]);
+            float ra = al * Math.abs(ca * u[0] + sa * u[1]) + aw * Math.abs(-sa * u[0] + ca * u[1]);
+            float rb = bl * Math.abs(cb * u[0] + sb * u[1]) + bw * Math.abs(-sb * u[0] + cb * u[1]);
+            if (d >= ra + rb) return false;
+        }
+        return true;
+    }
+
+    /** How many pairs of road vehicles overlap now (the footprints shrunk by a pixel, so touching doesn't count). */
+    public int overlapPairs() {
+        int n = 0;
+        for (int k = 0; k < gTouchedN; k++) {
+            int c = gTouched[k];
+            int cx = c % gw, cy = c / gw;
+            for (int j = gStart[c]; j < gEnd[c]; j++) {
+                int a = gList[j];
+                if (!onRoad(a)) continue;
+                for (int yy = cy - 1; yy <= cy + 1; yy++)
+                    for (int xx = cx - 1; xx <= cx + 1; xx++) {
+                        if (xx < 0 || yy < 0 || xx >= gw || yy >= gw) continue;
+                        int c2 = yy * gw + xx;
+                        for (int i = gStart[c2]; i < gEnd[c2]; i++) {
+                            int b = gList[i];
+                            if (b <= a || !onRoad(b)) continue;
+                            if (overlaps(a, b, -1)) n++;
+                        }
+                    }
+            }
+        }
+        return n;
     }
 
     public int countActive(String faction) {

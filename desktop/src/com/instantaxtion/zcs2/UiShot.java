@@ -80,7 +80,7 @@ public final class UiShot {
         frames(1);
         // the key to the map's marks
         tap("legend");
-        frames(1);
+        frames(2); // the key keeps labels out from the frame after it opens
         shot("06c-legend");
         tap("legend");
         tap("tool:look");

@@ -5,6 +5,7 @@ import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.zip.Deflater;
 import java.util.zip.DeflaterOutputStream;
 import java.util.zip.InflaterInputStream;
 
@@ -14,12 +15,81 @@ import java.util.zip.InflaterInputStream;
  * rebuilt from its seed, then the saved tiles (rubble, blown bridges) are laid over it.
  */
 public final class SaveIO {
-    public static final int VERSION = 4;
+    public static final int VERSION = 5;
+    /** The oldest save this version still reads (3: the game's 1.2; the fields added since get their defaults). */
+    public static final int OLDEST = 3;
     private static final int MAGIC = 0x5A435332; // "ZCS2"
 
+    /** A save from a version of the game too old to read. */
+    public static final class TooOld extends IOException {
+        TooOld() {
+            super("made with an older version of the game");
+        }
+    }
+
+    /** Saves the world to os: a snapshot of it, compressed. */
     public static void save(World w, OutputStream os) throws IOException {
-        DeflaterOutputStream z = new DeflaterOutputStream(os);
-        DataOutputStream o = new DataOutputStream(new java.io.BufferedOutputStream(z, 1 << 16));
+        compress(snapshot(w), os);
+    }
+
+    /**
+     * Everything a save holds, uncompressed: the part that has to be done while the world stands still (on the game's
+     * thread). compress() can then run anywhere, and save() is exactly snapshot() then compress().
+     */
+    public static Snapshot snapshot(World w) throws IOException {
+        // room for the tiles, the scent field and the rest at once, so the buffer seldom has to grow
+        Snapshot raw = new Snapshot(w.r.W * w.r.H + w.flow.dist.length * 2 + (4 << 20));
+        DataOutputStream o = new DataOutputStream(raw);
+        write(w, o);
+        o.flush();
+        return raw;
+    }
+
+    /** Compresses a snapshot into os (the save file's bytes). */
+    public static void compress(Snapshot raw, OutputStream os) throws IOException {
+        Deflater d = new Deflater();
+        try {
+            DeflaterOutputStream z = new DeflaterOutputStream(os, d, 1 << 16);
+            z.write(raw.buf, 0, raw.n);
+            z.finish();
+            z.flush();
+        } finally {
+            d.end();
+        }
+    }
+
+    /**
+     * A save's bytes before compression, in a growing array written without ByteArrayOutputStream's locking (a
+     * snapshot writes millions of small values).
+     */
+    public static final class Snapshot extends OutputStream {
+        private byte[] buf;
+        private int n;
+
+        Snapshot(int cap) {
+            buf = new byte[cap];
+        }
+
+        public int length() {
+            return n;
+        }
+
+        @Override
+        public void write(int b) {
+            if (n == buf.length) buf = java.util.Arrays.copyOf(buf, buf.length * 2);
+            buf[n++] = (byte) b;
+        }
+
+        @Override
+        public void write(byte[] b, int off, int len) {
+            if (n + len > buf.length) buf = java.util.Arrays.copyOf(buf, Math.max(buf.length * 2, n + len));
+            System.arraycopy(b, off, buf, n, len);
+            n += len;
+        }
+
+    }
+
+    private static void write(World w, DataOutputStream o) throws IOException {
         o.writeInt(MAGIC);
         o.writeInt(VERSION);
         o.writeLong(w.c.rulesHash);
@@ -61,9 +131,8 @@ public final class SaveIO {
         flow(o, w.flow);
         modules(o, w);
         extras(o, w);
+        extras5(o, w);
         o.writeInt(MAGIC);
-        o.flush();
-        z.finish();
     }
 
     public static World load(Content c, InputStream is, int threads) throws IOException {
@@ -71,6 +140,7 @@ public final class SaveIO {
         if (in.readInt() != MAGIC) throw new IOException("not a Zombie City Sandbox 2 save");
         int ver = in.readInt();
         if (ver > VERSION) throw new IOException("this save is from a newer version of the game");
+        if (ver < OLDEST) throw new TooOld();
         long rules = in.readLong();
         int size = in.readInt(), preset = in.readInt();
         long rseed = in.readLong(), seed = in.readLong();
@@ -108,7 +178,7 @@ public final class SaveIO {
         w.strategic = in.readBoolean();
         readEnts(in, w.e);
         readVehicles(in, w.veh);
-        readSquads(in, w);
+        readSquads(in, w, ver);
         readSectors(in, w.sec);
         readDispatch(in, w.disp);
         readMilitary(in, w.mil);
@@ -118,8 +188,20 @@ public final class SaveIO {
         readStats(in, w.stats);
         readEffects(in, w.fx);
         readFlow(in, w.flow);
-        readModules(in, w);
+        readModules(in, w, ver);
         if (ver >= 4) readExtras(in, w);
+        else olderDefaults(w);
+        if (ver >= 5) readExtras5(in, w);
+        else {
+            // a vehicle going home parks at home (version 5 gave each its own place)
+            Vehicles v = w.veh;
+            for (int i = 0; i < v.top; i++) {
+                v.slotX[i] = v.homeX[i];
+                v.slotY[i] = v.homeY[i];
+                v.slotH[i] = v.head[i];
+                if (v.state[i] == Vehicles.V_PULLIN) v.state[i] = Vehicles.V_ARRIVED;
+            }
+        }
         w.r.closeBarricadedRoads();
         if (in.readInt() != MAGIC) throw new IOException("save is damaged");
         w.veh.rebuildGrid();
@@ -213,6 +295,18 @@ public final class SaveIO {
         }
     }
 
+    /** State added in version 5: each vehicle's place at the kerb and its wait for room. */
+    private static void extras5(DataOutputStream o, World w) throws IOException {
+        Vehicles v = w.veh;
+        int n = v.top;
+        floats(o, v.slotX, n); floats(o, v.slotY, n); floats(o, v.slotH, n); floats(o, v.wait, n);
+    }
+
+    private static void readExtras5(DataInputStream in, World w) throws IOException {
+        Vehicles v = w.veh;
+        readFloats(in, v.slotX); readFloats(in, v.slotY); readFloats(in, v.slotH); readFloats(in, v.wait);
+    }
+
     private static void readExtras(DataInputStream in, World w) throws IOException {
         Military m = w.mil;
         readFloats(in, m.armyAsked);
@@ -234,15 +328,103 @@ public final class SaveIO {
         for (int k = 0; k < nl; k++) st.latent.add(new float[]{in.readFloat(), in.readFloat(), in.readFloat()});
     }
 
-    private static void readModules(DataInputStream in, World w) throws IOException {
+    private static void readModules(DataInputStream in, World w, int ver) throws IOException {
         int n = in.readInt();
         for (int k = 0; k < n; k++) {
             String id = in.readUTF();
             byte[] data = new byte[in.readInt()];
             in.readFully(data);
+            if (ver < 4) data = upgradeModule(id, data);
             for (Module m : w.modules)
                 if (m.id().equals(id)) m.load(new DataInputStream(new java.io.ByteArrayInputStream(data)));
         }
+    }
+
+    /**
+     * A version 3 save (the game's 1.2) lacks a few fields some modules added since, in the middle of their data:
+     * rewrites such a module's bytes in today's layout with the new fields at their starting values.
+     */
+    static byte[] upgradeModule(String id, byte[] data) throws IOException {
+        if (!id.equals("forces") && !id.equals("command") && !id.equals("media") && !id.equals("engineers")) return data;
+        DataInputStream in = new DataInputStream(new java.io.ByteArrayInputStream(data));
+        java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream(data.length + 2560);
+        DataOutputStream o = new DataOutputStream(bo);
+        if (id.equals("forces")) {
+            o.writeInt(in.readInt()); // the next formation's number
+            o.writeFloat(in.readFloat()); // the command clock
+            int n = in.readInt();
+            o.writeInt(n);
+            for (int k = 0; k < n; k++) {
+                o.writeInt(in.readInt()); // type
+                o.writeUTF(in.readUTF()); // name
+                copy(in, o, 3 * 4); // faction, hq, state
+                int rl = in.readInt();
+                o.writeInt(rl);
+                copy(in, o, Math.max(0, rl) * 4); // route
+                copy(in, o, 4 * 3 + 4 * 7 + 3); // ri, gx, gy, gunT, start, kills, losses, deployed, home, task; alive, outside, player
+                o.writeBoolean(false); // released to the general
+                o.writeInt(0); // job
+                o.writeInt(-1); // job id
+                o.writeFloat(0); // idle
+                o.writeFloat(0); // on the job
+            }
+            int f = in.readInt();
+            o.writeInt(f);
+            copy(in, o, f * 4); // free squads
+            o.writeBoolean(true); // the general commands (set from the role after loading)
+        } else if (id.equals("command")) {
+            int n = in.readInt();
+            o.writeInt(n);
+            for (int k = 0; k < n; k++) {
+                copy(in, o, 4 + 3 * 4); // replaced, approval, lowT, cool
+                o.writeUTF(in.readUTF()); // last decision
+                copy(in, o, 8); // its time
+                o.writeFloat(0); // asked
+            }
+            int m = in.readInt();
+            o.writeInt(m);
+            copy(in, o, m * (4 + 4 + 5 + 4));
+            copy(in, o, 1 + 3 * 4); // bridges, hourT, capitalT, fedT
+            for (int k = 0; k < 5; k++) o.writeFloat(0); // downT
+            o.writeFloat(0); // curfewCalmT
+            o.writeInt(-1); // last level (none seen yet)
+        } else if (id.equals("media")) {
+            int n = in.readInt();
+            o.writeInt(n);
+            copy(in, o, n * 8 + 3 * 4 + 4);
+            o.writeFloat(0); // the last figure
+            for (int k = 0; k < n; k++) o.writeFloat(LONG_AGO); // no rumour yet anywhere
+        } else {
+            int n = in.readInt();
+            o.writeInt(n);
+            copy(in, o, n * 12);
+            int b = in.readInt();
+            o.writeInt(b);
+            copy(in, o, b * 8 + 4 + 4); // built, wallT, fobs
+            o.writeInt(0); // no cool-downs
+            copy(in, o, 8); // barricades, recovered
+        }
+        o.flush();
+        return bo.toByteArray();
+    }
+
+    private static final float LONG_AGO = -1e9f;
+
+    private static void copy(DataInputStream in, DataOutputStream o, int n) throws IOException {
+        byte[] b = new byte[n];
+        in.readFully(b);
+        o.write(b);
+    }
+
+    /** What a version 3 save didn't hold, worked out from what it did. */
+    private static void olderDefaults(World w) {
+        // the ledger: everyone at the start = alive + killed + turned (the turned weren't counted then)
+        long alive = Audit.people(w);
+        Stats s = w.stats;
+        s.startPeople = Math.max(s.startCivilians, alive + s.civDeaths);
+        s.civTurned = s.startPeople - alive - s.civDeaths;
+        // the player as President or commander commanded the army themselves
+        w.forces.generalCommands = !(w.gov.playerDecides || w.roles.role == Roles.MILITARY);
     }
 
     // ------------------------------------------------------------------ entities
@@ -337,7 +519,7 @@ public final class SaveIO {
         }
     }
 
-    private static void readSquads(DataInputStream in, World w) throws IOException {
+    private static void readSquads(DataInputStream in, World w, int ver) throws IOException {
         int n = in.readInt();
         w.sq.list.clear();
         for (int i = 0; i < n; i++) {
@@ -349,12 +531,23 @@ public final class SaveIO {
             for (int k = 0; k < s.n; k++) s.mem[k] = in.readInt();
             s.gx = in.readFloat(); s.gy = in.readFloat(); s.faceX = in.readFloat(); s.faceY = in.readFloat(); s.timer = in.readFloat();
             s.boardT = in.readFloat(); s.fallT = in.readFloat(); s.replanT = in.readFloat(); s.hold = in.readFloat();
-            s.idleT = in.readFloat(); s.template = in.readInt();
+            if (ver >= 4) {
+                s.idleT = in.readFloat();
+                s.template = in.readInt();
+            }
             s.path = readFloatArr(in);
             s.pathI = in.readInt();
             s.name = in.readUTF(); s.label = in.readUTF();
             s.kills = in.readInt(); s.losses = in.readInt();
             s.alive = in.readBoolean(); s.outside = in.readBoolean(); s.player = in.readBoolean();
+            if (ver < 4) {
+                // older saves didn't keep which kind of squad it was: its label is the kind's name
+                for (Content.SquadT t : w.c.squads)
+                    if (t.name.equals(s.label)) {
+                        s.template = t.index;
+                        break;
+                    }
+            }
             w.sq.list.add(s);
         }
     }
@@ -604,9 +797,31 @@ public final class SaveIO {
 
     // ------------------------------------------------------------------ arrays
 
+    // arrays are encoded a chunk at a time (the same bytes DataOutputStream would write value by value, faster)
+    private static final ThreadLocal<byte[]> CHUNK = new ThreadLocal<byte[]>() {
+        @Override
+        protected byte[] initialValue() {
+            return new byte[1 << 15];
+        }
+    };
+
     private static void floats(DataOutputStream o, float[] a, int n) throws IOException {
         o.writeInt(n);
-        for (int i = 0; i < n; i++) o.writeFloat(a[i]);
+        byte[] b = CHUNK.get();
+        int k = 0;
+        for (int i = 0; i < n; i++) {
+            int v = Float.floatToIntBits(a[i]);
+            b[k] = (byte) (v >>> 24);
+            b[k + 1] = (byte) (v >>> 16);
+            b[k + 2] = (byte) (v >>> 8);
+            b[k + 3] = (byte) v;
+            k += 4;
+            if (k == b.length) {
+                o.write(b, 0, k);
+                k = 0;
+            }
+        }
+        o.write(b, 0, k);
     }
 
     private static void readFloats(DataInputStream in, float[] a) throws IOException {
@@ -619,7 +834,21 @@ public final class SaveIO {
 
     private static void ints(DataOutputStream o, int[] a, int n) throws IOException {
         o.writeInt(n);
-        for (int i = 0; i < n; i++) o.writeInt(a[i]);
+        byte[] b = CHUNK.get();
+        int k = 0;
+        for (int i = 0; i < n; i++) {
+            int v = a[i];
+            b[k] = (byte) (v >>> 24);
+            b[k + 1] = (byte) (v >>> 16);
+            b[k + 2] = (byte) (v >>> 8);
+            b[k + 3] = (byte) v;
+            k += 4;
+            if (k == b.length) {
+                o.write(b, 0, k);
+                k = 0;
+            }
+        }
+        o.write(b, 0, k);
     }
 
     private static void readInts(DataInputStream in, int[] a) throws IOException {
@@ -632,7 +861,19 @@ public final class SaveIO {
 
     private static void shorts(DataOutputStream o, short[] a, int n) throws IOException {
         o.writeInt(n);
-        for (int i = 0; i < n; i++) o.writeShort(a[i]);
+        byte[] b = CHUNK.get();
+        int k = 0;
+        for (int i = 0; i < n; i++) {
+            int v = a[i];
+            b[k] = (byte) (v >>> 8);
+            b[k + 1] = (byte) v;
+            k += 2;
+            if (k == b.length) {
+                o.write(b, 0, k);
+                k = 0;
+            }
+        }
+        o.write(b, 0, k);
     }
 
     private static void readShorts(DataInputStream in, short[] a) throws IOException {
@@ -661,7 +902,16 @@ public final class SaveIO {
 
     private static void bools(DataOutputStream o, boolean[] a, int n) throws IOException {
         o.writeInt(n);
-        for (int i = 0; i < n; i++) o.writeBoolean(a[i]);
+        byte[] b = CHUNK.get();
+        int k = 0;
+        for (int i = 0; i < n; i++) {
+            b[k++] = (byte) (a[i] ? 1 : 0);
+            if (k == b.length) {
+                o.write(b, 0, k);
+                k = 0;
+            }
+        }
+        o.write(b, 0, k);
     }
 
     private static boolean[] readBools(DataInputStream in) throws IOException {

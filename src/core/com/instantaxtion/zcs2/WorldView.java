@@ -12,6 +12,8 @@ public final class WorldView {
     private final Platform pf;
     public final MapPainter map;
     public boolean lean3d = true, blood = true, healthBars = true, names = true;
+    /** No words on the map at all (the menu's backdrop). */
+    public boolean noLabels;
     public Squads.Squad selected;
     public Forces.Formation selectedFormation;
     /** The map overlay shown (the national map's layers). */
@@ -108,6 +110,7 @@ public final class WorldView {
     /** A label drawn whatever else is there (its place already taken, or a mark that must show). */
     public void labelAlways(Gfx g, String s, float x, float y, float sizeDp, int color, int align, boolean bold) {
         justPlaced = false;
+        if (noLabels) return;
         if (deferLabels && lqN < lqText.length) {
             // while the map's marks are still being drawn, the words wait, so no dot, symbol or badge lands on them
             int k = lqN++;
@@ -145,7 +148,7 @@ public final class WorldView {
 
     // where labels may go this frame (the map area the bars leave free), and areas the interface keeps for itself
     private float areaX0 = -1e9f, areaY0 = -1e9f, areaX1 = 1e9f, areaY1 = 1e9f;
-    private final float[] keep = new float[4 * 8];
+    private final float[] keep = new float[4 * 12];
     private int keepN;
 
     /** For the next frame drawn only: labels stay inside this screen rectangle. */
@@ -158,7 +161,7 @@ public final class WorldView {
 
     /** For the next frame drawn only: no labels in this screen rectangle (the radio, a note). */
     public void keepOut(float x0, float y0, float x1, float y1) {
-        if (keepN >= 8 || x1 <= x0 || y1 <= y0) return;
+        if (keepN >= 12 || x1 <= x0 || y1 <= y0) return;
         int k = keepN++ * 4;
         keep[k] = x0;
         keep[k + 1] = y0;

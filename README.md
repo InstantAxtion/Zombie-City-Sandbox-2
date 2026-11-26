@@ -99,7 +99,7 @@ The tests and `play.sh` only need Java 8 or newer. CI (`.github/workflows/build-
 builds the APK on every push.
 
 Headless tools (run from the repository root, with `build/test` on the classpath): `Probe` (an outbreak of any
-size, printing the numbers; `STRAT=days` then fast-forwards), `Shot` (the world at five zooms), `UiShot` (the
+size, printing the numbers; `STRAT=days` then fast-forwards, `OVERLAP=1` counts vehicles standing on each other), `Shot` (the world at five zooms), `UiShot` (the
 interface driven by scripted taps; `UiShot dir 1080 2400 2.75` shoots a phone in portrait, `UiShot dir 2400 1080
 2.75` sideways, and `UiShot dir 1080 2400 2.75 director` walks the roles, campaigns, editor, layers, the hand-over
 to the general, the timelapse and replays).
