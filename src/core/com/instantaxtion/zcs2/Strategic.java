@@ -633,7 +633,7 @@ public final class Strategic {
 
     /**
      * People queue on the roads out at this rate (a game hour), more for the big cities. On a national map, so many
-     * for each highway out of the town (evacPerHourPerExit), half that for each lesser road out.
+     * for each highway out of the town (evacPerHourPerExit; half that for a town with none).
      */
     private float roadsOut(Region.Settlement s) {
         float perExit = w.rule("evacPerHourPerExit", 0);
@@ -644,8 +644,8 @@ public final class Strategic {
     private float[] exits;
 
     /**
-     * Roads out of a settlement: each highway leaving its streets counts 1, each lesser road 0.5 (at least 0.5).
-     * Worked out once, from the road graph.
+     * Highways out of a settlement (each crossing from its sectors to others'), at least 0.5 for a town reached by
+     * lesser roads only. Worked out once, from the road graph.
      */
     public float exits(int st) {
         if (exits == null) {
@@ -654,10 +654,9 @@ public final class Strategic {
             Sectors sec = w.sec;
             for (int k = 0; k < g.edgeCount; k++) {
                 int a = sec.settlement[w.r.sectorOfPx(g.nx[g.ea[k]], g.ny[g.ea[k]])], b = sec.settlement[w.r.sectorOfPx(g.nx[g.eb[k]], g.ny[g.eb[k]])];
-                if (a == b) continue;
-                float v = g.ekind[k] == RoadGraph.HIGHWAY ? 1 : 0.5f;
-                if (a >= 0) e[a] += v;
-                if (b >= 0) e[b] += v;
+                if (a == b || g.ekind[k] != RoadGraph.HIGHWAY) continue;
+                if (a >= 0) e[a]++;
+                if (b >= 0) e[b]++;
             }
             for (int k = 0; k < e.length; k++) e[k] = Math.max(0.5f, e[k]);
             exits = e;

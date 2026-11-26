@@ -88,7 +88,12 @@ public final class Recovery extends Module {
      * so a few dozen stragglers don't hold the country's alert up forever.
      */
     private void sweep(int total) {
-        if (total == 0 || total > 4000) return;
+        // (a national map: only once the dead are down to a share of the most there ever were, and slower: they are
+        // spread over far more ground)
+        if (total == 0 || total > w.rule("sweepBelow", 4000)) return;
+        float peakShare = w.rule("sweepPeakShare", 0);
+        if (peakShare > 0 && total > w.stats.peakZombies * peakShare) return;
+        float rate = w.rule("sweepRate", 1);
         Sectors sec = w.sec;
         int killed = 0, nests = 0;
         float bx = -1, by = -1;
@@ -97,7 +102,7 @@ public final class Recovery extends Module {
         for (int s = sec.idx.first(); s >= 0; s = sec.idx.next(s)) {
             int z = sec.zIn[s];
             if (z <= 0 || z > 400 || sec.hot[s] > 0 && !w.strategic) continue;
-            float share = sec.settlement[s] >= 0 ? 0.35f : 0.2f;
+            float share = (sec.settlement[s] >= 0 ? 0.35f : 0.2f) * rate;
             int k = Math.min(z, Math.max(Rng.unit(w.seed, w.tick, s * 31L + 5) < share ? 1 : 0, (int) (z * share)));
             if (k <= 0) continue;
             sec.zIn[s] -= k;
@@ -113,7 +118,7 @@ public final class Recovery extends Module {
         // straggling packs on the roads too
         for (Strategic.Horde h : w.strat.hordes) {
             if (!h.alive || h.count > 150) continue;
-            int k = Math.max(1, (int) (h.count * 0.3f));
+            int k = Math.max(1, (int) (h.count * 0.3f * rate));
             h.count -= k;
             killed += k;
             if (h.count <= 0) {

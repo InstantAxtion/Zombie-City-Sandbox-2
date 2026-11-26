@@ -26,7 +26,7 @@ public final class Balance {
         public int zombies, map, result;
         public long seed;
         public float days, lostShare;
-        public int deaths, police, army, peak;
+        public int deaths, police, army, peak, left;
         public long people0;
     }
 
@@ -80,6 +80,7 @@ public final class Balance {
         r.police = w.stats.armedDeaths[Ents.COP];
         r.army = w.stats.armedDeaths[Ents.SOLDIER];
         r.peak = w.stats.peakZombies;
+        r.left = w.totalZombies();
         w.shutdown();
         return r;
     }
@@ -159,9 +160,9 @@ public final class Balance {
         System.out.printf("%d runs in %.0f s%n", runs.size(), (System.nanoTime() - t0) / 1e9);
         new java.io.File("build").mkdirs();
         PrintWriter pw = new PrintWriter("build/balance.csv", "UTF-8");
-        pw.println("zombies,map,seed,result,days,lost_share,civilian_deaths,police_lost,army_lost,peak_dead,people_at_start");
+        pw.println("zombies,map,seed,result,days,lost_share,civilian_deaths,police_lost,army_lost,peak_dead,people_at_start,dead_left");
         for (Run r : runs)
-            pw.printf("%d,%d,%d,%s,%.2f,%.4f,%d,%d,%d,%d,%d%n", r.zombies, r.map, r.seed, RESULTS[r.result], r.days, r.lostShare, r.deaths, r.police, r.army, r.peak, r.people0);
+            pw.printf("%d,%d,%d,%s,%.2f,%.4f,%d,%d,%d,%d,%d,%d%n", r.zombies, r.map, r.seed, RESULTS[r.result], r.days, r.lostShare, r.deaths, r.police, r.army, r.peak, r.people0, r.left);
         pw.close();
     }
 }

@@ -613,8 +613,8 @@ public final class Forces extends Module {
 
     /** Fights nobody is watching: the people at each station and formation against the dead counted near it. */
     private void aggregate(float dt) {
-        float kill = w.c.rule("aggregateKill", 0.02f), loss = w.c.rule("aggregateLoss", 0.0008f);
-        float rounds = w.c.rule("roundsPerKill", 4), findHalf = w.c.rule("findHalf", 0);
+        float kill = w.rule("aggregateKill", 0.02f), loss = w.rule("aggregateLoss", 0.0008f);
+        float rounds = w.rule("roundsPerKill", 4), findHalf = w.rule("findHalf", 0);
         Sectors sec = w.sec;
         for (Region.Facility f : w.r.facilities) {
             if (f.pool == null || !w.strat.online(f.id)) continue;
@@ -918,6 +918,18 @@ public final class Forces extends Module {
             float dx = p[0] - f.hq.x, dy = p[1] - f.hq.y;
             if (dx * dx + dy * dy > 1200 * 1200) order(f, p[0], p[1]);
         }
+        // (a national map: a city is too big to hold from one place; a formation whose streets are clear moves on to
+        // the worst streets nobody holds)
+        float refront = w.rule("formationRefront", 0);
+        if (refront > 0)
+            for (Formation f : formations) {
+                if (!f.alive || f.job != JOB_TOWN || f.task < 0 || f.state != HOLDING || !aiMay(f) || f.jobT < refront) continue;
+                if (deadAround(f.hq.x, f.hq.y, 4) > 0) continue;
+                float[] p = openFront(w.r.settlements.get(f.task), f);
+                if (p == null) continue;
+                float dx = p[0] - f.hq.x, dy = p[1] - f.hq.y;
+                if (dx * dx + dy * dy > 1200 * 1200 && order(f, p[0], p[1])) f.jobT = 0;
+            }
         // nothing to do for a long while: home to barracks (and outside units back over the border, see Recovery)
         for (Formation f : formations) {
             if (!f.alive || !aiMay(f)) continue;
@@ -980,6 +992,43 @@ public final class Forces extends Module {
             if (dx * dx + dy * dy < reach * reach) return true;
         }
         return false;
+    }
+
+    /** The dead in the sectors within rad sectors of (x, y). */
+    private int deadAround(float x, float y, int rad) {
+        Sectors sec = w.sec;
+        int s0 = w.r.sectorOfPx(x, y), sx = s0 % sec.sw, sy = s0 / sec.sw, n = 0;
+        for (int yy = Math.max(0, sy - rad); yy <= Math.min(sec.sh - 1, sy + rad); yy++)
+            for (int xx = Math.max(0, sx - rad); xx <= Math.min(sec.sw - 1, sx + rad); xx++) n += sec.zIn[yy * sec.sw + xx] + w.sp.secZ[yy * sec.sw + xx];
+        return n;
+    }
+
+    /**
+     * The worst streets of a town (most of the dead) that no other formation holds or is on its way to (within four
+     * sectors of it), or null.
+     */
+    private float[] openFront(Region.Settlement s, Formation me) {
+        Sectors sec = w.sec;
+        int best = -1, bz = 0;
+        for (int q : sec.idx.bySettlement[s.id]) {
+            int z = sec.zIn[q] + w.sp.secZ[q];
+            if (z <= bz) continue;
+            boolean held = false;
+            int qx = q % sec.sw, qy = q / sec.sw;
+            for (Formation g : formations) {
+                if (g == me || !g.alive || g.state == BROKEN) continue;
+                float gx = g.state == HOLDING ? g.hq.x : g.gx, gy = g.state == HOLDING ? g.hq.y : g.gy;
+                int t = w.r.sectorOfPx(gx, gy);
+                if (Math.abs(t % sec.sw - qx) <= 4 && Math.abs(t / sec.sw - qy) <= 4) {
+                    held = true;
+                    break;
+                }
+            }
+            if (held) continue;
+            bz = z;
+            best = q;
+        }
+        return best < 0 ? null : new float[]{sec.cx(best), sec.cy(best)};
     }
 
     /** Where the k-th formation sent to a town takes its place: the worst streets first, one formation to each. */

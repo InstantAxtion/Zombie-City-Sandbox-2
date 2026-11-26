@@ -548,6 +548,7 @@ public final class Setup {
      * with lo..hi of its people infected. They turn over the next hours, indoors, where nobody sees.
      */
     private static void hiddenBitten(World w, int st, int not, int homes, int lo, int hi, long salt) {
+        homes = Math.round(homes * w.rule("hiddenSpread", 1)); // (more streets on a national map)
         List<Integer> cand = new ArrayList<Integer>();
         for (int s : w.sec.idx.bySettlement[st]) if (w.sec.popIn[s] > 200 && s != not) cand.add(s);
         for (int k = 0; k < homes && !cand.isEmpty(); k++) {
@@ -564,6 +565,7 @@ public final class Setup {
      * outbreak shows up in new places through the first day.
      */
     private static void latent(World w, int st, int homes, int lo, int hi, float from, float to, long salt) {
+        homes = Math.round(homes * w.rule("hiddenSpread", 1)); // (more streets on a national map)
         List<Integer> cand = new ArrayList<Integer>();
         for (int s : w.sec.idx.bySettlement[st]) if (w.sec.popIn[s] > 300) cand.add(s);
         for (int k = 0; k < homes && !cand.isEmpty(); k++) {
