@@ -34,6 +34,11 @@ public final class Gov {
         if (level < 1) raise(1);
     }
 
+    /** The player (as president) raises the alert level. */
+    public void raiseTo(int to) {
+        raise(Math.max(0, Math.min(LEVELS.length - 1, to)));
+    }
+
     void raise(int to) {
         if (to <= level) return;
         level = to;

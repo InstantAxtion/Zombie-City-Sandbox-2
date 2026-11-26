@@ -34,4 +34,17 @@ public final class DesktopPlatform implements Platform {
     public void vibrate(int ms) { }
     public void shareImage(GImage img) { }
     public void exit() { }
+
+    /** Scripted answers for tests (taken first); else a dialog when there's a screen. */
+    public final java.util.ArrayDeque<String> answers = new java.util.ArrayDeque<String>();
+
+    public void askText(String title, String current, TextAnswer answer) {
+        if (!answers.isEmpty()) {
+            answer.answer(answers.poll());
+            return;
+        }
+        if (java.awt.GraphicsEnvironment.isHeadless()) return;
+        String s = javax.swing.JOptionPane.showInputDialog(null, title, current);
+        if (s != null) answer.answer(s);
+    }
 }

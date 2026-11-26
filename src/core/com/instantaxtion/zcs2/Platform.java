@@ -37,4 +37,11 @@ public interface Platform {
 
     /** Leaves the app. */
     void exit();
+
+    /** Asks the player to type something (a challenge code). The answer comes back later, or never if cancelled. */
+    void askText(String title, String current, TextAnswer answer);
+
+    interface TextAnswer {
+        void answer(String text);
+    }
 }

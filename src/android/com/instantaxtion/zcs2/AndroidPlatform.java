@@ -130,4 +130,31 @@ final class AndroidPlatform implements Platform {
     }
 
     public void exit() { act.finish(); }
+
+    public void askText(final String title, final String current, final TextAnswer answer) {
+        act.runOnUiThread(new Runnable() {
+            public void run() {
+                final android.widget.EditText edit = new android.widget.EditText(act);
+                edit.setText(current);
+                edit.setSingleLine(true);
+                edit.setSelectAllOnFocus(true);
+                new android.app.AlertDialog.Builder(act)
+                        .setTitle(title)
+                        .setView(edit)
+                        .setPositiveButton("OK", new android.content.DialogInterface.OnClickListener() {
+                            public void onClick(android.content.DialogInterface d, int which) {
+                                answer.answer(edit.getText().toString());
+                            }
+                        })
+                        .setNeutralButton("Copy", new android.content.DialogInterface.OnClickListener() {
+                            public void onClick(android.content.DialogInterface d, int which) {
+                                android.content.ClipboardManager cb = (android.content.ClipboardManager) act.getSystemService(Context.CLIPBOARD_SERVICE);
+                                if (cb != null) cb.setPrimaryClip(android.content.ClipData.newPlainText("Zombie City 2 code", edit.getText().toString()));
+                            }
+                        })
+                        .setNegativeButton("Cancel", null)
+                        .show();
+            }
+        });
+    }
 }

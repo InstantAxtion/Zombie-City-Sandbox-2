@@ -16,6 +16,11 @@ final class ArmedAI {
     void think(int i, Parallel.Scratch s) {
         Ents e = w.e;
         if (e.aimT[i] > 0) e.aimT[i] -= World.DT;
+        if (i == w.playerEnt) {
+            // a police officer the player moves (the stick), shooting by themself
+            w.combat.playerThink(i, s);
+            return;
+        }
         if (e.infT[i] > 0 && (e.flags[i] & Ents.F_INFECTED) == 0) e.infT[i] -= World.DT; // grenade cooldown
         if (((w.tick + i) & 1) != 0) return;
         Content.Unit u = w.unitOf(i);

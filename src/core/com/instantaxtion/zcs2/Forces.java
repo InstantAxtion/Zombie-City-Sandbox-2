@@ -528,7 +528,7 @@ public final class Forces extends Module {
 
     /** Sends formations to the worst places, keeping one back for the capital. */
     private void command() {
-        if (w.mode == World.MODE_COMMANDER && w.gov.playerDecides) {
+        if (w.roles.role == Roles.PRESIDENT || w.roles.role == Roles.MILITARY) {
             // the player commands; idle formations only defend where they stand
             return;
         }
@@ -577,6 +577,42 @@ public final class Forces extends Module {
             if (!f.alive || f.task < 0 || f.player) continue;
             if (z[f.task] < 30) f.task = -1;
         }
+    }
+
+    /** A fire mission ordered by the player: the nearest battery in range shells (x, y). False if none can. */
+    public boolean fireMission(float x, float y) {
+        Formation best = null;
+        float bd = 7000 * 7000;
+        for (Formation f : formations) {
+            if (!f.alive || f.t.guns <= 0 || f.state == MOVING) continue;
+            float dx = f.hq.x - x, dy = f.hq.y - y, d = dx * dx + dy * dy;
+            if (d < bd) {
+                bd = d;
+                best = f;
+            }
+        }
+        if (best == null) return false;
+        Content.Weapon gun = w.c.weapon("tank_gun");
+        int s = w.r.sectorOfPx(x, y);
+        if (!w.strategic && (w.sec.hot[s] > 0 || w.sec.cam[s])) {
+            for (int k = 0; k < best.t.guns; k++) {
+                float ox = (Rng.unit(w.seed, w.tick, k * 2L + 40) - 0.5f) * 200, oy = (Rng.unit(w.seed, w.tick, k * 2L + 41) - 0.5f) * 200;
+                w.combat.blast(x + ox, y + oy, 70, gun != null ? gun.blastDmg : 400, -1, Ents.SOLDIER);
+            }
+        } else {
+            int kill = Math.min(w.sec.zIn[s], best.t.guns * 6);
+            w.sec.zIn[s] -= kill;
+            w.stats.killsBySide[2] += kill;
+            w.stats.zombieKills += kill;
+            best.kills += kill;
+            // and the people sheltering there
+            int lost = Math.min(w.sec.popIn[s], best.t.guns * 3);
+            w.sec.popIn[s] -= lost;
+            w.stats.civDeaths += lost;
+        }
+        w.stats.artillery++;
+        w.news.radio(best.name + ": fire mission, shot out", x, y, News.COMMAND);
+        return true;
     }
 
     public float[] infectionCentre(Region.Settlement s) {
@@ -653,8 +689,16 @@ public final class Forces extends Module {
             float x = cam.toScreenX(f.hq.x), y = cam.toScreenY(f.hq.y);
             if (x < -40 || y < -40 || x > cam.sw + 40 || y > cam.sh + 40) continue;
             if (f.state == MOVING && f.route != null) {
-                g.color(0x70FFFFFF);
-                g.line(x, y, cam.toScreenX(f.gx), cam.toScreenY(f.gy), 1.5f);
+                // an arrow to where it's going
+                float tx = cam.toScreenX(f.gx), ty = cam.toScreenY(f.gy);
+                float dx = tx - x, dy = ty - y, dl = (float) Math.sqrt(dx * dx + dy * dy);
+                if (dl > s * 2) {
+                    g.color(0xB0FFFFFF);
+                    g.line(x, y, tx, ty, 2);
+                    float ux = dx / dl, uy = dy / dl, ah = Math.min(14, dl * 0.3f);
+                    float[] head = {tx, ty, tx - ux * ah - uy * ah * 0.5f, ty - uy * ah + ux * ah * 0.5f, tx - ux * ah + uy * ah * 0.5f, ty - uy * ah - ux * ah * 0.5f};
+                    g.fillPoly(head, 3);
+                }
             }
             // a unit symbol: a box, coloured by side, marked by kind
             int col = f.faction == Ents.COP ? 0xFF3B6FD8 : 0xFF6E8A48;
@@ -663,22 +707,39 @@ public final class Forces extends Module {
             g.fillRect(x - s * 1.4f - 1.5f, y - s - 1.5f, s * 2.8f + 3, s * 2 + 3);
             g.color(col);
             g.fillRect(x - s * 1.4f, y - s, s * 2.8f, s * 2);
+            // NATO-style marks: infantry a cross, armour an oval track, artillery a dot, marines a cross and an anchor bar,
+            // police a P; above the box, its size (II battalion, X brigade, I company or battery)
             g.color(0xFFFFFFFF);
             String id = f.t.id;
-            if (id.equals("armour")) g.strokeCircle(x, y, s * 0.6f, 1.5f);
-            else if (id.equals("artillery")) g.fillCircle(x, y, s * 0.35f);
+            if (id.equals("armour")) {
+                g.strokeRect(x - s * 0.9f, y - s * 0.45f, s * 1.8f, s * 0.9f, 1.5f);
+                g.strokeCircle(x - s * 0.45f, y, s * 0.4f, 1.2f);
+                g.strokeCircle(x + s * 0.45f, y, s * 0.4f, 1.2f);
+            } else if (id.equals("artillery")) g.fillCircle(x, y, s * 0.35f);
             else if (id.equals("police_reserve")) g.text("P", x, y + s * 0.4f, s * 1.1f, Gfx.ALIGN_CENTER, true);
             else {
                 g.line(x - s * 1.4f, y - s, x + s * 1.4f, y + s, 1.5f);
                 g.line(x - s * 1.4f, y + s, x + s * 1.4f, y - s, 1.5f);
+                if (id.equals("marines")) g.fillRect(x - s * 0.8f, y + s * 0.55f, s * 1.6f, s * 0.25f);
             }
+            String echelon = id.equals("guard_brigade") ? "X" : id.equals("artillery") || id.equals("police_reserve") ? "I" : "II";
+            g.color(0xFF101010);
+            g.text(echelon, x + 1, y - s - 2, s, Gfx.ALIGN_CENTER, true);
+            g.color(0xFFFFFFFF);
+            g.text(echelon, x, y - s - 3, s, Gfx.ALIGN_CENTER, true);
+            // strength: a bar under the box
+            float frac = f.start > 0 ? Math.min(1, f.strength() / (float) f.start) : 1;
+            g.color(0xFF101010);
+            g.fillRect(x - s * 1.4f, y + s + 2, s * 2.8f, 3);
+            g.color(frac > 0.6f ? 0xFF60D060 : frac > 0.3f ? 0xFFE0C040 : 0xFFE04040);
+            g.fillRect(x - s * 1.4f, y + s + 2, s * 2.8f * frac, 3);
             if (view.selectedFormation == f) {
                 g.color(0xFFFFE040);
                 g.strokeRect(x - s * 1.4f - 4, y - s - 4, s * 2.8f + 8, s * 2 + 8, 2);
             }
             if (cam.zoom > 0.05f || f.player) {
                 g.color(0xE0FFFFFF);
-                g.text(shortName(f) + "  " + f.strength(), x, y + s + 13, 10, Gfx.ALIGN_CENTER, false);
+                g.text(shortName(f) + "  " + f.strength(), x, y + s + 16, 10, Gfx.ALIGN_CENTER, false);
             }
         }
     }

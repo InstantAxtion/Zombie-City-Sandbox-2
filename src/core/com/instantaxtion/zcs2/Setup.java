@@ -9,18 +9,45 @@ public final class Setup {
     public static float originX, originY;
 
     public static World newGame(Content c, int size, int preset, long seed, Content.Scenario sc, int threads) {
+        return newGame(c, size, preset, seed, sc, threads, -1, 60000);
+    }
+
+    /** The role a scenario is played as unless the player picks another. */
+    public static int defaultRole(Content.Scenario sc) {
+        if (sc == null) return Roles.GOD;
+        int r = Roles.byId(sc.role);
+        if (r >= 0) return r;
+        if (sc.mode.equals("commander")) return Roles.PRESIDENT;
+        if (sc.mode.equals("survivor")) return Roles.SURVIVOR;
+        return Roles.GOD;
+    }
+
+    /** A new game played as a role (-1 = the scenario's own), with maxInd people simulated in detail at most. */
+    public static World newGame(Content c, int size, int preset, long seed, Content.Scenario sc, int threads, int role, int maxInd) {
+        if (role < 0) role = defaultRole(sc);
         Region r = RegionGen.generate(size, preset, seed);
         World w = new World(c, r, seed, threads);
+        w.maxIndividuals = maxInd;
         w.scenario = sc;
-        w.mode = sc == null || sc.mode.equals("sandbox") ? World.MODE_SANDBOX : sc.mode.equals("commander") ? World.MODE_COMMANDER : World.MODE_SURVIVOR;
+        w.mode = Roles.modeFor(role);
+        Director.Header h = w.director.header;
+        h.size = size;
+        h.preset = preset;
+        h.seed = seed;
+        h.role = role;
+        h.maxInd = maxInd;
+        h.scenarioIni = sc == null ? "" : sc.toIni();
+        if (sc != null && sc.season >= 0) w.weather.startDay = sc.season % 365;
         forces(w);
         Region.Settlement city = r.city();
         originX = city.cx * 16f;
         originY = city.cy * 16f;
         if (sc != null) scenario(w, sc);
-        if (w.mode == World.MODE_COMMANDER) {
-            w.gov.playerDecides = true;
-            w.mil.strikesLeft = 6;
+        w.roles.assign(role, originX, originY);
+        if (role == Roles.SURVIVOR && w.playerEnt < 0) survivor(w);
+        if (w.playerEnt >= 0) {
+            originX = w.e.x[w.playerEnt];
+            originY = w.e.y[w.playerEnt];
         }
         w.stats.startPolice = w.sq.count(Ents.COP);
         w.stats.startSoldiers = w.sq.count(Ents.SOLDIER);
@@ -159,6 +186,70 @@ public final class Setup {
         String o = sc.origin;
         int n = sc.zombies;
         Region.Facility at = null;
+        if (o.equals("random")) {
+            // a city or town picked by the seed, and somewhere in it
+            List<Region.Settlement> places = new ArrayList<Region.Settlement>();
+            for (Region.Settlement s : r.settlements) if (s.kind == Region.S_CITY || s.kind == Region.S_TOWN) places.add(s);
+            Region.Settlement s = places.get(Rng.hashInt(w.seed, 5, 17, places.size()));
+            float[] p = landNear(w, s.cx * 16f, s.cy * 16f, s.radius * 10f, 7);
+            o = "xy:" + p[0] / r.px() + "," + p[1] / r.px();
+        }
+        if (o.equals("port")) {
+            // a ship came in: the dead come down the gangway at the docks (or the most coastal city)
+            Region.Facility port = facility(w, Region.F_PORT);
+            float[] p;
+            if (port != null) p = new float[]{port.x, port.y};
+            else {
+                Region.Settlement best = r.city();
+                for (Region.Settlement s : r.settlements) if (s.kind == Region.S_CITY && w.roles.coastal(s)) best = s;
+                p = shore(w, best);
+            }
+            o = "xy:" + p[0] / r.px() + "," + p[1] / r.px();
+        }
+        if (o.equals("state")) {
+            // a whole state has fallen: the dead in its towns and countryside, its people mostly gone
+            int st = r.states.size() > 1 ? 1 + Rng.hashInt(w.seed, 3, 4, r.states.size() - 1) : 0;
+            if (r.states.isEmpty()) st = -1;
+            w.roles.campaignState = st;
+            List<Integer> secs = new ArrayList<Integer>();
+            for (int s = 0; s < w.sec.n; s++) if (w.roles.stateOfSector(s) == st && w.sec.connect[s] != 0) secs.add(s);
+            for (int k = 0; k < 6 && !secs.isEmpty(); k++) {
+                int s = secs.get(Rng.hashInt(w.seed, k, 33, secs.size()));
+                w.strat.addHorde(w.sec.cx(s), w.sec.cy(s), n / 12);
+            }
+            int left = n - 6 * (n / 12);
+            for (int s : secs) {
+                int set = w.sec.settlement[s];
+                if (set >= 0 && r.settlements.get(set).capital) continue;
+                int turned = w.sec.popIn[s] * 2 / 3;
+                w.sec.zIn[s] += turned;
+                w.sec.popIn[s] -= turned;
+            }
+            for (int k = 0; k < left && !secs.isEmpty(); k += 50) w.sec.zIn[secs.get(Rng.hashInt(w.seed, k, 34, secs.size()))] += Math.min(50, left - k);
+            if (st >= 0) {
+                Region.Settlement c = r.settlements.get(r.states.get(st).capitalCity);
+                originX = c.cx * 16f;
+                originY = c.cy * 16f;
+            }
+            w.gov.level = 3;
+            o = "done";
+        }
+        if (o.startsWith("xy:")) {
+            // a place on the map (custom scenarios): a pack of the dead there
+            String[] p = o.substring(3).split(",");
+            float x = Float.parseFloat(p[0].trim()) * r.px(), y = Float.parseFloat(p[1].trim()) * r.px();
+            float[] q = landNear(w, x, y, 400, 9);
+            originX = q[0];
+            originY = q[1];
+            int ind = Math.min(n, 400);
+            for (int k = 0; k < ind; k++) {
+                float ang = k * 2.39f, rad = 8 + (float) Math.sqrt(k) * 8;
+                float zx = q[0] + (float) Math.cos(ang) * rad, zy = q[1] + (float) Math.sin(ang) * rad;
+                if (r.walkablePx(zx, zy)) w.spawnZombie(zx, zy, w.pickZType(-1, k));
+            }
+            if (n > ind) w.sec.zIn[r.sectorOfPx(q[0], q[1])] += n - ind;
+            o = "done";
+        }
         if (o.equals("lab")) at = facility(w, Region.F_LAB);
         else if (o.equals("prison")) at = facility(w, Region.F_PRISON);
         else if (o.equals("festival")) at = facility(w, Region.F_PARK);
@@ -284,8 +375,12 @@ public final class Setup {
             }
             w.strat.addHorde(x, y, sc.hordeSize);
         }
-        if (sc.mode.equals("survivor")) {
-            // you: somewhere near the start, not in it
+    }
+
+    /** You, as a survivor: somewhere near the start, not in it. */
+    static void survivor(World w) {
+        Region r = w.r;
+        {
             Content.Unit u = w.c.unit("survivor");
             float[] p = null;
             for (int a = 0; a < 100 && p == null; a++) {
@@ -302,6 +397,28 @@ public final class Setup {
             originX = p[0];
             originY = p[1];
         }
+    }
+
+    /** A walkable point near (x, y). */
+    static float[] landNear(World w, float x, float y, float spread, long salt) {
+        for (int a = 0; a < 200; a++) {
+            float ang = Rng.unit(w.seed, a, salt) * 6.283f, d = Rng.unit(w.seed, a, salt + 1) * spread * (1 + a / 40f);
+            float px = x + (float) Math.cos(ang) * d, py = y + (float) Math.sin(ang) * d;
+            int t = w.r.tileAtPx(px, py);
+            if (Tile.walkable(t) && t != Tile.BRIDGE) return new float[]{px, py};
+        }
+        return new float[]{x, y};
+    }
+
+    /** The edge of a settlement nearest open water. */
+    static float[] shore(World w, Region.Settlement s) {
+        for (int d = s.radius / 2; d < s.radius + 60; d += 4)
+            for (int a = 0; a < 24; a++) {
+                double ang = a * Math.PI / 12;
+                int tx = s.cx + (int) (Math.cos(ang) * d), ty = s.cy + (int) (Math.sin(ang) * d);
+                if (Tile.water(w.r.t(tx, ty))) return landNear(w, (s.cx + (int) (Math.cos(ang) * (d - 6))) * 16f, (s.cy + (int) (Math.sin(ang) * (d - 6))) * 16f, 60, 3);
+            }
+        return new float[]{s.cx * 16f, s.cy * 16f};
     }
 
     private static Region.Facility facility(World w, int kind) {

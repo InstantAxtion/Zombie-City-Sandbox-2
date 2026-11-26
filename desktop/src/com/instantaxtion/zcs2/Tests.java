@@ -709,6 +709,148 @@ public final class Tests {
                 l.shutdown();
             }
         });
+        test("director: a replay rebuilds the same outbreak", new T() {
+            public void run() throws Exception {
+                World w = Setup.newGame(content, 768, RegionGen.COAST, 77, content.scenario("lab_leak"), 2, Roles.GOD, 60000);
+                camOver(w, Setup.originX, Setup.originY);
+                // a session: paint, place, strike, pan, fast-forward and back
+                for (int k = 0; k < 20 * 20; k++) w.step();
+                Actions.paint(w, Setup.originX + 200, Setup.originY, 300, 200, -1);
+                Squads.Squad s = Actions.squad(w, "swat", 8, Setup.originX - 150, Setup.originY);
+                for (int k = 0; k < 15 * 20; k++) w.step();
+                if (s != null) Actions.order(w, s, Setup.originX + 120, Setup.originY);
+                camOver(w, Setup.originX + 500, Setup.originY + 300);
+                Actions.strike(w, Setup.originX + 900, Setup.originY + 600);
+                Actions.curfew(w, true);
+                for (int k = 0; k < 20 * 20; k++) w.step();
+                w.camDetail = false;
+                Actions.strategic(w, true);
+                for (int k = 0; k < 60; k++) w.step();
+                Actions.strategic(w, false);
+                camOver(w, Setup.originX, Setup.originY);
+                for (int k = 0; k < 10 * 20; k++) w.step();
+                check(w.director.events.size() > 5, "only " + w.director.events.size() + " inputs recorded");
+                Replay r = Replay.of(content, w, 2);
+                r.runTo(w.tick);
+                check(r.w.tick == w.tick, "ticks differ");
+                check(Audit.hash(r.w) == Audit.hash(w), "the replay came out different");
+                // and through a file
+                ByteArrayOutputStream bo = new ByteArrayOutputStream();
+                Replay.save(w, bo);
+                Replay r2 = Replay.load(content, new ByteArrayInputStream(bo.toByteArray()), 1);
+                r2.runTo(w.tick);
+                check(Audit.hash(r2.w) == Audit.hash(w), "the replay from a file came out different");
+                check(bo.size() < 200000, "replay is " + bo.size() / 1024 + " KB");
+                check(!w.director.lapseTime.isEmpty(), "no timelapse frames");
+                w.shutdown();
+                r.w.shutdown();
+                r2.w.shutdown();
+            }
+        });
+        test("roles: each role gets its own piece", new T() {
+            public void run() {
+                for (int role = 0; role < Roles.NAMES.length; role++) {
+                    World w = Setup.newGame(content, 768, RegionGen.COAST, 21, content.scenario("lab_leak"), 2, role, 60000);
+                    check(w.roles.role == role, "role not set");
+                    check(w.mode == Roles.modeFor(role), Roles.NAMES[role] + ": mode " + w.mode);
+                    switch (role) {
+                        case Roles.PRESIDENT: check(w.gov.playerDecides, "the president doesn't decide"); break;
+                        case Roles.INCIDENT: {
+                            int k = w.r.settlements.get(w.roles.target).kind;
+                            check(k == Region.S_CITY || k == Region.S_TOWN, "incident commander of a " + k);
+                            break;
+                        }
+                        case Roles.PRECINCT: check(w.r.facilities.get(w.roles.target).kind == Region.F_POLICE, "precinct isn't a police station"); break;
+                        case Roles.SQUAD: {
+                            Squads.Squad s = w.sq.get(w.roles.target);
+                            check(s.alive && s.player, "no squad to lead");
+                            check(w.roles.canOrder(s), "can't order your own squad");
+                            for (Squads.Squad o : w.sq.list) if (o != s && o.alive) check(!w.roles.canOrder(o), "can order someone else's squad");
+                            break;
+                        }
+                        case Roles.OFFICER:
+                            check(w.playerEnt >= 0 && w.e.kind[w.playerEnt] == Ents.COP, "the officer isn't a police officer");
+                            check(w.e.squad[w.playerEnt] == w.roles.target, "the officer has no patrol");
+                            break;
+                        case Roles.SURVIVOR: check(w.playerEnt >= 0 && w.e.kind[w.playerEnt] == Ents.CIV, "no survivor"); break;
+                        default:
+                    }
+                    play(w, 20, true);
+                    if (role == Roles.OFFICER && w.playerEnt >= 0 && w.e.loc[w.playerEnt] == Ents.FREE) {
+                        // the patrol keeps up with the officer
+                        Squads.Squad s = w.sq.get(w.roles.target);
+                        float px = w.e.x[w.playerEnt], py = w.e.y[w.playerEnt];
+                        check(Math.abs(s.gx - px) + Math.abs(s.gy - py) < 120, "the patrol isn't following");
+                    }
+                    w.shutdown();
+                }
+            }
+        });
+        test("campaigns: the country goals end the game", new T() {
+            public void run() {
+                World w = game(31, 768, "hold_city", 2);
+                check(w.roles.role == Roles.PRESIDENT, "campaigns are played as the president");
+                Region.Settlement c = w.r.city();
+                for (int s = 0; s < w.sec.n; s++) if (w.sec.settlement[s] == c.id) w.sec.popIn[s] = 0;
+                play(w, 3, false);
+                check(w.ended && !w.won, "an empty capital should lose: " + w.endTitle);
+                w.shutdown();
+                w = game(32, 768, "protect", 2);
+                c = w.r.city();
+                for (int s = 0; s < w.sec.n; s++) if (w.sec.settlement[s] == c.id) w.sec.zIn[s] += 500;
+                play(w, 3, false);
+                check(w.ended && !w.won, "a capital full of the dead should lose: " + w.endTitle);
+                w.shutdown();
+                w = game(33, 768, "officer", 2);
+                check(w.playerEnt >= 0 && w.e.kind[w.playerEnt] == Ents.COP, "On patrol isn't played as an officer");
+                w.shutdown();
+            }
+        });
+        test("shared: challenge codes and your own scenarios", new T() {
+            public void run() throws Exception {
+                java.io.File dir = new java.io.File("build/test-game");
+                dir.mkdirs();
+                for (java.io.File f : dir.listFiles()) f.delete();
+                DesktopPlatform pf = new DesktopPlatform(dir);
+                Game g = new Game(pf);
+                g.ngMode = 1;
+                g.ngScenario = 2;
+                g.ngRole = Roles.MILITARY;
+                g.ngSeed = 4242;
+                String code = g.challengeCode();
+                g.ngMode = 0;
+                g.ngScenario = 0;
+                g.ngRole = -1;
+                g.ngSeed = 1;
+                check(g.applyCode(code), "code refused: " + code);
+                check(g.challengeCode().equals(code), "code didn't come back: " + g.challengeCode() + " vs " + code);
+                check(!g.applyCode("nonsense"), "nonsense accepted");
+                // a scenario from the editor, saved, read back, played
+                Content.Scenario sc = new Content.Scenario();
+                sc.id = "custom1";
+                sc.name = "Mine";
+                sc.mode = "sandbox";
+                sc.origin = "xy:0.5,0.5";
+                sc.goal = "";
+                sc.desc = "test";
+                sc.zombies = 120;
+                sc.season = 355;
+                sc.role = "incident";
+                java.io.OutputStream out = pf.openWrite(Game.CUSTOM);
+                out.write(sc.toIni().getBytes("UTF-8"));
+                out.close();
+                Game g2 = new Game(pf);
+                Content.Scenario back = g2.content.scenario("custom1");
+                check(back != null && back.custom && back.zombies == 120 && back.season == 355, "custom scenario didn't load");
+                check(!g2.scenariosFor(3).isEmpty(), "not under Yours");
+                World w = Setup.newGame(g2.content, 768, RegionGen.COAST, 5, back, 2, -1, 60000);
+                check(w.roles.role == Roles.INCIDENT, "the scenario's role wasn't used");
+                check(w.weather.startDay == 355, "the season wasn't used");
+                play(w, 2, true);
+                check(w.totalZombies() > 50, "no dead at the chosen place: " + w.totalZombies());
+                w.shutdown();
+            }
+        });
         test("perf: 20,000 of the dead", new T() {
             public void run() {
                 World w = game(2, 1024, "sandbox", 4);

@@ -340,7 +340,10 @@ public final class Command extends Module {
             if (o.cool > 0) continue;
             o.cool = 10;
             switch (o.role) {
-                case MAYOR: if (!w.gov.playerDecides) mayor(o, 10); break;
+                case MAYOR:
+                    // the player as this city's incident commander makes the mayor's calls
+                    if (!w.gov.playerDecides && !(w.roles.role == Roles.INCIDENT && w.roles.target == o.where)) mayor(o, 10);
+                    break;
                 case CHIEF: chief(o); break;
                 case GOVERNOR: governor(o); break;
                 case PRESIDENT: president(o); break;

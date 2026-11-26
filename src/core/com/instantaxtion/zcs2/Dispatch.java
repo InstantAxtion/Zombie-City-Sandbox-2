@@ -241,6 +241,7 @@ public final class Dispatch {
         Content.SquadT tmpl = null;
         for (Region.Facility f : w.r.facilities) {
             if (f.pool == null) continue;
+            if (w.roles.role == Roles.PRECINCT && f.id == w.roles.target) continue; // the player sends that station's squads
             if (f.kind == Region.F_HQ) {
                 Forces.Formation fm = w.forces.formationOf(f);
                 if (fm == null || !fm.alive || fm.state == Forces.MOVING || fm.state == Forces.AIRLIFT || fm.player) continue;

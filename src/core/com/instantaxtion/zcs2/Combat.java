@@ -185,6 +185,7 @@ final class Combat {
         Ents e = w.e;
         if (e.loc[t] != Ents.FREE) return;
         e.die(t, e.x[t], e.y[t], false);
+        w.director.died(e.x[t], e.y[t]);
         e.timer[t] = 40;
         w.fx.blood(e.x[t], e.y[t], 3);
         int side = faction == Ents.SOLDIER ? 2 : faction == Ents.COP ? 1 : 0;
@@ -214,6 +215,7 @@ final class Combat {
             w.sq.get(sqd).losses++;
         }
         e.die(v, e.x[v], e.y[v], rises);
+        w.director.died(e.x[v], e.y[v]);
         e.timer[v] = rises ? (cause == CAUSE_TURNED ? 1.5f : w.rng.range(6f, 16f)) : 90;
         w.fx.blood(e.x[v], e.y[v], 4);
         if (e.kind[v] == Ents.CIV) w.stats.civDeaths++;
