@@ -1027,6 +1027,7 @@ public final class Game {
                 try {
                     InputStream in = pf.openRead(file);
                     Replay r = Replay.load(content, in, settings.simThreads());
+                    r.snapCap = Math.min(r.snapCap, Math.max(8L << 20, pf.maxMemory() / 8)); // (snapshots to seek with: a share of the heap)
                     in.close();
                     startX = Setup.originX;
                     startY = Setup.originY;
@@ -3001,6 +3002,7 @@ public final class Game {
         if (dir.modMsg != null) ny += ui.dp(8) + ui.wrap(dir.modMsg, m, y + ny + ui.dp(30), W - m * 2, ui.dp(12.5f), dir.modOk ? Ui.GOOD : 0xFFFF8A70, 8);
         g.restore();
         maxScroll = Math.max(0, y + ny + ui.dp(30) + scroll - H);
+        if (scroll > maxScroll) scroll = maxScroll;
         g.color(Ui.SCREEN);
         g.fillRect(0, 0, W, ui.dp(54));
         ui.button("back", m, ui.dp(10), ui.dp(70), ui.dp(36), "Back", false, 13);

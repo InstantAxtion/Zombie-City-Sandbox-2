@@ -487,6 +487,16 @@ public final class UiShot {
         tp("replays");
         frames(2);
         shot("e13-replays-with-cut");
+        tp("back");
+        frames(1);
+        tp("settings");
+        frames(1);
+        pf.files.add(new String[]{"my_mod.ini", "[weapon pistol]\nrange = far\n"});
+        tp("mod:import");
+        frames(2);
+        game.scroll = 100000;
+        frames(2);
+        shot("e14-settings-mods-import-error");
         System.out.println("ok director 1.4: replay " + (game.replay != null ? game.replay.snaps.size() + " snapshots" : "over"));
         game.world().shutdown();
         System.exit(0);

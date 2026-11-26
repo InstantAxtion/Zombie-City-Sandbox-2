@@ -24,7 +24,7 @@ All in one package, `com.instantaxtion.zcs2`. The core (`src/core`) never touche
 
 | Area | Files | What they do |
 |---|---|---|
-| Content | `Content`, `assets/content.ini` | Weapons, units, zombie types, vehicles, scenarios |
+| Content | `Content`, `Data`, `assets/content.ini` | Weapons, units, zombie types, vehicles, scenarios; names, buildings, presets, origins, outside help |
 | The region | `RegionGen`, `Region`, `RoadGraph`, `Tile`, `Noise`, `Names` | Terrain, rivers, settlements, street grids, blocks and lots, facilities, the army base and prison, highways (A* over the terrain, smoothed, bridged), farms; the road graph and its routing |
 | The world | `World`, `Ents`, `Spatial`, `Flow`, `NavPath`, `Parallel`, `Rng` | Entity storage, the spatial grid, the scent field, foot paths, the worker pool, deterministic randomness, and the order of a step |
 | Two tiers | `Sectors` | The counted population and dead, indoor infection, coming out onto the streets and going back in, migration |
@@ -32,7 +32,7 @@ All in one package, `com.instantaxtion.zcs2`. The core (`src/core`) never touche
 | Forces | `Squads`, `Vehicles`, `Dispatch`, `Military` | Squads and their orders; driving on the road graph and flying; 911 calls, cordons; the army, gunships, tanks, air strikes, supply, outside help |
 | The region-wide | `Strategic`, `Gov`, `News`, `Stats`, `Records` | Facilities, power grids, ammunition, hordes, refugees, bridges, strains, goals; the alert level, trust, curfews, evacuations, rumours; the radio log; the numbers and the report; why things happened (a tracer of each fighter's last seconds, why towns fell, each formation's story, decisive moments, callouts and the alerts fast-forward stops for: read-only, a module of its own) |
 | Player | `Tools`, `Setup`, `Actions`, `Roles`, `Defences`, `Orders`, `Rules` | Everything the player can do (every change goes through `Actions`, which records it); building a new game, its scenario and the player's role; the country-scale campaign goals; what the player builds, lasting orders, driving and possession, and the rules sheet |
-| Director | `Director`, `Replay`, `DirectorScreens` | The record of inputs, replays from a game's start, the timelapse, heatmaps; the replay list, timelapse and scenario editor screens |
+| Director | `Director`, `Replay`, `Script`, `DirectorScreens` | The record of inputs, replays from a game's start (snapshots to seek, camera paths), a scenario's triggers and goals, the timelapse, heatmaps; the replay list and bar, timelapse and scenario editor screens |
 | Checking | `Audit`, `SaveIO` | Invariants and state hashes; saves |
 | Presentation | `Gfx`, `GImage`, `Platform`, `Camera`, `MapPainter`, `WorldView`, `Ui`, `Icons`, `Game`, `Settings`, `Texts` | Drawing at every zoom, the interface, the screens |
 | Sound | `Synth`, `Mixer`, `AudioDirector` | Every effect, bed and score stem, synthesised once; mixing with priorities and a limiter; what to play, where, and the captions, vibration and shake that go with it |
@@ -267,6 +267,46 @@ each step, and the test `director: a replay rebuilds the same outbreak` checks t
 session with painting, orders, strikes, panning and fast-forward. The timelapse stores the dead and the people of
 every sector once a game hour as log-scale bytes (about 10 KB an hour on the default map, inside the save).
 
+**Seeking.** While a replay plays, `Replay` keeps snapshots: a save's bytes (`SaveIO.snapshot`, compressed), the
+tick and the next input, at the start and every 30 game minutes, up to 48 MB; past the cap every other one is
+dropped (the start stays) and the interval doubles. Going to a tick behind the world, or more than a game hour
+behind a snapshot ahead of it, loads the nearest snapshot at or before it (on another thread: `SaveIO.load`
+rebuilds the map from its seed, then the state) and plays on to the tick as fast as the device can; ahead, it
+just plays on. A loaded save plays on exactly as the game did, so a seek lands on the same state as playing
+straight through: the test `director: seeking to any time...` checks the hash at six checkpoints sought in a
+scrambled order, with the snapshots squeezed until they thin out. The replay bar (`DirectorScreens.replayBar`)
+shows the track with the snapshots and the camera's keyframes, and the clock; Step goes a game minute.
+
+**Camera paths.** A keyframe is (tick, centre, zoom); `Replay.CamPath.at(tick)` is a Catmull-Rom curve through
+them, the zoom on a log scale, eased at each key, holding before the first and after the last. The view follows
+it (counting the step under way, so it doesn't stutter) until the player moves the camera. The camera in a replay
+is not an input (the recorded camera events are), so a path changes nothing. A director's cut is the replay file
+again (version 2) with the path after the inputs; version 1 files still load.
+
+**Scripts.** A scenario can carry triggers and goals of its own (`Script`): a module added only to games whose
+scenario has them (`Script.attach`, from `Setup.newGame` and `SaveIO.load`, before `Records`, which stays last),
+so every other game and its save are unchanged. Once a game second each trigger not yet fired checks its
+condition (time since the start, the dead in a town over N from `Stats.zBySettlement`, a town fallen by `Records`'
+measure, a facility offline) and carries its action out through `Actions.scripted`: the same `apply` an input
+uses, but not recorded, because a replay rebuilds the scenario from the header and the script fires again at
+the same step. Goals end the game: survive N days or kill all the dead to win; a town losing more than (100 - N)%
+of its people (`Stats.lostBySettlement`, which commuting doesn't move) or losses (civilians bitten or killed and
+forces lost) over N to lose. The editor's other additions (outbreak points, squads and defences, rules, strain)
+are carried out once by `Setup.extras` after the scenario's start.
+
+**Data in content.ini.** `Data` holds the sections that were code: `[names]`, `[building]` (names, today's and
+national roof palettes, pitched or flat, lit at night), `[preset]` (terrain kind and its numbers, rivers, a
+naval station), `[origin]` and `[outside]`. Maps are made from size, preset and seed with no Content, so each kind
+a loaded file has is installed for `RegionGen`, `ChunkGen`, `NationGen`, `NationPainter`, `Names` and `WorldView`
+(a file without it keeps the one in use; a desktop tool with no content loaded reads `assets/content.ini`). The
+built-in values are the old literals, parsed to the same floats and picked with the same dice (a one-colour roof
+never rolls), so maps are byte-identical: the test `data: content.ini holds exactly...` compares region and
+nation checksums, roofs and names recorded on the code before. These sections are left out of
+`Content.rulesHash`, so saves and the golden test are unchanged. A content.ini is read with the line and section
+of any mistake; an import (`Platform.pickFile`: Android's `ACTION_GET_CONTENT`, a file chooser on a desktop) is
+checked without being put in use, then kept as the app's `content.ini`; Share sends the one in use
+(`ACTION_SEND`).
+
 ## Lessons from the first game, and where they went
 
 - *The fight must be legible.* Everything can be tapped; squads and their orders, the alert level, the radio log
@@ -391,3 +431,5 @@ do, the rest is dropped rather than queued, and the speed button shows the rate 
 - Online play: co-op is pass-and-play on one phone and results are compared by code; playing together over the
   internet would need a server.
 - Several countries; the sea as a place.
+- Exporting a stretch of a replay as pictures (PNG frames, or a GIF): Android can write PNGs without a library
+  (`Bitmap.compress`), so it is feasible, but it is not built yet.

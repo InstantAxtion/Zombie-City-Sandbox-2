@@ -186,7 +186,7 @@ final class DirectorScreens {
         // the buttons
         boolean onKey = keyAt(r, w.tick) >= 0;
         String[][] b = {{"rb:back", "-1h"}, {"rb:play", g0.paused ? "Play" : "Pause"}, {"rb:step", "Step"},
-                {"rb:speed", Game.SPEED_NAMES[g0.speedIdx]}, {"rb:key", onKey ? "-Key" : "+Key"}, {"rb:path", g0.pathOn && r.path.size() > 0 ? "Path on" : "Path"},
+                {"rb:speed", Game.SPEED_NAMES[g0.speedIdx]}, {"rb:key", onKey ? "-Key" : "+Key"}, {"rb:path", "Path"},
                 {"rb:cut", "Cut"}};
         float gap = ui.dp(4), by = cy + ui.dp(18), bh2 = y0 + bh - by - ui.dp(8);
         float each = (bw - m * 2 + gap) / b.length;
