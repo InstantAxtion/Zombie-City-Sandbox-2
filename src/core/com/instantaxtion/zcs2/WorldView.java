@@ -192,7 +192,7 @@ public final class WorldView {
 
     // where labels may go this frame (the map area the bars leave free), and areas the interface keeps for itself
     private float areaX0 = -1e9f, areaY0 = -1e9f, areaX1 = 1e9f, areaY1 = 1e9f;
-    private final float[] keep = new float[4 * 12];
+    private final float[] keep = new float[4 * 16];
     private int keepN;
 
     /** For the next frame drawn only: labels stay inside this screen rectangle. */
@@ -205,7 +205,7 @@ public final class WorldView {
 
     /** For the next frame drawn only: no labels in this screen rectangle (the radio, a note). */
     public void keepOut(float x0, float y0, float x1, float y1) {
-        if (keepN >= 12 || x1 <= x0 || y1 <= y0) return;
+        if (keepN >= 16 || x1 <= x0 || y1 <= y0) return;
         int k = keepN++ * 4;
         keep[k] = x0;
         keep[k + 1] = y0;
@@ -931,6 +931,16 @@ public final class WorldView {
             g.color(0xFFFFFFFF);
             g.strokeCircle(sx, sy, r * 2.6f, 1.5f * dp);
         }
+        // a marksman on a perch: a small roof-chevron over them
+        if (!dead && kind != Ents.CIV && w.aai.has(i) && (w.aai.bits[i] & ArmedAI.B_PERCHED) != 0) {
+            float cy = sy - r * 2.4f, cw = Math.max(5 * dp, r * 1.2f);
+            g.color(0xFF0C0C0C);
+            g.line(sx - cw, cy + cw * 0.55f, sx, cy, 3.2f * dp);
+            g.line(sx, cy, sx + cw, cy + cw * 0.55f, 3.2f * dp);
+            g.color(0xFFFFE070);
+            g.line(sx - cw, cy + cw * 0.55f, sx, cy, 1.6f * dp);
+            g.line(sx, cy, sx + cw, cy + cw * 0.55f, 1.6f * dp);
+        }
     }
 
     /** Ordinary clothes: warm, muted. */
@@ -1132,6 +1142,9 @@ public final class WorldView {
         placedN = keepN;
         keepN = 0;
         layers(g, cam);
+        // what just happened takes its place first; then what the simulation knows but didn't show
+        callouts(g, cam);
+        marks(g, cam);
         // the infection as a soft red bleed over the sectors (from far out, and where the dead are only counted)
         if (z < 0.55f && (overlay == OV_INFECTION || overlay == OV_FORCES)) {
             // close in the dead are drawn one by one: the bleed only hints at those indoors
@@ -1394,6 +1407,225 @@ public final class WorldView {
             placedN++;
         }
         return true;
+    }
+
+    // ------------------------------------------------------------------ callouts
+
+    /** Seconds (real) a callout stays up; the last of it fades. */
+    static final float CALLOUT_LIFE = 4.5f;
+    private final String[] coText = new String[24];
+    private final float[] coX = new float[24], coY = new float[24], coBorn = new float[24];
+    private final int[] coKind = new int[24], coCount = new int[24];
+    private long coSeen = -1;
+    private final int[] coOrder = new int[24];
+
+    /** How many callouts are up now (for the tests and the shots). */
+    public int calloutsUp() {
+        int n = 0;
+        for (int k = 0; k < coText.length; k++) if (coText[k] != null && time - coBorn[k] < CALLOUT_LIFE) n++;
+        return n;
+    }
+
+    /** Takes the new callouts from the records: one like it close by is counted into it rather than shown twice. */
+    private void takeCallouts() {
+        Records rc = w.stats.rec;
+        long from = Math.max(coSeen + 1, rc.calloutSeq - rc.callouts.length);
+        if (coSeen < 0) from = Math.max(0, rc.calloutSeq - 8); // a game just opened: only the latest few
+        for (long q = from; q < rc.calloutSeq; q++) {
+            Records.Callout c = rc.callouts[(int) (q % rc.callouts.length)];
+            if (c == null || c.seq != q) continue;
+            int slot = -1, oldest = 0;
+            for (int k = 0; k < coText.length; k++) {
+                if (coText[k] != null && time - coBorn[k] < CALLOUT_LIFE && coText[k].equals(c.text)
+                        && Math.abs(coX[k] - c.x) < 260 && Math.abs(coY[k] - c.y) < 260) {
+                    slot = k;
+                    break;
+                }
+                if (coText[oldest] != null && (coText[k] == null || coBorn[k] < coBorn[oldest])) oldest = k;
+            }
+            if (slot >= 0) {
+                coCount[slot]++;
+                coBorn[slot] = time;
+                continue;
+            }
+            coText[oldest] = c.text;
+            coX[oldest] = c.x;
+            coY[oldest] = c.y;
+            coKind[oldest] = c.kind;
+            coBorn[oldest] = time;
+            coCount[oldest] = 1;
+        }
+        coSeen = rc.calloutSeq - 1;
+    }
+
+    /** Short floating text where things happened: the most important first, none on another label. */
+    private void callouts(Gfx g, Camera cam) {
+        takeCallouts();
+        float z = cam.zoom;
+        int n = 0;
+        for (int k = 0; k < coText.length; k++) {
+            if (coText[k] == null) continue;
+            if (time - coBorn[k] >= CALLOUT_LIFE) {
+                coText[k] = null;
+                continue;
+            }
+            // from far out only the big things (a town, a facility, a horde, a blast)
+            int prio = Records.C_PRIO[coKind[k]];
+            if (z < 0.12f && prio < 3 || z < 0.03f && prio < 4) continue;
+            coOrder[n++] = k;
+        }
+        // most important, then newest, first
+        for (int a = 1; a < n; a++)
+            for (int b = a; b > 0; b--) {
+                int p = coOrder[b - 1], q = coOrder[b];
+                int pp = Records.C_PRIO[coKind[p]], pq = Records.C_PRIO[coKind[q]];
+                if (pq > pp || pq == pp && coBorn[q] > coBorn[p]) {
+                    coOrder[b - 1] = q;
+                    coOrder[b] = p;
+                } else break;
+            }
+        int shown = 0;
+        for (int o = 0; o < n && shown < 6; o++) {
+            int k = coOrder[o];
+            float age = time - coBorn[k];
+            float a = Math.max(0, Math.min(1, Math.min(age * 6, (CALLOUT_LIFE - age) / 1.2f)));
+            float sx = cam.toScreenX(coX[k]), sy = cam.toScreenY(coY[k]) - (16 + 10 * Math.min(1, age / CALLOUT_LIFE)) * dp;
+            String t = coCount[k] > 1 ? coText[k] + " ×" + coCount[k] : coText[k];
+            float ts = 11.5f * dp, tw = g.textWidth(t, ts, true), ph = 18 * dp;
+            float x0 = sx - tw / 2 - 7 * dp, x1 = sx + tw / 2 + 7 * dp, y0 = sy - ph / 2, y1 = sy + ph / 2;
+            if (x1 < 0 || x0 > cam.sw || y1 < 0 || y0 > cam.sh) continue;
+            if (!place(x0, y0, x1, y1 + 5 * dp)) continue;
+            shown++;
+            int col = Records.C_COLOR[coKind[k]];
+            g.color(MapPainter.alpha(0xE0140C0C, a));
+            g.fillRoundRect(x0, y0, x1 - x0, ph, ph / 2);
+            g.color(MapPainter.alpha(col, a));
+            g.fillRoundRect(x0 + 3 * dp, y0 + 4 * dp, 3 * dp, ph - 8 * dp, 1.5f * dp);
+            // a tick down to the place
+            g.line(sx, y1, sx, y1 + 5 * dp, 1.4f * dp);
+            labelAlways(g, t, sx + 1.5f * dp, sy + ts * 0.36f, 11.5f, MapPainter.alpha(0xFFFFFFFF, a), Gfx.ALIGN_CENTER, true);
+        }
+    }
+
+    // ------------------------------------------------------------------ what the simulation has, drawn
+
+    private java.util.List<float[]> safe = new java.util.ArrayList<float[]>();
+    private float safeT = -9;
+
+    /** Survivors' safe points, drones over the streets, the precinct's cordon and how long its calls have waited. */
+    private void marks(Gfx g, Camera cam) {
+        float z = cam.zoom;
+        boolean survivor = w.mode == World.MODE_SURVIVOR || w.roles.role == Roles.SURVIVOR;
+        // safe points: where a person on foot is safe (the survivor's goal; on the forces layer for everyone)
+        if (survivor || overlay == OV_FORCES) {
+            if (time - safeT > 1 || time < safeT) {
+                safeT = time;
+                safe = w.strat.safePoints();
+            }
+            float best = Float.MAX_VALUE;
+            float[] near = null;
+            int pe = w.playerEnt;
+            for (float[] p : safe) {
+                float sx = cam.toScreenX(p[0]), sy = cam.toScreenY(p[1]);
+                if (pe >= 0) {
+                    float d = (p[0] - w.e.x[pe]) * (p[0] - w.e.x[pe]) + (p[1] - w.e.y[pe]) * (p[1] - w.e.y[pe]);
+                    if (d < best) {
+                        best = d;
+                        near = p;
+                    }
+                }
+                if (sx < -40 * dp || sy < -40 * dp || sx > cam.sw + 40 * dp || sy > cam.sh + 40 * dp) continue;
+                float rr = Math.max(9 * dp, (p[2] == Strategic.SAFE_BASE ? 700 : 300) * z);
+                float pulse = 0.5f + 0.5f * (float) Math.sin(time * 2.5f);
+                g.color(MapPainter.alpha(0xFF50E080, 0.12f + 0.08f * pulse));
+                g.fillCircle(sx, sy, rr);
+                g.color(0xFF50E080);
+                g.strokeCircle(sx, sy, rr, 2 * dp);
+                g.color(0xFF0C2010);
+                g.fillCircle(sx, sy, 6 * dp);
+                g.color(0xFF60F090);
+                g.fillRect(sx - 1.2f * dp, sy - 4 * dp, 2.4f * dp, 8 * dp);
+                g.fillRect(sx - 4 * dp, sy - 1.2f * dp, 8 * dp, 2.4f * dp);
+                int kind = (int) p[2];
+                String lab = "Safe: " + (kind >= 0 && kind < Strategic.SAFE_NAMES.length ? Strategic.SAFE_NAMES[kind] : "here");
+                label(g, lab, sx, sy - 10 * dp, 11, 0xFFB8FFC8, Gfx.ALIGN_CENTER, true);
+            }
+            if (survivor && near != null && pe >= 0 && w.e.loc[pe] == Ents.FREE) {
+                // the way to the nearest: a dashed line from you
+                float px = cam.toScreenX(w.e.x[pe]), py = cam.toScreenY(w.e.y[pe]);
+                g.color(0xA050E080);
+                dashedLine(g, px, py, cam.toScreenX(near[0]), cam.toScreenY(near[1]), 1.6f * dp, 7 * dp);
+            }
+        }
+        // drones: a small quad orbiting over the one flying it
+        if (z > 0.08f && !w.strategic) {
+            ArmedAI ai = w.aai;
+            for (int k = 0; k < ai.droneN; k++) {
+                float a = time * 1.3f + k * 2.1f, orbit = 34;
+                float dx = ai.drones[k * 2] + (float) Math.cos(a) * orbit, dy = ai.drones[k * 2 + 1] + (float) Math.sin(a) * orbit;
+                float sx = cam.toScreenX(dx), sy = cam.toScreenY(dy);
+                if (sx < -20 * dp || sy < -20 * dp || sx > cam.sw + 20 * dp || sy > cam.sh + 20 * dp) continue;
+                quad(g, sx, sy, Math.max(5 * dp, 9 * z), a);
+            }
+        }
+        // the precinct: its cordon posts from further out, and how long each call in its district has waited
+        if (w.roles.role == Roles.PRECINCT && z > 0.04f) {
+            if (z <= 0.2f) for (Dispatch.Post p : w.disp.posts) {
+                float sx = cam.toScreenX(p.x), sy = cam.toScreenY(p.y);
+                if (sx < -30 * dp || sy < -30 * dp || sx > cam.sw + 30 * dp || sy > cam.sh + 30 * dp) continue;
+                float l = 6 * dp;
+                g.color(0xFF0A1430);
+                g.line(sx - p.fy * l, sy + p.fx * l, sx + p.fy * l, sy - p.fx * l, 4 * dp);
+                g.color(p.squad >= 0 ? 0xFF5A96FF : 0xFF5070A0);
+                g.line(sx - p.fy * l, sy + p.fx * l, sx + p.fy * l, sy - p.fx * l, 2.4f * dp);
+            }
+            for (Dispatch.Incident in : w.disp.incidents) {
+                if (!in.open || in.assigned > 0 || !w.roles.inDistrict(in.sector)) continue;
+                float sx = cam.toScreenX(in.x), sy = cam.toScreenY(in.y);
+                if (sx < -30 * dp || sy < -30 * dp || sx > cam.sw + 30 * dp || sy > cam.sh + 30 * dp) continue;
+                callClock(g, sx + 14 * dp, sy - 14 * dp, (float) (w.time - in.created));
+            }
+        }
+    }
+
+    /** A call's waiting clock: an arc that fills over half an hour (red past it) and the minutes. */
+    void callClock(Gfx g, float x, float y, float waited) {
+        float r = 8 * dp, f = Math.max(0, Math.min(1, waited / 30f));
+        int col = waited < 10 ? 0xFFE0E0E0 : waited < 30 ? 0xFFFFC040 : 0xFFFF5040;
+        g.color(0xE0101318);
+        g.fillCircle(x, y, r + 2 * dp);
+        int n = 2 + (int) (f * 24);
+        float[] xy = new float[(n + 1) * 2];
+        for (int k = 0; k <= n; k++) {
+            double a = -Math.PI / 2 + f * Math.PI * 2 * k / n;
+            xy[k * 2] = x + (float) Math.cos(a) * r;
+            xy[k * 2 + 1] = y + (float) Math.sin(a) * r;
+        }
+        g.color(col);
+        if (f > 0.02f) g.lines(xy, n + 1, 2.2f * dp);
+        String t = (int) waited + "m";
+        if (place(x - 12 * dp, y + r + 1 * dp, x + 12 * dp, y + r + 13 * dp)) labelAlways(g, t, x, y + r + 11 * dp, 10, col, Gfx.ALIGN_CENTER, true);
+    }
+
+    /** A small quadcopter seen from above: four rotors on an X. */
+    void quad(Gfx g, float x, float y, float s, float a) {
+        float c = (float) Math.cos(a * 0.3f), si = (float) Math.sin(a * 0.3f);
+        g.color(0x50000000);
+        g.fillCircle(x + s * 0.5f, y + s * 0.7f, s * 0.7f);
+        for (int k = 0; k < 4; k++) {
+            float ang = (float) (Math.PI / 4 + k * Math.PI / 2);
+            float ex = x + (float) (Math.cos(ang) * c - Math.sin(ang) * si) * s, ey = y + (float) (Math.sin(ang) * c + Math.cos(ang) * si) * s;
+            g.color(0xFF101418);
+            g.line(x, y, ex, ey, Math.max(1.5f, s * 0.22f));
+            g.color(0x90C8D8E8);
+            g.fillCircle(ex, ey, s * 0.42f);
+            g.color(0xFF101418);
+            g.strokeCircle(ex, ey, s * 0.42f, Math.max(1, s * 0.08f));
+        }
+        g.color(0xFF2A3440);
+        g.fillCircle(x, y, s * 0.3f);
+        g.color(0xFFFF4040);
+        g.fillCircle(x, y, s * 0.1f);
     }
 
     /** Takes a screen rectangle whatever is there already (a mark drawn later that labels must not cover). */
