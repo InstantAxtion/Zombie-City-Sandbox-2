@@ -2459,6 +2459,38 @@ public final class Tests {
                         cache.generated, cache.waits, cache.prefetched, cache.evicted, ChunkCache.capacityFor(256L << 20));
             }
         });
+        test("chunks: a Region reads chunks as its pages", new T() {
+            public void run() {
+                Nation n = country();
+                Region r = new Region(n.sw * Chunk.SIZE, n.sw * Chunk.SIZE, n.seed, n.preset, Chunk.SIZE, false);
+                check(r.sect == Chunk.SIZE && r.secW == n.sw, "sectors are the chunk square");
+                int cx0 = n.capital().cx / 64, cy0 = n.capital().cy / 64, buildings = 0;
+                for (int k = 0; k < 9; k++) {
+                    Chunk c = ChunkGen.generate(n, cx0 - 1 + k % 3, cy0 - 1 + k / 3);
+                    r.store.attach(c);
+                    check(r.store.chunk(c.index) == c && c.index == r.store.pageOf(c.cx * 64, c.cy * 64), "the page is the chunk");
+                    for (int y = 0; y < 64; y++)
+                        for (int x = 0; x < 64; x++) {
+                            int tx = c.cx * 64 + x, ty = c.cy * 64 + y;
+                            check(r.t(tx, ty) == c.t(x, y) && r.building(tx, ty) == c.building(x, y), "tile " + tx + "," + ty);
+                        }
+                    for (int i = 0; i < c.bCount; i++, buildings++) {
+                        int id = c.id(i), x = r.bx(id), y = r.by(id);
+                        check(Chunk.isChunkBuilding(id) && r.building(x, y) == id && r.building(x + r.bw(id) - 1, y + r.bh(id) - 1) == id, "building " + i + " found by its tiles");
+                        check(x == c.cx * 64 + c.bx[i] && y == c.cy * 64 + c.by[i] && r.bkind(id) == c.bkind[i] && r.bfloors(id) == c.bfloors[i]
+                                && r.bres(id) == c.bres[i] && r.broof(id) == c.broof[i] && r.bset(id) == c.settlement, "building " + i + " read through the accessors");
+                        float dx = r.doorX(id), dy = r.doorY(id);
+                        check(c.doorX[i] < 0 ? dx < 0 : Tile.walkable(r.tileAtPx(dx, dy)) && Math.abs(dx - (x + r.bw(id) / 2f) * 16) <= (r.bw(id) / 2f + 1) * 16, "door of " + i);
+                    }
+                }
+                check(buildings > 50, "only " + buildings + " buildings looked at");
+                // and today's maps: Region's own buildings by id are the arrays
+                Region m = RegionGen.generate(768, RegionGen.COAST, 1);
+                for (int b = 0; b < m.bCount; b++)
+                    check(m.bx(b) == m.bx[b] && m.bkind(b) == m.bkind[b] && m.building(m.bx[b], m.by[b]) == b && m.building(m.by[b] * m.W + m.bx[b]) == b, "building " + b);
+                System.out.printf("        9 chunks attached as pages, %d buildings read through Region%n", buildings);
+            }
+        });
     }
 }
 

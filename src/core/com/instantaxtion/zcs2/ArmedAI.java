@@ -812,8 +812,8 @@ final class ArmedAI {
                 for (int k = 0; k < 4; k++) {
                     int nx = tx + (k == 0 ? 1 : k == 1 ? -1 : 0), ny = ty + (k == 2 ? 1 : k == 3 ? -1 : 0);
                     if (!r.in(nx, ny)) continue;
-                    int b = r.building(ny * r.W + nx);
-                    if (b >= 0) floors = Math.max(floors, r.bfloors[b]);
+                    int b = r.building(nx, ny);
+                    if (b >= 0) floors = Math.max(floors, r.bfloors(b));
                 }
                 if (floors < 2) continue;
                 float wx = tx * Tile.SIZE + 8, wy = ty * Tile.SIZE + 8;

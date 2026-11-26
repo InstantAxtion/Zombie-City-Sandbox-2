@@ -6,7 +6,8 @@ import java.util.List;
 
 /** The generated region: terrain tiles, buildings, settlements, facilities and roads. Static apart from damage. */
 public final class Region {
-    public static final int SECT = 32; // tiles per sector side
+    /** Tiles per sector side on today's maps (RegionGen). Use r.sect: national maps use bigger sectors. */
+    public static final int SECT = 32;
     public static final int NAV = 2;   // tiles per navigation cell side
 
     // building kinds
@@ -86,17 +87,35 @@ public final class Region {
     public final long seed;
     public final int preset;
     public String name;
-    public final byte[] tile;
-    /** The building on each tile, stored as index + 1 (0 = none) in 16 bits: up to 65,534 buildings. */
-    private final char[] bldAt;
+    /** Tiles per sector side: SECT on today's maps, the chunk size on national ones. */
+    public final int sect;
+    /**
+     * The tiles and the building on each tile, in 64x64 pages (ChunkStore). Region's own buildings are stored there
+     * as -(index + 1), as Chunk stores national buildings: up to 32,768 of them.
+     */
+    public final ChunkStore store;
+    /** store's page table of tiles, held here so t() is one load away from it; pw is its row length. */
+    private final byte[][] tp;
+    private final int pw;
 
-    /** The building on tile index i (ty * W + tx), or -1. */
+    /** The building on tile index i (ty * W + tx), or -1. Prefer building(tx, ty). */
     public int building(int i) {
-        return bldAt[i] - 1;
+        return building(i % W, i / W);
     }
 
-    void clearBuilding(int i) {
-        bldAt[i] = 0;
+    /**
+     * The building on tile (tx, ty), which must be on the map, or -1: one of Region's (an index into bx, by...) or
+     * a chunk's own building (an encoded id, Chunk.isChunkBuilding); the accessors bx(id), bkind(id)... take either.
+     */
+    public int building(int tx, int ty) {
+        int v = store.bldRaw(tx, ty);
+        if (v == 0) return -1;
+        if (v < 0) return -v - 1;
+        return Chunk.CHUNK_FLAG | store.pageOf(tx, ty) << Chunk.LOCAL_BITS | (v - 1);
+    }
+
+    void clearBuilding(int tx, int ty) {
+        store.setBldRaw(tx, ty, 0);
     }
     public final List<Settlement> settlements = new ArrayList<Settlement>();
     public final List<Facility> facilities = new ArrayList<Facility>();
@@ -118,17 +137,26 @@ public final class Region {
     public final List<Integer> entryNodes = new ArrayList<Integer>();
 
     public Region(int w, int h, long seed, int preset) {
+        this(w, h, seed, preset, SECT, true);
+    }
+
+    /** A map with sectors of sect tiles; allPages makes every page resident at once (today's maps). */
+    Region(int w, int h, long seed, int preset, int sect, boolean allPages) {
         W = w;
         H = h;
         this.seed = seed;
         this.preset = preset;
-        tile = new byte[w * h];
-        bldAt = new char[w * h];
+        this.sect = sect;
+        store = new ChunkStore(w, h);
+        if (allPages) store.allocateAll();
+        tp = store.tile;
+        pw = store.pw;
         navW = w / NAV;
         navH = h / NAV;
-        nav = new byte[navW * navH];
-        secW = (w + SECT - 1) / SECT;
-        secH = (h + SECT - 1) / SECT;
+        // a map without every page resident (national, P7) gets its navigation grid paged in P2: none until then
+        nav = new byte[allPages ? navW * navH : 0];
+        secW = (w + sect - 1) / sect;
+        secH = (h + sect - 1) / sect;
     }
 
     public int px() {
@@ -139,13 +167,19 @@ public final class Region {
         return tx >= 0 && ty >= 0 && tx < W && ty < H;
     }
 
+    /** The tile at (tx, ty); off the map is deep water. Hot: the page lookup is written out here on purpose. */
     public int t(int tx, int ty) {
         if (tx < 0 || ty < 0 || tx >= W || ty >= H) return Tile.DEEP;
-        return tile[ty * W + tx];
+        return tp[(ty >> 6) * pw + (tx >> 6)][(ty & 63) << 6 | (tx & 63)];
     }
 
     public void set(int tx, int ty, byte k) {
-        if (tx >= 0 && ty >= 0 && tx < W && ty < H) tile[ty * W + tx] = k;
+        if (tx >= 0 && ty >= 0 && tx < W && ty < H) tp[(ty >> 6) * pw + (tx >> 6)][(ty & 63) << 6 | (tx & 63)] = k;
+    }
+
+    /** Writes a tile with no bounds check (the generators, on tiles they know are on the map). */
+    void raw(int tx, int ty, byte k) {
+        tp[(ty >> 6) * pw + (tx >> 6)][(ty & 63) << 6 | (tx & 63)] = k;
     }
 
     public int tileAtPx(float x, float y) {
@@ -222,7 +256,7 @@ public final class Region {
     }
 
     public int sectorOfPx(float x, float y) {
-        int sx = (int) (x / (Tile.SIZE * SECT)), sy = (int) (y / (Tile.SIZE * SECT));
+        int sx = (int) (x / (Tile.SIZE * sect)), sy = (int) (y / (Tile.SIZE * sect));
         if (sx < 0) sx = 0;
         if (sy < 0) sy = 0;
         if (sx >= secW) sx = secW - 1;
@@ -243,7 +277,7 @@ public final class Region {
             bres = Arrays.copyOf(bres, n);
             broof = Arrays.copyOf(broof, n);
         }
-        if (bCount >= 65534) throw new IllegalStateException("too many buildings");
+        if (bCount >= 32768) throw new IllegalStateException("too many buildings");
         int i = bCount++;
         bx[i] = x;
         by[i] = y;
@@ -257,19 +291,94 @@ public final class Region {
         for (int ty = y; ty < y + h; ty++)
             for (int tx = x; tx < x + w; tx++)
                 if (in(tx, ty)) {
-                    tile[ty * W + tx] = Tile.BUILDING;
-                    bldAt[ty * W + tx] = (char) (i + 1);
+                    raw(tx, ty, Tile.BUILDING);
+                    store.setBldRaw(tx, ty, -(i + 1));
                 }
         return i;
+    }
+
+    // ------------------------------------------------------------------ buildings by id
+    // An id is either one of Region's buildings (0..bCount-1: today's maps, and the national buildings of a national
+    // map) or a chunk's own building, encoded as Chunk.id() does. These read either; tile coordinates are the map's.
+
+    /** The chunk holding a chunk building (its page must be resident). */
+    public Chunk chunkOf(int id) {
+        Chunk c = store.chunk(Chunk.chunkOf(id));
+        if (c == null) throw new IllegalStateException("building " + Integer.toHexString(id) + ": its chunk isn't loaded");
+        return c;
+    }
+
+    public int bx(int id) {
+        if ((id & Chunk.CHUNK_FLAG) == 0) return bx[id];
+        Chunk c = chunkOf(id);
+        return c.cx * Chunk.SIZE + c.bx[Chunk.localOf(id)];
+    }
+
+    public int by(int id) {
+        if ((id & Chunk.CHUNK_FLAG) == 0) return by[id];
+        Chunk c = chunkOf(id);
+        return c.cy * Chunk.SIZE + c.by[Chunk.localOf(id)];
+    }
+
+    public int bw(int id) {
+        return (id & Chunk.CHUNK_FLAG) == 0 ? bw[id] : chunkOf(id).bw[Chunk.localOf(id)];
+    }
+
+    public int bh(int id) {
+        return (id & Chunk.CHUNK_FLAG) == 0 ? bh[id] : chunkOf(id).bh[Chunk.localOf(id)];
+    }
+
+    public int bkind(int id) {
+        return (id & Chunk.CHUNK_FLAG) == 0 ? bkind[id] : chunkOf(id).bkind[Chunk.localOf(id)];
+    }
+
+    public int bfloors(int id) {
+        return (id & Chunk.CHUNK_FLAG) == 0 ? bfloors[id] : chunkOf(id).bfloors[Chunk.localOf(id)];
+    }
+
+    public int bres(int id) {
+        return (id & Chunk.CHUNK_FLAG) == 0 ? bres[id] : chunkOf(id).bres[Chunk.localOf(id)];
+    }
+
+    public int broof(int id) {
+        return (id & Chunk.CHUNK_FLAG) == 0 ? broof[id] : chunkOf(id).broof[Chunk.localOf(id)];
+    }
+
+    /** The settlement a building belongs to (a chunk building: its chunk's), or -1. */
+    public int bset(int id) {
+        return (id & Chunk.CHUNK_FLAG) == 0 ? bset[id] : chunkOf(id).settlement;
+    }
+
+    /** Doors of Region's buildings (px, -1 for none), worked out by World. */
+    private float[] doorPxX, doorPxY;
+
+    void setDoors(float[] x, float[] y) {
+        doorPxX = x;
+        doorPxY = y;
+    }
+
+    /** The middle of a building's door tile in px, or -1 if it has none (or doors aren't worked out yet). */
+    public float doorX(int id) {
+        if ((id & Chunk.CHUNK_FLAG) == 0) return doorPxX == null || id >= doorPxX.length ? -1 : doorPxX[id];
+        Chunk c = chunkOf(id);
+        int d = c.doorX[Chunk.localOf(id)];
+        return d < 0 ? -1 : (c.cx * Chunk.SIZE + d) * Tile.SIZE + Tile.SIZE / 2f;
+    }
+
+    public float doorY(int id) {
+        if ((id & Chunk.CHUNK_FLAG) == 0) return doorPxY == null || id >= doorPxY.length ? -1 : doorPxY[id];
+        Chunk c = chunkOf(id);
+        int d = c.doorY[Chunk.localOf(id)];
+        return d < 0 ? -1 : (c.cy * Chunk.SIZE + d) * Tile.SIZE + Tile.SIZE / 2f;
     }
 
     /** Turns a building into rubble (blasts, air strikes): people inside are the sector's problem. */
     public void destroyBuilding(int i) {
         for (int ty = by[i]; ty < by[i] + bh[i]; ty++)
             for (int tx = bx[i]; tx < bx[i] + bw[i]; tx++)
-                if (in(tx, ty) && bldAt[ty * W + tx] == i + 1) {
-                    tile[ty * W + tx] = Tile.RUBBLE;
-                    bldAt[ty * W + tx] = 0;
+                if (in(tx, ty) && store.bldRaw(tx, ty) == -(i + 1)) {
+                    raw(tx, ty, Tile.RUBBLE);
+                    store.setBldRaw(tx, ty, 0);
                 }
         bfloors[i] = 0;
         rebuildNav(bx[i] - 2, by[i] - 2, bx[i] + bw[i] + 2, by[i] + bh[i] + 2);
@@ -390,7 +499,7 @@ public final class Region {
     /** A checksum of the map, for tests and saves. */
     public long checksum() {
         long h = 1469598103934665603L;
-        for (byte b : tile) h = (h ^ b) * 1099511628211L;
+        h = store.hashTiles(h);
         h ^= bCount * 31L + roads.nodeCount * 7L + roads.edgeCount;
         return h;
     }

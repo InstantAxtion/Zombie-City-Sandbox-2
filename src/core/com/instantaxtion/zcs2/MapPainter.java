@@ -74,10 +74,10 @@ public final class MapPainter {
         int t = r.t(x, y);
         int c = GROUND[t];
         if (t == Tile.BUILDING) {
-            int b = r.building(y * r.W + x);
+            int b = r.building(x, y);
             if (b >= 0) {
-                c = r.broof[b];
-                if (x == r.bx[b] || y == r.by[b] || x == r.bx[b] + r.bw[b] - 1 || y == r.by[b] + r.bh[b] - 1) c = shade(c, 0.8f);
+                c = r.broof(b);
+                if (x == r.bx(b) || y == r.by(b) || x == r.bx(b) + r.bw(b) - 1 || y == r.by(b) + r.bh(b) - 1) c = shade(c, 0.8f);
             }
         }
         if (texture && natural(t)) {

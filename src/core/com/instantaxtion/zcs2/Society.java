@@ -258,12 +258,12 @@ public final class Society extends Module {
             int b = -1;
             for (int k = 0; k < 30 && b < 0; k++) {
                 int c = Rng.hashInt(w.seed, w.tick + k, st, w.r.bCount);
-                int kind = w.r.bkind[c];
-                if (w.r.bset[c] == st && w.r.bfloors[c] > 0 && (kind == Region.B_SHOP || kind == Region.B_MALL || kind == Region.B_WAREHOUSE || kind == Region.B_FOODW))
+                int kind = w.r.bkind(c);
+                if (w.r.bset(c) == st && w.r.bfloors(c) > 0 && (kind == Region.B_SHOP || kind == Region.B_MALL || kind == Region.B_WAREHOUSE || kind == Region.B_FOODW))
                     b = c;
             }
             if (b < 0) continue;
-            float x = (w.r.bx[b] + w.r.bw[b] / 2f) * 16, y = (w.r.by[b] + w.r.bh[b] / 2f) * 16;
+            float x = (w.r.bx(b) + w.r.bw(b) / 2f) * 16, y = (w.r.by(b) + w.r.bh(b) / 2f) * 16;
             w.stats.lootings++;
             // stores lost
             for (Region.Facility f : w.r.facilities) {

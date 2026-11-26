@@ -349,12 +349,12 @@ public final class WorldView {
         idxW = r.W / 32 + 1;
         int cells = idxW * idxW;
         int[] count = new int[cells + 1];
-        for (int b = 0; b < r.bCount; b++) count[(r.by[b] / 32) * idxW + r.bx[b] / 32]++;
+        for (int b = 0; b < r.bCount; b++) count[(r.by(b) / 32) * idxW + r.bx(b) / 32]++;
         bStart = new int[cells + 1];
         for (int c = 0; c < cells; c++) bStart[c + 1] = bStart[c] + count[c];
         bIndex = new int[r.bCount];
         int[] fill = java.util.Arrays.copyOf(bStart, cells);
-        for (int b = 0; b < r.bCount; b++) bIndex[fill[(r.by[b] / 32) * idxW + r.bx[b] / 32]++] = b;
+        for (int b = 0; b < r.bCount; b++) bIndex[fill[(r.by(b) / 32) * idxW + r.bx(b) / 32]++] = b;
         indexed = r.bCount;
         if (scorched == null || scorched.length < r.bCount) scorched = scorched == null ? new boolean[r.bCount] : java.util.Arrays.copyOf(scorched, r.bCount);
     }
@@ -371,9 +371,9 @@ public final class WorldView {
                 int c = cy * idxW + cx;
                 for (int k = bStart[c]; k < bStart[c + 1]; k++) {
                     int b = bIndex[k];
-                    if (r.bfloors[b] <= 0) continue;
-                    int bx = r.bx[b], by = r.by[b];
-                    if (bx > tx1 || by > ty1 || bx + r.bw[b] < tx0 + 36 || by + r.bh[b] < ty0 + 36) continue;
+                    if (r.bfloors(b) <= 0) continue;
+                    int bx = r.bx(b), by = r.by(b);
+                    if (bx > tx1 || by > ty1 || bx + r.bw(b) < tx0 + 36 || by + r.bh(b) < ty0 + 36) continue;
                     if (n == vis.length) vis = java.util.Arrays.copyOf(vis, n * 2);
                     vis[n++] = b;
                 }
@@ -399,8 +399,8 @@ public final class WorldView {
         for (int pass = 0; pass < 3; pass++) {
             for (int k = 0; k < n; k++) {
                 int b = vis[k];
-                int floors = r.bfloors[b];
-                float wx = r.bx[b] * 16f, wy = r.by[b] * 16f, ww = r.bw[b] * 16f, wh = r.bh[b] * 16f;
+                int floors = r.bfloors(b);
+                float wx = r.bx(b) * 16f, wy = r.by(b) * 16f, ww = r.bw(b) * 16f, wh = r.bh(b) * 16f;
                 float sx = cam.toScreenX(wx), sy = cam.toScreenY(wy), sw = ww * z, sh = wh * z;
                 float height = Math.min(40, floors) * 3.2f + 4;
                 if (pass == 0) {
@@ -417,7 +417,7 @@ public final class WorldView {
                     lx *= maxLean * z * 2 / ll;
                     ly *= maxLean * z * 2 / ll;
                 }
-                int roof = r.broof[b];
+                int roof = r.broof(b);
                 if (scorched[b]) roof = MapPainter.mix(roof, 0xFF201A16, 0.7f);
                 if (pass == 1) {
                     if (!lean3d) continue;
@@ -465,7 +465,7 @@ public final class WorldView {
 
     private void roof(Gfx g, int b, float x, float y, float rw, float rh, float z, int roof, boolean detail) {
         Region r = w.r;
-        int kind = r.bkind[b];
+        int kind = r.bkind(b);
         int shape = kind == Region.B_HOUSE || kind == Region.B_FARMHOUSE || kind == Region.B_BARN || kind == Region.B_CHURCH ? SHAPE_PITCHED : SHAPE_FLAT;
         if (shape == SHAPE_PITCHED) {
             // two slopes either side of the ridge, one in the sun
@@ -632,10 +632,10 @@ public final class WorldView {
         int warm = MapPainter.alpha(0xFFFFD58A, 0.25f + night * 0.65f);
         for (int k = 0; k < n; k++) {
             int b = vis[k];
-            if (r.bres[b] <= 0 && r.bkind[b] != Region.B_HOSPITAL && r.bkind[b] != Region.B_POLICE) continue;
-            float wx = r.bx[b] * 16f, wy = r.by[b] * 16f, ww = r.bw[b] * 16f, wh = r.bh[b] * 16f;
+            if (r.bres(b) <= 0 && r.bkind(b) != Region.B_HOSPITAL && r.bkind(b) != Region.B_POLICE) continue;
+            float wx = r.bx(b) * 16f, wy = r.by(b) * 16f, ww = r.bw(b) * 16f, wh = r.bh(b) * 16f;
             if (scorched[b] || !w.strat.lit(r.sectorOfPx(wx + ww / 2, wy + wh / 2))) continue;
-            float height = Math.min(40, r.bfloors[b]) * 3.2f + 4;
+            float height = Math.min(40, r.bfloors(b)) * 3.2f + 4;
             float lx = (wx + ww / 2 - ccx) * lk * height * z, ly = (wy + wh / 2 - ccy) * lk * height * z;
             float ll = (float) Math.sqrt(lx * lx + ly * ly);
             if (ll > 120 * z) {
