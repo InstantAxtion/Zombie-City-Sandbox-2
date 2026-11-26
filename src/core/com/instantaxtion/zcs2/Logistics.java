@@ -583,38 +583,45 @@ public final class Logistics extends Module {
 
     // ------------------------------------------------------------------ drawing
 
+    private final float[] shape = new float[8];
+
     @Override
     public void draw(Gfx g, Camera cam, WorldView view) {
-        float z = cam.zoom;
+        float z = cam.zoom, dp = cam.dp;
         for (Convoy c : convoys) {
             float sx = cam.toScreenX(c.x), sy = cam.toScreenY(c.y);
-            if (z < 0.15f) {
-                // supply routes: a faint line to where it's going
-                float[] t = target(c);
-                g.color(c.refugees > 0 ? 0x40FFFFFF : 0x40E0C060);
-                g.line(sx, sy, cam.toScreenX(t[0]), cam.toScreenY(t[1]), 1);
+            Region.Facility to = c.to >= 0 && c.to < w.r.facilities.size() ? w.r.facilities.get(c.to) : null;
+            if (z < 0.15f && to != null) {
+                // supply routes: a faint dashed line to where it's going
+                g.color(c.refugees > 0 ? 0x60FFFFFF : 0x70E0C060);
+                WorldView.dashedLine(g, sx, sy, cam.toScreenX(to.x), cam.toScreenY(to.y), Math.max(1, 0.9f * dp), 5 * dp);
             }
             if (sx < -200 || sy < -200 || sx > cam.sw + 200 || sy > cam.sh + 200) continue;
+            float a = to == null ? 0 : (float) Math.atan2(to.y - c.y, to.x - c.x);
             if (c.mode == PLANE) {
-                float[] t = target(c);
-                float a = (float) Math.atan2(t[1] - c.y, t[0] - c.x);
                 g.save();
                 g.translate(sx, sy);
                 g.rotate(a);
-                float s = Math.max(6, 40 * z);
-                float[] p = {s, 0, -s, -s * 0.8f, -s * 0.6f, 0, -s, s * 0.8f};
+                float s = Math.max(9 * dp, 40 * z);
+                shape[0] = s; shape[1] = 0; shape[2] = -s; shape[3] = -s * 0.8f; shape[4] = -s * 0.6f; shape[5] = 0; shape[6] = -s; shape[7] = s * 0.8f;
+                g.color(0xC0000000);
+                g.translate(2 * dp, 3 * dp);
+                g.fillPoly(shape, 4);
+                g.translate(-2 * dp, -3 * dp);
                 g.color(0xFFE8ECF0);
-                g.fillPoly(p, 4);
+                g.fillPoly(shape, 4);
                 g.restore();
                 continue;
             }
             if (c.mode == SHIP) {
-                float[] t = target(c);
-                float a = (float) Math.atan2(t[1] - c.y, t[0] - c.x);
                 g.save();
                 g.translate(sx, sy);
                 g.rotate(a);
-                float s = Math.max(5, 70 * z);
+                float s = Math.max(10 * dp, 70 * z);
+                g.color(0x50FFFFFF);
+                g.fillRect(-s * 2.2f, -s * 0.15f, s * 1.3f, s * 0.3f);
+                g.color(0xFF0C0C0C);
+                g.fillRoundRect(-s - dp, -s * 0.28f - dp, s * 2 + 2 * dp, s * 0.56f + 2 * dp, s * 0.25f);
                 g.color(0xFF505A64);
                 g.fillRoundRect(-s, -s * 0.28f, s * 2, s * 0.56f, s * 0.25f);
                 g.color(0xFFB04030);
@@ -622,11 +629,11 @@ public final class Logistics extends Module {
                 g.restore();
                 continue;
             }
-            int col = c.mode == TRAIN ? (c.refugees > 0 ? 0xFF3060A0 : 0xFF8A3A2A) : 0xFF8A8A50;
+            int col = c.mode == TRAIN ? (c.refugees > 0 ? 0xFF3060A0 : 0xFF8A3A2A) : 0xFF9A9460;
             if (z < 0.25f) {
-                float s = c.mode == TRAIN ? 6 : 4.5f;
+                float s = (c.mode == TRAIN ? 6 : 4.5f) * dp;
                 g.color(0xFF101010);
-                g.fillRect(sx - s - 1, sy - s * 0.6f - 1, s * 2 + 2, s * 1.2f + 2);
+                g.fillRect(sx - s - dp, sy - s * 0.6f - dp, s * 2 + 2 * dp, s * 1.2f + 2 * dp);
                 g.color(col);
                 g.fillRect(sx - s, sy - s * 0.6f, s * 2, s * 1.2f);
                 continue;
@@ -634,13 +641,13 @@ public final class Logistics extends Module {
             // close: a column of trucks (or the carriages) strung back along the way it came
             RoadGraph gr = c.mode == TRAIN ? w.r.rails : w.r.roads;
             int n = c.mode == TRAIN ? 10 : c.size();
-            float gap = c.mode == TRAIN ? 30 : 42, len = c.mode == TRAIN ? 26 : 30, wid = c.mode == TRAIN ? 11 : 13;
+            float k = Math.max(z, 8 * dp / 30f);
+            float gap = (c.mode == TRAIN ? 30 : 42) * k / z, len = c.mode == TRAIN ? 26 : 30, wid = c.mode == TRAIN ? 11 : 13;
             float px = c.x, py = c.y;
             int idx = c.ri;
-            float need = 0;
-            for (int k = 0; k < n; k++) {
+            for (int q = 0; q < n; q++) {
                 // walk back along the route by 'gap'
-                float rem = k == 0 ? 0 : gap;
+                float rem = q == 0 ? 0 : gap;
                 float hx = 1, hy = 0;
                 while (rem > 0) {
                     if (c.route == null || idx < 0) break;
@@ -662,18 +669,19 @@ public final class Logistics extends Module {
                     hx = gr.nx[c.route[ahead]] - px;
                     hy = gr.ny[c.route[ahead]] - py;
                 }
-                float a = (float) Math.atan2(hy, hx);
+                float ang = (float) Math.atan2(hy, hx);
                 g.save();
                 g.translate(cam.toScreenX(px), cam.toScreenY(py));
-                g.rotate(a);
-                g.color(0x40000000);
-                g.fillRect(-len / 2 * z + 2 * z, -wid / 2 * z + 3 * z, len * z, wid * z);
-                g.color(k == 0 && c.mode == TRAIN ? 0xFF303030 : col);
-                g.fillRoundRect(-len / 2 * z, -wid / 2 * z, len * z, wid * z, 2 * z);
+                g.rotate(ang);
+                g.color(0x48000000);
+                g.fillRect(-len / 2 * k + 2 * k, -wid / 2 * k + 3 * k, len * k, wid * k);
+                g.color(0xFF101010);
+                g.fillRoundRect(-len / 2 * k - dp * 0.5f, -wid / 2 * k - dp * 0.5f, len * k + dp, wid * k + dp, 2 * k);
+                g.color(q == 0 && c.mode == TRAIN ? 0xFF303030 : col);
+                g.fillRoundRect(-len / 2 * k, -wid / 2 * k, len * k, wid * k, 2 * k);
                 g.color(0x30FFFFFF);
-                g.fillRect(-len / 2 * z, -wid / 2 * z, len * 0.3f * z, wid * z);
+                g.fillRect(-len / 2 * k, -wid / 2 * k, len * 0.3f * k, wid * k);
                 g.restore();
-                need += 0;
             }
         }
     }

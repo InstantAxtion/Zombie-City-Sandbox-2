@@ -503,14 +503,19 @@ public final class Roles extends Module {
 
     @Override
     public void draw(Gfx g, Camera cam, WorldView view) {
+        float dp = cam.dp;
         for (int st = 0; st < quarantine.length; st++) {
             if (!quarantine[st]) continue;
             Region.Settlement s = w.r.settlements.get(st);
-            float x = cam.toScreenX(s.cx * 16f), y = cam.toScreenY(s.cy * 16f), r = (s.radius + 12) * 16f * cam.zoom;
-            g.color(0xC0FF3030);
-            g.strokeCircle(x, y, Math.max(12, r), 3);
-            g.color(0xFFFF8080);
-            g.text("QUARANTINE", x, y - Math.max(12, r) - 4, 11, Gfx.ALIGN_CENTER, true);
+            float x = cam.toScreenX(s.cx * 16f), y = cam.toScreenY(s.cy * 16f), r = Math.max(14 * dp, (s.radius + 12) * 16f * cam.zoom);
+            if (x < -r * 1.5f || y < -r * 1.5f || x > cam.sw + r * 1.5f || y > cam.sh + r * 1.5f) continue;
+            g.color(0x18FFC020);
+            g.fillCircle(x, y, r);
+            g.color(0x80000000);
+            g.strokeCircle(x, y, r, 4 * dp);
+            g.color(0xE8FFC020);
+            g.strokeCircle(x, y, r, 2 * dp);
+            view.label(g, "QUARANTINE", x, y - r - 5 * dp, 10.5f, 0xFFFFD060, Gfx.ALIGN_CENTER, true);
         }
     }
 }

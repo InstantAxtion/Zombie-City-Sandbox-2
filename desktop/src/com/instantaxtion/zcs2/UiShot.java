@@ -66,6 +66,20 @@ public final class UiShot {
         game.touch(Game.UP, 0, c[0], c[1]);
         frames(120);
         shot("06-fight");
+        // a strike, aimed and then called off
+        tap("tool:strike");
+        frames(1);
+        game.touch(Game.DOWN, 0, c[0], c[1] - 80);
+        game.touch(Game.UP, 0, c[0], c[1] - 80);
+        frames(2);
+        shot("06b-strike-aim");
+        tap("aim:no");
+        frames(1);
+        // the key to the map's marks
+        tap("legend");
+        frames(1);
+        shot("06c-legend");
+        tap("legend");
         tap("tool:look");
         frames(1);
         // inspect whoever is in the middle
@@ -127,9 +141,11 @@ public final class UiShot {
         tap("mode:1");
         frames(2);
         shot("d02-campaigns");
-        tap("role");
+        tap("rolesheet");
         frames(1);
         shot("d03-role");
+        tap("rolepick:" + Roles.MILITARY);
+        frames(1);
         pf.answers.add("ZC2-1536-0-777-hold_city-military");
         tap("code");
         frames(2);
@@ -278,7 +294,8 @@ public final class UiShot {
         shot(mode + "-1");
         if (mode.equals("survivor")) {
             // push the stick right for a while
-            float[] p = {game.ui.dp(24) + game.ui.dp(54), H - game.ui.dp(54) - game.ui.dp(24) - game.ui.dp(54)};
+            // the stick sits in the bottom-left corner of the map, above the tools
+            float[] p = {game.freeL + game.ui.dp(24) + game.ui.dp(54), game.freeB - game.ui.dp(24) - game.ui.dp(54)};
             game.touch(Game.DOWN, 0, p[0], p[1]);
             game.touch(Game.MOVE, 0, p[0] + 60, p[1] - 10);
             frames(120);

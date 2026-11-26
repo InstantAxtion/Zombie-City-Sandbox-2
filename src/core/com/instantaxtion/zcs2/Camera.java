@@ -1,20 +1,58 @@
 package com.instantaxtion.zcs2;
 
-/** One continuous camera from a street corner to the whole region. zoom = screen px per world px. */
+/**
+ * One continuous camera from a street corner to the whole region. zoom = screen px per world px. The interface's
+ * bars cover the screen's edges (insets): "the whole country" fits the free area between them, and the camera keeps
+ * the map inside that area.
+ */
 public final class Camera {
     public float cx, cy, zoom = 0.5f;
     public int sw = 1, sh = 1;
     public float minZoom = 0.02f, maxZoom = 3.2f;
+    /** Screen pixels per dp: what's drawn on the map (people, symbols, labels) is sized in dp so it reads on any phone. */
+    public float dp = 1;
+    /** The screen edges covered by the interface, in pixels. */
+    public float insetL, insetT, insetR, insetB;
     private float flyX, flyY, flyZ;
     private float flyT;
+    private float worldPx = 1;
     public int follow = -1; // entity followed
     public int followVehicle = -1;
 
     public void setScreen(int w, int h, float worldPx) {
         sw = Math.max(1, w);
         sh = Math.max(1, h);
-        minZoom = Math.min(sw, sh) / worldPx * 0.95f;
+        this.worldPx = worldPx;
+        minZoom = fitZoom() * 0.92f;
         if (zoom < minZoom) zoom = minZoom;
+    }
+
+    public void setInsets(float l, float t, float r, float b) {
+        insetL = l;
+        insetT = t;
+        insetR = r;
+        insetB = b;
+    }
+
+    /** The zoom at which the whole map just fits the free area between the bars. */
+    public float fitZoom() {
+        float fw = Math.max(sw * 0.3f, sw - insetL - insetR), fh = Math.max(sh * 0.3f, sh - insetT - insetB);
+        return Math.min(fw, fh) / worldPx;
+    }
+
+    /** The world point at the middle of the free area, for a camera centre and zoom. */
+    private float freeOffX(float z) {
+        return (insetL + (sw - insetL - insetR) / 2f - sw / 2f) / z;
+    }
+
+    private float freeOffY(float z) {
+        return (insetT + (sh - insetT - insetB) / 2f - sh / 2f) / z;
+    }
+
+    /** Flies to show the whole map in the free area. */
+    public void showAll() {
+        float z = fitZoom();
+        flyTo(worldPx / 2f - freeOffX(z), worldPx / 2f - freeOffY(z), z);
     }
 
     public float toScreenX(float wx) {
@@ -71,22 +109,36 @@ public final class Camera {
         flyX = x;
         flyY = y;
         flyZ = Math.max(minZoom, Math.min(maxZoom, z));
-        flyT = 1;
+        flyT = 2;
     }
 
     public void update(float dt, float worldPx) {
+        this.worldPx = worldPx;
         if (flyT > 0) {
-            float k = Math.min(1, dt * 4);
+            // ease in log-zoom (a long zoom feels as quick at the far end as the near one), and land exactly
+            float k = Math.min(1, dt * 4.5f);
             cx += (flyX - cx) * k;
             cy += (flyY - cy) * k;
-            zoom += (flyZ - zoom) * k;
+            float lz = (float) Math.log(zoom), lt = (float) Math.log(flyZ);
+            zoom = (float) Math.exp(lz + (lt - lz) * k);
             flyT -= dt;
-            if (Math.abs(flyX - cx) < 2 && Math.abs(flyY - cy) < 2 && Math.abs(flyZ - zoom) < 0.001f) flyT = 0;
+            boolean close = Math.abs(flyX - cx) * zoom < 1 && Math.abs(flyY - cy) * zoom < 1 && Math.abs(lt - lz) < 0.004f;
+            if (close || flyT <= 0) {
+                cx = flyX;
+                cy = flyY;
+                zoom = flyZ;
+                flyT = 0;
+            }
         }
-        float halfW = sw / 2f / zoom, halfH = sh / 2f / zoom;
+        // keep the map in the free area: centred there when it's smaller than the area
+        float ox = freeOffX(zoom), oy = freeOffY(zoom);
+        float halfW = (sw - insetL - insetR) / 2f / zoom, halfH = (sh - insetT - insetB) / 2f / zoom;
         float m = worldPx;
-        cx = Math.max(Math.min(halfW, m / 2), Math.min(Math.max(m - halfW, m / 2), cx));
-        cy = Math.max(Math.min(halfH, m / 2), Math.min(Math.max(m - halfH, m / 2), cy));
+        float fx = cx + ox, fy = cy + oy;
+        fx = halfW * 2 >= m ? m / 2 : Math.max(halfW, Math.min(m - halfW, fx));
+        fy = halfH * 2 >= m ? m / 2 : Math.max(halfH, Math.min(m - halfH, fy));
+        cx = fx - ox;
+        cy = fy - oy;
     }
 
     public boolean flying() {

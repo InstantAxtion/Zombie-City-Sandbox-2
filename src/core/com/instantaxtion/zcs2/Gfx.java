@@ -40,6 +40,12 @@ public interface Gfx {
 
     void image(GImage img, float dx, float dy, float dw, float dh);
 
+    /** The picture drawn faded (alpha 0..1): glow sprites, soft shadows, scaled heatmaps. */
+    void image(GImage img, float dx, float dy, float dw, float dh, float alpha);
+
+    /** Text with a dark outline round each letter (labels over the map), in the current colour. */
+    void textHalo(String s, float x, float y, float size, int align, boolean bold, int haloColor, float haloWidth);
+
     void save();
 
     void restore();

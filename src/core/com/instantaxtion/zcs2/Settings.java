@@ -4,6 +4,8 @@ package com.instantaxtion.zcs2;
 public final class Settings {
     public int sound = 80, music = 50; // percent
     public boolean lean3d = true, blood = true, healthBars = true, names = true, radio = true, vibrate = true, minimap = true;
+    /** Frame rate and counts in a corner, for testing. */
+    public boolean debug = false;
     public int maxIndividuals = 60000;
     public int threads = 0; // 0 = automatic
     public int uiSize = 1; // 0 small, 1 normal, 2 large
@@ -27,6 +29,7 @@ public final class Settings {
         uiSize = i(p, "uiSize", uiSize);
         realistic = b(p, "realistic", realistic);
         gpu = b(p, "gpuOptIn", gpu);
+        debug = b(p, "debug", debug);
     }
 
     public void save(Platform p) {
@@ -44,6 +47,7 @@ public final class Settings {
         p.setPref("uiSize", "" + uiSize);
         p.setPref("realistic", "" + realistic);
         p.setPref("gpuOptIn", "" + gpu);
+        p.setPref("debug", "" + debug);
     }
 
     private static int i(Platform p, String k, int def) {

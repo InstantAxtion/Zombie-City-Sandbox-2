@@ -517,9 +517,11 @@ public final class Society extends Module {
 
     // ------------------------------------------------------------------ drawing, saves
 
+    private final float[] tent = new float[6];
+
     @Override
     public void draw(Gfx g, Camera cam, WorldView view) {
-        float z = cam.zoom;
+        float z = cam.zoom, dp = cam.dp;
         if (z < 0.03f) return;
         Sectors sec = w.sec;
         if (z < 1.2f && z > 0.05f) {
@@ -531,38 +533,42 @@ public final class Society extends Module {
                     int s = sy * sec.sw + sx;
                     if (!sec.holdout[s]) continue;
                     float x = cam.toScreenX(sec.cx(s)), y = cam.toScreenY(sec.cy(s));
-                    // a barricade: a striped bar
+                    // a barricaded holdout: a striped bar
+                    float hw = 10 * dp, hh = 4 * dp;
                     g.color(0xFF101010);
-                    g.fillRect(x - 10, y - 4, 20, 8);
+                    g.fillRect(x - hw - dp, y - hh - dp, hw * 2 + 2 * dp, hh * 2 + 2 * dp);
                     for (int k = 0; k < 4; k++) {
                         g.color((k & 1) == 0 ? 0xFFE0B030 : 0xFF303030);
-                        g.fillRect(x - 9 + k * 4.5f, y - 3, 4.5f, 6);
+                        g.fillRect(x - hw + k * hw / 2, y - hh, hw / 2, hh * 2);
                     }
                 }
         }
         for (Camp c : camps) {
             float x = cam.toScreenX(c.x), y = cam.toScreenY(c.y);
-            if (x < -60 || y < -60 || x > cam.sw + 60 || y > cam.sh + 60) continue;
-            float s = Math.max(3, 14 * z);
+            if (x < -60 * dp || y < -60 * dp || x > cam.sw + 60 * dp || y > cam.sh + 60 * dp) continue;
+            float s = Math.max(3 * dp, 14 * z);
             for (int k = 0; k < 9; k++) {
                 float tx = x + ((k % 3) - 1) * s * 2.2f, ty = y + ((k / 3) - 1) * s * 2;
+                tent[0] = tx; tent[1] = ty - s; tent[2] = tx + s; tent[3] = ty + s * 0.7f; tent[4] = tx - s; tent[5] = ty + s * 0.7f;
+                g.color(0xFF2A2620);
+                g.fillPoly(tent, 3);
                 g.color(0xFFD8D0B0);
-                float[] p = {tx, ty - s, tx + s, ty + s * 0.7f, tx - s, ty + s * 0.7f};
-                g.fillPoly(p, 3);
+                tent[1] += dp * 0.8f;
+                tent[2] -= dp * 0.7f;
+                tent[4] += dp * 0.7f;
+                g.fillPoly(tent, 3);
             }
-            if (z < 0.5f) {
-                g.color(0xFFFFFFFF);
-                g.text(c.name + " (" + WorldView.fmt(Math.max(0, sec.popIn[c.sector])) + ")", x, y + s * 4, 10, Gfx.ALIGN_CENTER, false);
-            }
+            if (z < 0.5f) view.label(g, c.name + " (" + WorldView.people(Math.max(0, sec.popIn[c.sector])) + ")", x, y + s * 3 + 12 * dp, 10, 0xFFF0F0E0, Gfx.ALIGN_CENTER, false);
         }
         for (Colony c : colonies) {
             float x = cam.toScreenX(c.x), y = cam.toScreenY(c.y);
-            if (x < -60 || y < -60 || x > cam.sw + 60 || y > cam.sh + 60) continue;
-            float r = Math.max(6, 120 * z);
-            g.color(c.fallen ? 0xFF803030 : 0xFFA07840);
-            g.strokeCircle(x, y, r, 3);
-            g.color(0xFFFFFFFF);
-            g.text(c.name + (c.fallen ? " (fallen)" : " (" + WorldView.fmt(sec.popIn[c.sector]) + ")"), x, y - r - 4, 10, Gfx.ALIGN_CENTER, true);
+            if (x < -60 * dp || y < -60 * dp || x > cam.sw + 60 * dp || y > cam.sh + 60 * dp) continue;
+            float r = Math.max(9 * dp, 120 * z);
+            g.color(0x90000000);
+            g.strokeCircle(x, y, r, 4.5f * dp);
+            g.color(c.fallen ? 0xFF903030 : 0xFFC09048);
+            g.strokeCircle(x, y, r, 2.5f * dp);
+            view.label(g, c.name + (c.fallen ? " (fallen)" : " (" + WorldView.people(sec.popIn[c.sector]) + ")"), x, y - r - 5 * dp, 10.5f, c.fallen ? 0xFFFF9080 : 0xFFF8E8C8, Gfx.ALIGN_CENTER, true);
         }
     }
 

@@ -12,6 +12,8 @@ final class AndroidImage implements GImage {
     Bitmap bitmap;
     private int texId, texGen;
     private volatile boolean dirty = true;
+    /** A changed rectangle still to upload (when only part changed): x0, y0, x1, y1, or x0 > x1 for none. */
+    private int dx0 = 1, dy0, dx1 = 0, dy1;
 
     AndroidImage(int w, int h) {
         bitmap = Bitmap.createBitmap(Math.max(1, w), Math.max(1, h), Bitmap.Config.ARGB_8888);
@@ -31,9 +33,27 @@ final class AndroidImage implements GImage {
         dirty = true;
     }
 
+    public void updatePixels(int[] argb, int offset, int stride, int x, int y, int w, int h) {
+        if (bitmap == null) return;
+        bitmap.setPixels(argb, offset, stride, x, y, w, h);
+        synchronized (this) {
+            if (dx0 > dx1) {
+                dx0 = x;
+                dy0 = y;
+                dx1 = x + w;
+                dy1 = y + h;
+            } else {
+                dx0 = Math.min(dx0, x);
+                dy0 = Math.min(dy0, y);
+                dx1 = Math.max(dx1, x + w);
+                dy1 = Math.max(dy1, y + h);
+            }
+        }
+    }
+
     /** True if drawing it now means uploading it first. */
     boolean needsUpload() {
-        return bitmap != null && (dirty || texId == 0 || texGen != GLGfx.contextGen);
+        return bitmap != null && (dirty || texId == 0 || texGen != GLGfx.contextGen || dx0 <= dx1);
     }
 
     /** Its texture on the GL thread (0 if it's been recycled), uploading it first if needed. */
@@ -47,7 +67,20 @@ final class AndroidImage implements GImage {
         }
         if (dirty || texId == 0) {
             dirty = false;
+            synchronized (this) {
+                dx0 = 1;
+                dx1 = 0;
+            }
             texId = GLGfx.upload(b, texId);
+        } else if (dx0 <= dx1) {
+            // only a part changed: send just that rectangle
+            int x0, y0, x1, y1;
+            synchronized (this) {
+                x0 = dx0; y0 = dy0; x1 = dx1; y1 = dy1;
+                dx0 = 1;
+                dx1 = 0;
+            }
+            GLGfx.uploadPart(b, texId, x0, y0, x1 - x0, y1 - y0);
         }
         return texId;
     }

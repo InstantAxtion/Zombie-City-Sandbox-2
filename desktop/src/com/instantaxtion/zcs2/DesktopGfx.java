@@ -121,6 +121,30 @@ public final class DesktopGfx implements Gfx {
         g.drawImage(b, at, null);
     }
 
+    public void image(GImage img, float dx, float dy, float dw, float dh, float alpha) {
+        if (alpha <= 0) return;
+        java.awt.Composite old = g.getComposite();
+        g.setComposite(java.awt.AlphaComposite.getInstance(java.awt.AlphaComposite.SRC_OVER, Math.min(1, alpha)));
+        image(img, dx, dy, dw, dh);
+        g.setComposite(old);
+    }
+
+    public void textHalo(String s, float x, float y, float size, int align, boolean bold, int halo, float hw) {
+        Font f = font(size, bold);
+        g.setFont(f);
+        float tw = (float) g.getFontMetrics().getStringBounds(s, g).getWidth();
+        if (align == ALIGN_CENTER) x -= tw / 2;
+        else if (align == ALIGN_RIGHT) x -= tw;
+        java.awt.font.TextLayout tl = new java.awt.font.TextLayout(s, f, g.getFontRenderContext());
+        java.awt.Shape outline = tl.getOutline(AffineTransform.getTranslateInstance(x, y));
+        java.awt.Paint fill = g.getPaint();
+        g.setColor(new Color(halo, true));
+        g.setStroke(new BasicStroke(hw * 2, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        g.draw(outline);
+        g.setPaint(fill);
+        g.fill(outline);
+    }
+
     public void save() {
         stack.push(g.getTransform());
         clips.push(g.getClip() == null ? new Rectangle2D.Float(-1e6f, -1e6f, 2e6f, 2e6f) : g.getClip());
@@ -156,6 +180,10 @@ public final class DesktopGfx implements Gfx {
 
         public void setPixels(int[] argb, int w, int h) {
             img.setRGB(0, 0, w, h, argb, 0, w);
+        }
+
+        public void updatePixels(int[] argb, int offset, int stride, int x, int y, int w, int h) {
+            img.setRGB(x, y, w, h, argb, offset, stride);
         }
 
         public void recycle() {

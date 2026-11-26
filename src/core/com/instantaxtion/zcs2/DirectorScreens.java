@@ -137,64 +137,90 @@ final class DirectorScreens {
             }
         }
         frame = Math.max(0, Math.min(n - 1, frame));
-        float size = Math.min(W - m * 2, H - ui.dp(220));
-        float x0 = (W - size) / 2, y0 = ui.dp(60);
-        int step = g0.view.map.step();
+        boolean land = W > H * 1.15f;
+        float size = land ? Math.min(H - ui.dp(70), W * 0.55f) : Math.min(W - m * 2, H - ui.dp(260));
+        float x0 = land ? m : (W - size) / 2, y0 = ui.dp(60);
         g.image(g0.view.map.regionImage, x0, y0, size, size);
-        g.color(0x60000000);
+        g.color(0x70000000);
         g.fillRect(x0, y0, size, size);
         Sectors sec = w.sec;
-        float cs = size / sec.sw;
         byte[] zd = d.lapseDead.get(frame), pp = d.lapsePeople.get(frame);
-        for (int s = 0; s < sec.n; s++) {
-            int pv = pp[s] & 255, zv = zd[s] & 255;
-            float sx = x0 + (s % sec.sw) * cs, sy = y0 + (s / sec.sw) * cs;
-            if (pv > 0) {
-                g.color(((int) (pv * 0.6f) << 24) | 0xE8E0C8);
-                g.fillRect(sx, sy, cs + 0.5f, cs + 0.5f);
-            }
-            if (zv > 0) {
-                g.color((Math.min(230, 60 + zv) << 24) | 0xD01818);
-                g.fillRect(sx, sy, cs + 0.5f, cs + 0.5f);
-            }
+        // the hour's picture: people as a warm haze, the dead as red, smoothed
+        if (lapseImg == null || lapsePx.length != sec.n) {
+            lapsePx = new int[sec.n];
+            lapseImg = g0.pf.newImage(sec.sw, sec.sh);
+            lapseShown = -1;
         }
+        if (lapseShown != frame) {
+            for (int s = 0; s < sec.n; s++) {
+                int pv = pp[s] & 255, zv = zd[s] & 255;
+                int c = 0;
+                if (zv > 0) c = (Math.min(235, 70 + zv) << 24) | 0xD81C1C;
+                else if (pv > 0) c = ((int) Math.min(200, pv * 0.7f) << 24) | 0xF0E2C0;
+                lapsePx[s] = c;
+            }
+            lapseImg.setPixels(lapsePx, sec.sw, sec.sh);
+            lapseShown = frame;
+        }
+        g.image(lapseImg, x0, y0, size * sec.sw * Region.SECT / w.r.W, size * sec.sh * Region.SECT / w.r.H);
         for (Region.Settlement s : w.r.settlements) {
             if (s.kind != Region.S_CITY) continue;
             g.color(0xFFFFFFFF);
-            g.text(s.name, x0 + s.cx * size / w.r.W, y0 + s.cy * size / w.r.H, ui.dp(11), Gfx.ALIGN_CENTER, true);
+            g.textHalo(s.name, x0 + s.cx * size / w.r.W, y0 + s.cy * size / w.r.H, ui.dp(11.5f), Gfx.ALIGN_CENTER, true, 0xD0000000, ui.dp(1.3f));
         }
         float t = d.lapseTime.get(frame);
-        int dead = 0, people = 0;
+        long dead = 0, people = 0;
         for (int s = 0; s < sec.n; s++) {
             dead += Director.unlog(zd[s]);
             people += Director.unlog(pp[s]);
         }
-        float y = y0 + size + ui.dp(18);
+        float cx = land ? x0 + size + m * 2 : m, cw = land ? W - cx - m : W - m * 2;
+        float y = land ? y0 + ui.dp(22) : y0 + size + ui.dp(26);
         g.color(Ui.TEXT);
-        int day = 1 + (int) ((World.START_HOUR + t / 60) / 24);
-        int hour = (int) ((World.START_HOUR + t / 60) % 24);
-        g.text("Day " + day + ", " + String.format("%02d:00", hour), m, y, ui.dp(15), Gfx.ALIGN_LEFT, true);
+        g.text(Game.clockAt(t), cx, y, ui.dp(Ui.L + 3), Gfx.ALIGN_LEFT, true);
+        y += ui.dp(24);
         g.color(0xFFFF8080);
-        g.text("about " + WorldView.people(dead) + " dead", W - m, y, ui.dp(13), Gfx.ALIGN_RIGHT, true);
-        y += ui.dp(18);
+        g.text("about " + WorldView.people(dead) + " dead", cx, y, ui.dp(Ui.M), Gfx.ALIGN_LEFT, true);
         g.color(0xFFE8E0C8);
-        g.text("about " + WorldView.people(people) + " people", W - m, y, ui.dp(12), Gfx.ALIGN_RIGHT, false);
-        y += ui.dp(14);
-        // the scrubber
-        float bw = W - m * 2;
-        g.color(0xFF2A323C);
-        g.fillRect(m, y, bw, ui.dp(10));
-        g.color(Ui.ACCENT);
-        g.fillRect(m, y, bw * (frame + 1) / n, ui.dp(10));
-        ui.area("tl:scrub", m, y - ui.dp(10), bw, ui.dp(30));
-        scrubX = m;
-        scrubW = bw;
+        g.text("about " + WorldView.people(people) + " people", cx + cw, y, ui.dp(Ui.M), Gfx.ALIGN_RIGHT, false);
         y += ui.dp(26);
-        float hb = (W - m * 2 - ui.dp(16)) / 3;
-        ui.button("tl:start", m, y, hb, ui.dp(40), "Start", false, 13);
-        ui.button("tl:play", m + hb + ui.dp(8), y, hb, ui.dp(40), playing ? "Pause" : "Play", playing, 13);
-        ui.button("tl:end", m + (hb + ui.dp(8)) * 2, y, hb, ui.dp(40), "Now", false, 13);
+        // the scrubber: a track with a mark at each day, and a knob
+        float bw = cw, ty = y + ui.dp(8);
+        g.color(0xFF2A323C);
+        g.fillRoundRect(cx, ty - ui.dp(4), bw, ui.dp(8), ui.dp(4));
+        g.color(Ui.ACCENT);
+        g.fillRoundRect(cx, ty - ui.dp(4), Math.max(ui.dp(8), bw * (frame + 1) / n), ui.dp(8), ui.dp(4));
+        float tFirst = d.lapseTime.get(0), tLast = Math.max(tFirst + 1, d.lapseTime.get(n - 1));
+        for (int day = 1; day < 400; day++) {
+            float tm = (day * 24 - World.START_HOUR) * 60;
+            if (tm <= tFirst) continue;
+            if (tm > tLast) break;
+            float tx = cx + bw * (tm - tFirst) / (tLast - tFirst);
+            g.color(0x90FFFFFF);
+            g.fillRect(tx, ty - ui.dp(9), 1, ui.dp(18));
+            if ((tLast - tFirst) / 60 / 24 < 12 || day % 5 == 0) {
+                g.color(Ui.DIM);
+                g.text("Day " + (day + 1), tx, ty + ui.dp(22), ui.dp(Ui.S), Gfx.ALIGN_CENTER, false);
+            }
+        }
+        float kx = cx + bw * (frame + 0.5f) / n;
+        g.color(0xFFFFFFFF);
+        g.fillCircle(kx, ty, ui.dp(9));
+        g.color(Ui.ACCENT);
+        g.fillCircle(kx, ty, ui.dp(5));
+        ui.area("tl:scrub", cx, ty - ui.dp(20), bw, ui.dp(40));
+        scrubX = cx;
+        scrubW = bw;
+        y += ui.dp(46);
+        float hb = (cw - ui.dp(16)) / 3;
+        ui.button("tl:start", cx, y, hb, ui.dp(44), "Start", false, 13);
+        ui.button("tl:play", cx + hb + ui.dp(8), y, hb, ui.dp(44), playing ? "Pause" : "Play", playing, 13);
+        ui.button("tl:end", cx + (hb + ui.dp(8)) * 2, y, hb, ui.dp(44), "Now", false, 13);
     }
+
+    private GImage lapseImg;
+    private int[] lapsePx;
+    private int lapseShown = -1;
 
     private float scrubX, scrubW;
 

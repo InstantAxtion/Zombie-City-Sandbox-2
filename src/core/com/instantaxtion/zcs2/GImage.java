@@ -12,5 +12,8 @@ public interface GImage {
     /** Replaces its pixels (ARGB, row by row). */
     void setPixels(int[] argb, int w, int h);
 
+    /** Replaces a rectangle of its pixels: argb holds rows of 'stride' ints, the first at 'offset'. */
+    void updatePixels(int[] argb, int offset, int stride, int x, int y, int w, int h);
+
     void recycle();
 }

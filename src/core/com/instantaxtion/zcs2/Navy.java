@@ -335,39 +335,46 @@ public final class Navy extends Module {
         targetT = in.readFloat();
     }
 
+    private final float[] hull = new float[10];
+
     @Override
     public void draw(Gfx g, Camera cam, WorldView view) {
         Content.VType vt = w.c.vtype("destroyer");
-        float z = cam.zoom;
+        float z = cam.zoom, dp = cam.dp;
         for (Ship s : ships) {
             if (!s.alive) continue;
             float sx = cam.toScreenX(s.x), sy = cam.toScreenY(s.y);
-            if (sx < -100 || sy < -100 || sx > cam.sw + 100 || sy > cam.sh + 100) continue;
-            float L = Math.max(14, (vt != null ? vt.length : 110) * z), W = Math.max(4, (vt != null ? vt.width : 22) * z);
+            if (sx < -100 * dp || sy < -100 * dp || sx > cam.sw + 100 * dp || sy > cam.sh + 100 * dp) continue;
+            float L = Math.max(22 * dp, (vt != null ? vt.length : 110) * z), W = Math.max(5 * dp, (vt != null ? vt.width : 22) * z);
             g.save();
             g.translate(sx, sy);
             g.rotate(s.head);
             g.color(0x50FFFFFF);
-            g.fillRect(-L * 0.9f, -W * 0.3f, L * 0.4f, W * 0.6f); // wake
-            float[] hull = {L / 2, 0, L / 4, -W / 2, -L / 2, -W / 2, -L / 2, W / 2, L / 4, W / 2};
+            g.fillRect(-L * 1.1f, -W * 0.3f, L * 0.6f, W * 0.6f); // wake
+            hull[0] = L / 2; hull[1] = 0; hull[2] = L / 4; hull[3] = -W / 2; hull[4] = -L / 2; hull[5] = -W / 2; hull[6] = -L / 2; hull[7] = W / 2; hull[8] = L / 4; hull[9] = W / 2;
+            g.color(0xFF0C0C0C);
+            g.save();
+            g.scale(1.08f);
+            g.fillPoly(hull, 5);
+            g.restore();
             g.color(vt != null ? vt.color : 0xFF6C747C);
             g.fillPoly(hull, 5);
             g.color(0xFF4C545C);
             g.fillRect(-L * 0.1f, -W * 0.25f, L * 0.25f, W * 0.5f);
             g.restore();
-            if (z < 0.3f) {
-                g.color(0xE0FFFFFF);
-                g.text(s.name, sx, sy - W - 4, 10, Gfx.ALIGN_CENTER, false);
-            }
+            if (z < 0.3f) view.label(g, s.name, sx, sy - W - 5 * dp, 10, 0xFFE8F0FF, Gfx.ALIGN_CENTER, false);
         }
         for (Flight f : flights) {
             float sx = cam.toScreenX(f.x), sy = cam.toScreenY(f.y);
             float a = (float) Math.atan2(f.ty - f.fy, f.tx - f.fx);
-            float L = Math.max(16, 60 * z);
+            float L = Math.max(18 * dp, 60 * z);
             g.save();
             g.translate(sx, sy);
             g.rotate(a);
-            g.color(0xFF7A8270);
+            g.color(0x60000000);
+            g.fillRect(-L / 2 + 3 * dp, -L / 12 + 4 * dp, L, L / 6);
+            g.fillRect(-L / 10 + 3 * dp, -L / 2 + 4 * dp, L / 5, L);
+            g.color(0xFFA8AE98);
             g.fillRect(-L / 2, -L / 12, L, L / 6);
             g.fillRect(-L / 10, -L / 2, L / 5, L);
             g.restore();

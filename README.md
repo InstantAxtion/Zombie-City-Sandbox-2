@@ -56,19 +56,24 @@ one person.
   fastest containment) is kept and shown.
 - **Modding.** Make your own scenarios in the editor (where it starts, how many, hordes, goal, days, season,
   role). Put a `content.ini` in the app's files and it replaces the built-in one.
-- **Readable at every scale.** Tap anyone or anything: names, ranks, ammunition, orders, a formation's strength
+- **Readable at every scale.** Everything on the map is sized for the phone's screen (people, vehicles, unit
+  symbols, labels with outlines), crowds glow where they're thick, and labels don't pile on top of each other. Tap
+  anyone or anything: names, ranks, ammunition, orders, a formation's strength
   and losses, a town's people, the dead and its power. The radio log keeps every message (tap one to go there).
   The after-action report has a timeline, the turning point, the numbers, the best fighters, what happened, the
   fallen, and your best for the challenge.
 
 ## Controls
 
-Drag to move, pinch to zoom, tap to look. The **Map** tool opens the map's layers and a button that jumps between
-the whole country and where you were; the minimap jumps too. Top right: pause and speed (1x to 16x, then fast-forward). The
-menu button (or the phone's back button) pauses, and the back button also cancels a load in progress. The officer and the survivor can't fast-forward
-(the speed button goes round 1x to 16x); when the phone can't keep up with a fast-forward speed, the button shows
-the rate it really reaches ("~15h/s"). The game saves itself every three minutes of play and whenever the app
-is paused. On a desktop: the mouse is a finger, the wheel zooms, space
+Drag to move, pinch to zoom, tap to look. The tools are along the bottom (down the left side when the phone is
+sideways); each says in a line above its options what a tap does. The **Map** tool switches the national map's
+layers, and its first button jumps out to the whole country and back; the minimap jumps too. Strikes are aimed,
+then confirmed. Red arrows at the map's edge point to the biggest fights out of view. The **?** button explains the
+marks on the map. Top right: pause and speed (1x to 16x, then fast-forward). The menu button (or the phone's back
+button) pauses, and the back button also cancels a load in progress. The officer and the survivor can't
+fast-forward (the speed button goes round 1x to 16x); when the phone can't keep up with a fast-forward speed, the
+button shows the rate it really reaches ("~15h/s"). The game saves itself every three minutes of play and whenever
+the app is paused. On a desktop: the mouse is a finger, the wheel zooms, space
 pauses, 1-8 set the speed, M toggles the map, Esc is back.
 
 ## Building and testing

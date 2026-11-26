@@ -92,15 +92,35 @@ final class AndroidGfx implements Gfx {
         c.drawPoints(xy, 0, n * 2, pts);
     }
 
+    /** Sizes rounded to half pixels: every distinct size is another set of glyphs in the hardware cache. */
+    private static float round(float size) {
+        return Math.max(1, Math.round(size * 2) / 2f);
+    }
+
     public void text(String s, float x, float y, float size, int align, boolean bold) {
-        text.setTextSize(size);
+        text.setTextSize(round(size));
         text.setTypeface(bold ? BOLD : Typeface.DEFAULT);
         text.setTextAlign(align == ALIGN_CENTER ? Paint.Align.CENTER : align == ALIGN_RIGHT ? Paint.Align.RIGHT : Paint.Align.LEFT);
         c.drawText(s, x, y, text);
     }
 
+    public void textHalo(String s, float x, float y, float size, int align, boolean bold, int halo, float hw) {
+        int col = text.getColor();
+        text.setTextSize(round(size));
+        text.setTypeface(bold ? BOLD : Typeface.DEFAULT);
+        text.setTextAlign(align == ALIGN_CENTER ? Paint.Align.CENTER : align == ALIGN_RIGHT ? Paint.Align.RIGHT : Paint.Align.LEFT);
+        text.setStyle(Paint.Style.STROKE);
+        text.setStrokeJoin(Paint.Join.ROUND);
+        text.setStrokeWidth(hw * 2);
+        text.setColor(halo);
+        c.drawText(s, x, y, text);
+        text.setStyle(Paint.Style.FILL);
+        text.setColor(col);
+        c.drawText(s, x, y, text);
+    }
+
     public float textWidth(String s, float size, boolean bold) {
-        text.setTextSize(size);
+        text.setTextSize(round(size));
         text.setTypeface(bold ? BOLD : Typeface.DEFAULT);
         return text.measureText(s);
     }
@@ -110,6 +130,13 @@ final class AndroidGfx implements Gfx {
         if (b == null || b.isRecycled()) return;
         rect.set(dx, dy, dx + dw, dy + dh);
         c.drawBitmap(b, null, rect, bmp);
+    }
+
+    public void image(GImage img, float dx, float dy, float dw, float dh, float alpha) {
+        if (alpha <= 0) return;
+        bmp.setAlpha(Math.min(255, (int) (alpha * 255)));
+        image(img, dx, dy, dw, dh);
+        bmp.setAlpha(255);
     }
 
     public void save() { c.save(); }

@@ -376,19 +376,19 @@ public final class Ecology extends Module {
 
     @Override
     public void draw(Gfx g, Camera cam, WorldView view) {
-        // nests, from high up: a dark ring round the sector
+        // nests, from high up: a dark red ring round the sector, the strain's number in it
         if (cam.zoom > 0.5f) return;
-        float cs = Region.SECT * Tile.SIZE;
+        float cs = Region.SECT * Tile.SIZE, dp = cam.dp;
         for (int s = 0; s < w.sec.n; s++) {
             if (!nest[s]) continue;
             float x = cam.toScreenX(w.sec.cx(s)), y = cam.toScreenY(w.sec.cy(s));
-            if (x < -50 || y < -50 || x > cam.sw + 50 || y > cam.sh + 50) continue;
-            g.color(0xC0400808);
-            g.strokeCircle(x, y, Math.max(5, cs * cam.zoom * 0.45f), 2);
-            if (strain[s] > 0) {
-                g.color(0xFFFFB0B0);
-                g.text("S" + strain[s], x, y + 4, 10, Gfx.ALIGN_CENTER, true);
-            }
+            if (x < -50 * dp || y < -50 * dp || x > cam.sw + 50 * dp || y > cam.sh + 50 * dp) continue;
+            float r = Math.max(7 * dp, cs * cam.zoom * 0.45f);
+            g.color(0x90000000);
+            g.strokeCircle(x, y, r, 3.5f * dp);
+            g.color(0xE0B02020);
+            g.strokeCircle(x, y, r, 1.8f * dp);
+            if (strain[s] > 0) view.label(g, "S" + strain[s], x, y + 4 * dp, 10.5f, 0xFFFFB0B0, Gfx.ALIGN_CENTER, true);
         }
     }
 }

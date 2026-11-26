@@ -158,24 +158,65 @@ public final class Weather extends Module {
     @Override
     public void draw(Gfx g, Camera cam, WorldView view) {
         int W = g.width(), H = g.height();
+        float dp = cam.dp, t = view.time;
         if (snowCover > 0.05f && cam.zoom > 0.1f) {
-            g.color(((int) (snowCover * 70)) << 24 | 0xF0F4FF);
+            g.color(((int) (snowCover * 60)) << 24 | 0xF0F4FF);
+            g.fillRect(0, 0, W, H);
+        }
+        if (state == RAIN || state == STORM || state == CLOUDY) {
+            // a heavier sky
+            g.color(state == STORM ? 0x50101824 : state == RAIN ? 0x34142030 : 0x18202830);
             g.fillRect(0, 0, W, H);
         }
         if (state == FOG) {
-            g.color(0x50C8CCD0);
+            // a haze, and banks of it drifting across
+            float far = cam.zoom < 0.2f ? 0.5f : 1;
+            g.color(MapPainter.alpha(0xFFC4C8CC, 0.35f * far));
             g.fillRect(0, 0, W, H);
+            float s = Math.max(W, H) * 0.7f;
+            for (int i = 0; i < 7; i++) {
+                float x = ((Rng.unit(91, i, 1) * (W + s) + t * (8 + i * 3) * dp) % (W + s)) - s / 2;
+                float y = Rng.unit(91, i, 2) * H;
+                view.glow(g, view.glowWhite, x, y, s * (0.6f + Rng.unit(91, i, 3) * 0.6f), 0.5f * far);
+            }
         }
-        if ((wet() || state == SNOW) && cam.zoom > 0.15f) {
-            // streaks (or flakes) over the screen
-            int n = state == STORM ? 160 : 90;
-            float t = view.time;
-            g.color(state == SNOW ? 0xC0FFFFFF : 0x60B0C8E0);
+        if (wet() || state == SNOW) {
+            // streaks (or flakes) over the screen, slanted by the wind
+            boolean snow = state == SNOW;
+            int n = state == STORM ? 260 : snow ? 160 : 150;
+            float far = cam.zoom < 0.15f ? 0.5f : 1;
+            float len = (state == STORM ? 22 : 16) * dp, slant = state == STORM ? 0.35f : 0.18f;
+            g.color(snow ? 0xD8FFFFFF : state == STORM ? (int) (0x90 * far) << 24 | 0xC0D4EC : (int) (0x78 * far) << 24 | 0xB8CCE4);
             for (int i = 0; i < n; i++) {
-                float x = (Rng.unit(77, i, 1) * W + t * (state == SNOW ? 20 : 120)) % W;
-                float y = (Rng.unit(77, i, 2) * H + t * (state == SNOW ? 60 : 900)) % H;
-                if (state == SNOW) g.fillCircle(x, y, 1.6f);
-                else g.line(x, y, x - 3, y + 14, 1);
+                float sp = 0.7f + Rng.unit(77, i, 3) * 0.6f;
+                if (snow) {
+                    float x = (Rng.unit(77, i, 1) * W + t * 14 * dp * sp + (float) Math.sin(t * 1.3f + i) * 6 * dp) % W;
+                    float y = (Rng.unit(77, i, 2) * H + t * 38 * dp * sp) % H;
+                    g.fillCircle(x < 0 ? x + W : x, y, (1 + Rng.unit(77, i, 4)) * dp);
+                } else {
+                    float x = (Rng.unit(77, i, 1) * W + t * 260 * dp * slant * sp) % W;
+                    float y = (Rng.unit(77, i, 2) * H + t * 900 * dp * sp) % H;
+                    g.line(x, y, x - len * slant, y + len, Math.max(1, 0.8f * dp));
+                }
+            }
+        }
+        if (state == STORM) {
+            // lightning: a flash every few seconds, and the bolt
+            float period = 7f;
+            int k = (int) (t / period);
+            float ph = t - k * period - Rng.unit(55, k, 0) * 4;
+            if (ph >= 0 && ph < 0.35f) {
+                float a = ph < 0.08f ? 1 : (0.35f - ph) / 0.27f;
+                g.color(MapPainter.alpha(0xFFE8EEFF, a * 0.45f));
+                g.fillRect(0, 0, W, H);
+                g.color(MapPainter.alpha(0xFFF4F8FF, a));
+                float x = Rng.unit(55, k, 1) * W, y = 0;
+                for (int s = 0; s < 7; s++) {
+                    float nx = x + (Rng.unit(55, k, 10 + s) - 0.5f) * 60 * dp, ny = y + H * 0.08f;
+                    g.line(x, y, nx, ny, 2.2f * dp);
+                    x = nx;
+                    y = ny;
+                }
             }
         }
     }

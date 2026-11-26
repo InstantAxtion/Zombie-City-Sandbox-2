@@ -1,12 +1,15 @@
 package com.instantaxtion.zcs2;
 
 /**
- * Draws the world at any zoom. Close in: every person, vehicle and shot, buildings standing up with height that
- * leans away from the screen's middle. Further out: people as dots, the ground from cached chunks. Right out:
- * the region map with the infection as a stain, hordes, refugee columns, squads as unit symbols and town names.
+ * Draws the world at any zoom. Close in: every person, vehicle and shot, buildings standing up with walls, windows,
+ * roofs and soft shadows, leaning away from the screen's middle. Further out: people as dots over glowing density,
+ * the ground from cached chunks. Right out: an operations table of the region: the infection as a soft red bleed,
+ * hordes, refugee columns, formations as unit symbols, towns with their numbers. Everything that marks something
+ * (people, symbols, labels, rings) is sized in dp, so it reads the same on any phone; labels have outlines.
  */
 public final class WorldView {
     private final World w;
+    private final Platform pf;
     public final MapPainter map;
     public boolean lean3d = true, blood = true, healthBars = true, names = true;
     public Squads.Squad selected;
@@ -16,27 +19,95 @@ public final class WorldView {
     public static final int OV_NONE = 0, OV_INFECTION = 1, OV_UTIL = 2, OV_SUPPLY = 3, OV_TRUST = 4, OV_FORCES = 5, OV_DEATHS = 6, OV_PEAK = 7;
     public static final String[] OV_NAMES = {"Plain", "Infection", "Utilities", "Supplies", "Trust and fear", "Forces and fronts", "Deaths", "Peak infection"};
     public int inspectEnt = -1, inspectVehicle = -1;
-    public float brushX = -1, brushY, brushR;
+    public float brushX = -1, brushY, brushR, brushT;
     public int brushColor;
+    /** An aimed strike waiting for confirmation (world x, y and radius), or x < 0. */
+    public float aimX = -1, aimY, aimR;
+    /** Seconds of drawing (animations). */
     public float time;
+    /** Screen pixels per dp this frame. */
+    public float dp = 1;
     private float[] pts = new float[4096];
     private final float[] poly = new float[16];
+    /** Buildings that have burned (drawn charred): what the view has seen, not saved. */
+    private boolean[] scorched;
+
+    // soft sprites, made once: glows, smoke, shadow, the vignette
+    GImage glowWarm, glowRed, glowBlue, glowWhite, glowFire, smoke, shadow, vignette;
+    private final SecMap infection = new SecMap(0), dark = new SecMap(1), heat = new SecMap(2);
+    private final CrowdMap crowd = new CrowdMap();
+
+    public static final int DEAD_RIM = 0xFF6E1616, LIVING_LINE = 0xFF1C1712;
+    public static final int C_DEAD = 0xFF8FAAA6, C_CIV = 0xFFF0DCB0, C_COP = 0xFF4C88FF, C_ARMY = 0xFFCDBE78;
 
     public WorldView(World w, Platform pf) {
         this.w = w;
+        this.pf = pf;
         map = new MapPainter(w.r, pf, 64);
+        glowWarm = sprite(0xFFC070, 1.6f);
+        glowRed = sprite(0xFF3030, 1.6f);
+        glowBlue = sprite(0x4080FF, 1.6f);
+        glowWhite = sprite(0xFFFFFF, 1.4f);
+        glowFire = sprite(0xFF8A20, 1.2f);
+        smoke = sprite(0x3A3836, 1.1f);
+        shadow = sprite(0x000000, 1.2f);
+        vignette = vignetteImage();
+    }
+
+    /** A soft round sprite: the colour fading out from the middle. */
+    private GImage sprite(int rgb, float power) {
+        int n = 64;
+        int[] px = new int[n * n];
+        for (int y = 0; y < n; y++)
+            for (int x = 0; x < n; x++) {
+                float dx = (x + 0.5f - n / 2f) / (n / 2f), dy = (y + 0.5f - n / 2f) / (n / 2f);
+                float d = (float) Math.sqrt(dx * dx + dy * dy);
+                float a = d >= 1 ? 0 : (float) Math.pow(1 - d, power);
+                px[y * n + x] = ((int) (a * 255) << 24) | rgb;
+            }
+        GImage img = pf.newImage(n, n);
+        img.setPixels(px, n, n);
+        return img;
+    }
+
+    private GImage vignetteImage() {
+        int n = 64;
+        int[] px = new int[n * n];
+        for (int y = 0; y < n; y++)
+            for (int x = 0; x < n; x++) {
+                float dx = (x + 0.5f - n / 2f) / (n / 2f), dy = (y + 0.5f - n / 2f) / (n / 2f);
+                float d = Math.max(0, (float) Math.sqrt(dx * dx * 0.8f + dy * dy * 0.8f) - 0.55f) / 0.6f;
+                float a = Math.min(1, d * d) * 0.55f;
+                px[y * n + x] = ((int) (a * 255) << 24) | 0x05070A;
+            }
+        GImage img = pf.newImage(n, n);
+        img.setPixels(px, n, n);
+        return img;
+    }
+
+    /** A sprite drawn centred, size in screen px, faded. */
+    void glow(Gfx g, GImage img, float x, float y, float size, float alpha) {
+        g.image(img, x - size / 2, y - size / 2, size, size, alpha);
+    }
+
+    /** A label over the map: dp size, an outline so it reads over anything. */
+    public void label(Gfx g, String s, float x, float y, float sizeDp, int color, int align, boolean bold) {
+        g.color(color);
+        g.textHalo(s, x, y, sizeDp * dp, align, bold, 0xD0000000, Math.max(1.2f, 1.3f * dp));
     }
 
     public void draw(Gfx g, Camera cam, float dt) {
         time += dt;
+        dp = cam.dp;
         map.refresh();
         float z = cam.zoom;
-        g.color(Tile.MAP_COLOR[Tile.DEEP]);
+        g.color(MapPainter.GROUND[Tile.DEEP]);
         g.fillRect(0, 0, g.width(), g.height());
         ground(g, cam);
         float x0 = cam.x0() - 80, y0 = cam.y0() - 80, x1 = cam.x1() + 80, y1 = cam.y1() + 80;
         if (z >= 0.3f && blood) decals(g, cam, x0, y0, x1, y1);
         if (z >= 0.3f) bodies(g, cam, x0, y0, x1, y1);
+        if (z >= 0.18f && z < 0.6f) crowd.draw(g, cam);
         if (z >= 0.22f) buildings(g, cam, x0, y0, x1, y1);
         nightShade(g, cam);
         if (z >= 0.22f) vehicles(g, cam, x0, y0, x1, y1, false);
@@ -46,97 +117,199 @@ public final class WorldView {
         effects(g, cam, x0, y0, x1, y1);
         overlays(g, cam);
         for (int i = 0; i < w.modules.size(); i++) w.modules.get(i).draw(g, cam, this);
-        if (brushX >= 0) {
+        if (brushX >= 0 && time - brushT < 0.8f) {
             g.color(brushColor);
-            g.strokeCircle(cam.toScreenX(brushX), cam.toScreenY(brushY), brushR * z, 2);
+            float bx = cam.toScreenX(brushX), by = cam.toScreenY(brushY), br = Math.max(brushR * z, 6 * dp);
+            g.strokeCircle(bx, by, br, 2 * dp);
+            g.color(MapPainter.alpha(brushColor, 0.18f));
+            g.fillCircle(bx, by, br);
         }
+        if (aimX >= 0) reticle(g, cam);
+        g.image(vignette, 0, 0, g.width(), g.height());
+    }
+
+    /** The aim of a strike waiting to be confirmed: a pulsing reticle with the blast's reach. */
+    private void reticle(Gfx g, Camera cam) {
+        float x = cam.toScreenX(aimX), y = cam.toScreenY(aimY);
+        float r = Math.max(aimR * cam.zoom, 14 * dp), pulse = 0.5f + 0.5f * (float) Math.sin(time * 6);
+        g.color(0x40FF3020);
+        g.fillCircle(x, y, r);
+        g.color(0xFFFF5040);
+        g.strokeCircle(x, y, r, 2 * dp);
+        g.strokeCircle(x, y, r * (0.35f + 0.1f * pulse), 1.5f * dp);
+        float a = r + 8 * dp, b = r * 0.5f;
+        g.line(x - a, y, x - b, y, 2 * dp);
+        g.line(x + b, y, x + a, y, 2 * dp);
+        g.line(x, y - a, x, y - b, 2 * dp);
+        g.line(x, y + b, x, y + a, 2 * dp);
     }
 
     // ------------------------------------------------------------------ ground
+
+    private long paintBudgetNs = 6_000_000L;
+    private float lastCx, lastCy, lastZ, stillT;
+    private int framesDrawn;
 
     private void ground(Gfx g, Camera cam) {
         float z = cam.zoom;
         float worldPx = w.r.px();
         // the whole-region picture underneath everything (and on its own when far out)
         g.image(map.regionImage, cam.toScreenX(0), cam.toScreenY(0), worldPx * z, worldPx * z);
+        framesDrawn++;
+        // still camera: paint more each frame (and the ring round the view)
+        boolean still = Math.abs(cam.cx - lastCx) * z < 1 && Math.abs(cam.cy - lastCy) * z < 1 && Math.abs(z - lastZ) < 0.0005f;
+        stillT = still ? stillT + 0.016f : 0;
+        lastCx = cam.cx;
+        lastCy = cam.cy;
+        lastZ = z;
         if (z < 0.1f) return;
-        int lvl = z < 0.45f ? 0 : 1;
+        int lvl = MapPainter.levelFor(z);
         float chunkPx = MapPainter.CHUNK * Tile.SIZE;
-        int cx0 = Math.max(0, (int) (cam.x0() / chunkPx)), cy0 = Math.max(0, (int) (cam.y0() / chunkPx));
         int n = w.r.W / MapPainter.CHUNK;
+        int cx0 = Math.max(0, (int) (cam.x0() / chunkPx)), cy0 = Math.max(0, (int) (cam.y0() / chunkPx));
         int cx1 = Math.min(n - 1, (int) (cam.x1() / chunkPx)), cy1 = Math.min(n - 1, (int) (cam.y1() / chunkPx));
-        int budget = 3;
+        long budget = framesDrawn < 20 ? 40_000_000L : stillT > 0.25f ? 14_000_000L : paintBudgetNs;
+        long t0 = System.nanoTime();
         // paint the chunks nearest the middle first
         float mx = (cx0 + cx1) / 2f, my = (cy0 + cy1) / 2f;
-        for (int ring = 0; ring <= Math.max(cx1 - cx0, cy1 - cy0); ring++)
+        int rings = Math.max(cx1 - cx0, cy1 - cy0);
+        for (int ring = 0; ring <= rings; ring++)
             for (int cy = cy0; cy <= cy1; cy++)
                 for (int cx = cx0; cx <= cx1; cx++) {
                     if ((int) Math.max(Math.abs(cx - mx), Math.abs(cy - my)) != ring) continue;
-                    GImage img = map.chunk(cx, cy, lvl, budget > 0);
-                    if (img == null && lvl == 1) img = map.chunk(cx, cy, 0, false);
-                    if (img == null) continue;
-                    if (map.painted > 0) {
-                        budget--;
-                        map.painted = 0;
+                    boolean may = System.nanoTime() - t0 < budget;
+                    GImage img = map.chunk(cx, cy, lvl, may);
+                    if (img == null) {
+                        // a coarser one stands in: a middle one is cheap to paint, so make that if nothing better is there
+                        for (int l = lvl - 1; l >= 0 && img == null; l--) img = map.chunk(cx, cy, l, false);
+                        if ((img == null || !map.has(cx, cy, Math.min(1, lvl))) && lvl >= 1 && System.nanoTime() - t0 < budget + 4_000_000L)
+                            img = map.chunk(cx, cy, 1, true);
+                        if (img == null) img = map.chunk(cx, cy, 0, true);
                     }
+                    if (img == null) continue;
                     float sx = cam.toScreenX(cx * chunkPx), sy = cam.toScreenY(cy * chunkPx);
-                    g.image(img, sx, sy, chunkPx * z + 0.6f, chunkPx * z + 0.6f);
+                    g.image(img, sx, sy, chunkPx * z + 0.75f, chunkPx * z + 0.75f);
                 }
+        // with time to spare, the ring just outside the view
+        if (stillT > 0.5f) {
+            for (int cy = Math.max(0, cy0 - 1); cy <= Math.min(n - 1, cy1 + 1); cy++)
+                for (int cx = Math.max(0, cx0 - 1); cx <= Math.min(n - 1, cx1 + 1); cx++) {
+                    if (cx >= cx0 && cx <= cx1 && cy >= cy0 && cy <= cy1) continue;
+                    if (System.nanoTime() - t0 > budget) return;
+                    map.chunk(cx, cy, lvl, true);
+                }
+        }
     }
 
     private void decals(Gfx g, Camera cam, float x0, float y0, float x1, float y1) {
         Effects fx = w.fx;
         float z = cam.zoom;
-        g.color(0x9A6A0A0A);
+        g.color(0x9A5A0808);
         for (int k = 0; k < fx.dCount; k++) {
             float x = fx.dx[k], y = fx.dy[k];
             if (x < x0 || x > x1 || y < y0 || y > y1) continue;
-            g.fillCircle(cam.toScreenX(x), cam.toScreenY(y), (2 + fx.dsize[k]) * z);
+            g.fillCircle(cam.toScreenX(x), cam.toScreenY(y), Math.max((2 + fx.dsize[k]) * z, 1.5f * dp));
         }
     }
 
     private void bodies(Gfx g, Camera cam, float x0, float y0, float x1, float y1) {
         Ents e = w.e;
         float z = cam.zoom;
+        float s = Math.max(4 * z, 2.6f * dp), lw = Math.max(3.2f * z, 1.8f * dp);
         for (int i = 0; i < e.top; i++) {
             if (e.loc[i] != Ents.BODY) continue;
             float x = e.x[i], y = e.y[i];
             if (x < x0 || x > x1 || y < y0 || y > y1) continue;
             float sx = cam.toScreenX(x), sy = cam.toScreenY(y);
-            int c = e.kind[i] == Ents.ZOMBIE ? 0xFF4A5A38 : e.kind[i] == Ents.COP ? 0xFF2A3F78 : e.kind[i] == Ents.SOLDIER ? 0xFF4A5532 : 0xFF8A7A66;
-            g.color(c);
+            int c = e.kind[i] == Ents.ZOMBIE ? 0xFF4E5E5C : e.kind[i] == Ents.COP ? 0xFF2A3F78 : e.kind[i] == Ents.SOLDIER ? 0xFF6A6440 : 0xFF8A7A66;
             float a = e.face[i];
-            float dx = (float) Math.cos(a) * 4 * z, dy = (float) Math.sin(a) * 4 * z;
-            g.line(sx - dx, sy - dy, sx + dx, sy + dy, 3.2f * z);
+            float dx = (float) Math.cos(a) * s, dy = (float) Math.sin(a) * s;
+            g.color(0x70300808);
+            g.fillCircle(sx + dx * 0.3f, sy + dy * 0.3f, lw * 1.1f);
+            g.color(c);
+            g.line(sx - dx, sy - dy, sx + dx, sy + dy, lw);
             if ((e.flags[i] & Ents.F_RISES) != 0 && e.timer[i] < 3) {
                 // stirring
-                g.color(0x6690C060);
-                g.strokeCircle(sx, sy, 6 * z, 1);
+                g.color(0xA0D04040);
+                g.strokeCircle(sx, sy, Math.max(6 * z, 5 * dp), 1.2f * dp);
             }
         }
     }
 
     // ------------------------------------------------------------------ buildings
 
+    private int[] bIndex, bStart;
+    private int indexed = -1, idxW;
+    private int[] vis = new int[1024];
+
+    /** Buildings by 32-tile chunk (by their top-left corner), so a frame only looks at the ones near the view. */
+    private void indexBuildings() {
+        Region r = w.r;
+        idxW = r.W / 32 + 1;
+        int cells = idxW * idxW;
+        int[] count = new int[cells + 1];
+        for (int b = 0; b < r.bCount; b++) count[(r.by[b] / 32) * idxW + r.bx[b] / 32]++;
+        bStart = new int[cells + 1];
+        for (int c = 0; c < cells; c++) bStart[c + 1] = bStart[c] + count[c];
+        bIndex = new int[r.bCount];
+        int[] fill = java.util.Arrays.copyOf(bStart, cells);
+        for (int b = 0; b < r.bCount; b++) bIndex[fill[(r.by[b] / 32) * idxW + r.bx[b] / 32]++] = b;
+        indexed = r.bCount;
+        if (scorched == null || scorched.length < r.bCount) scorched = scorched == null ? new boolean[r.bCount] : java.util.Arrays.copyOf(scorched, r.bCount);
+    }
+
+    /** The buildings near the view into vis[]; returns how many. */
+    private int visible(float x0, float y0, float x1, float y1) {
+        Region r = w.r;
+        if (indexed != r.bCount) indexBuildings();
+        int tx0 = Math.max(0, (int) (x0 / 16) - 40), ty0 = Math.max(0, (int) (y0 / 16) - 40);
+        int tx1 = Math.min(r.W - 1, (int) (x1 / 16) + 4), ty1 = Math.min(r.H - 1, (int) (y1 / 16) + 4);
+        int n = 0;
+        for (int cy = ty0 / 32; cy <= ty1 / 32; cy++)
+            for (int cx = tx0 / 32; cx <= tx1 / 32; cx++) {
+                int c = cy * idxW + cx;
+                for (int k = bStart[c]; k < bStart[c + 1]; k++) {
+                    int b = bIndex[k];
+                    if (r.bfloors[b] <= 0) continue;
+                    int bx = r.bx[b], by = r.by[b];
+                    if (bx > tx1 || by > ty1 || bx + r.bw[b] < tx0 + 36 || by + r.bh[b] < ty0 + 36) continue;
+                    if (n == vis.length) vis = java.util.Arrays.copyOf(vis, n * 2);
+                    vis[n++] = b;
+                }
+            }
+        return n;
+    }
+
+    private int visN;
+
     private void buildings(Gfx g, Camera cam, float x0, float y0, float x1, float y1) {
         Region r = w.r;
         float z = cam.zoom;
         float ccx = cam.cx, ccy = cam.cy;
-        boolean dark = w.daylight() < 0.5f;
-        int tx0 = Math.max(0, (int) (x0 / 16) - 4), ty0 = Math.max(0, (int) (y0 / 16) - 4);
-        int tx1 = Math.min(r.W - 1, (int) (x1 / 16) + 4), ty1 = Math.min(r.H - 1, (int) (y1 / 16) + 4);
+        int n = visN = visible(x0, y0, x1, y1);
         float lk = lean3d ? 0.0016f : 0;
         float maxLean = 60;
-        // pass 1: walls (dark sides), pass 2: roofs
-        for (int pass = 0; pass < 2; pass++) {
-            for (int b = 0; b < r.bCount; b++) {
-                int bx = r.bx[b], by = r.by[b];
-                if (bx > tx1 || by > ty1 || bx + r.bw[b] < tx0 || by + r.bh[b] < ty0) continue;
+        boolean detail = z > 0.45f;
+        for (int k = 0; k < n; k++) {
+            int b = vis[k];
+            if (w.fires.heat[b] > 0) scorched[b] = true;
+        }
+        // pass 0: soft shadows (the sun in the south-west... from the top left), pass 1: walls, pass 2: roofs
+        for (int pass = 0; pass < 3; pass++) {
+            for (int k = 0; k < n; k++) {
+                int b = vis[k];
                 int floors = r.bfloors[b];
-                if (floors <= 0) continue;
-                float wx = bx * 16f, wy = by * 16f, ww = r.bw[b] * 16f, wh = r.bh[b] * 16f;
+                float wx = r.bx[b] * 16f, wy = r.by[b] * 16f, ww = r.bw[b] * 16f, wh = r.bh[b] * 16f;
                 float sx = cam.toScreenX(wx), sy = cam.toScreenY(wy), sw = ww * z, sh = wh * z;
                 float height = Math.min(40, floors) * 3.2f + 4;
+                if (pass == 0) {
+                    float off = height * 0.32f * z;
+                    g.color(0x22000000);
+                    g.fillRect(sx + off * 0.5f, sy + off * 0.65f, sw + off * 0.5f, sh + off * 0.5f);
+                    g.color(0x26000000);
+                    g.fillRect(sx + off * 0.25f, sy + off * 0.35f, sw + off * 0.3f, sh + off * 0.3f);
+                    continue;
+                }
                 float lx = (wx + ww / 2 - ccx) * lk * height * z, ly = (wy + wh / 2 - ccy) * lk * height * z;
                 float ll = (float) Math.sqrt(lx * lx + ly * ly);
                 if (ll > maxLean * z * 2) {
@@ -144,34 +317,24 @@ public final class WorldView {
                     ly *= maxLean * z * 2 / ll;
                 }
                 int roof = r.broof[b];
-                if (pass == 0) {
-                    if (!lean3d) {
-                        g.color(0x50000000);
-                        g.fillRect(sx + 2 * z, sy + 3 * z, sw, sh);
-                        continue;
-                    }
-                    // shadow, then the four walls as quads between base and roof
-                    g.color(0x38000000);
-                    g.fillRect(sx + height * 0.25f * z, sy + height * 0.3f * z, sw, sh);
-                    int wall = MapPainter.shade(roof, 0.62f);
-                    wallQuad(g, sx, sy, sx + sw, sy, lx, ly, MapPainter.shade(wall, 1.1f));
-                    wallQuad(g, sx + sw, sy, sx + sw, sy + sh, lx, ly, MapPainter.shade(wall, 0.85f));
-                    wallQuad(g, sx, sy + sh, sx + sw, sy + sh, lx, ly, MapPainter.shade(wall, 0.75f));
-                    wallQuad(g, sx, sy, sx, sy + sh, lx, ly, wall);
+                if (scorched[b]) roof = MapPainter.mix(roof, 0xFF201A16, 0.7f);
+                if (pass == 1) {
+                    if (!lean3d) continue;
+                    int wall = MapPainter.mix(MapPainter.shade(roof, 0.58f), 0xFF3C3E44, 0.35f);
+                    if (ly < 0) face(g, sx, sy, sx + sw, sy, lx, ly, MapPainter.shade(wall, 1.12f), floors, -ly, detail);
+                    if (lx > 0) face(g, sx + sw, sy, sx + sw, sy + sh, lx, ly, MapPainter.shade(wall, 0.86f), floors, lx, detail);
+                    if (ly > 0) face(g, sx, sy + sh, sx + sw, sy + sh, lx, ly, MapPainter.shade(wall, 0.72f), floors, ly, detail);
+                    if (lx < 0) face(g, sx, sy, sx, sy + sh, lx, ly, MapPainter.shade(wall, 1.0f), floors, -lx, detail);
                 } else {
                     float rx = sx + lx, ry = sy + ly;
-                    g.color(roof);
-                    g.fillRect(rx, ry, sw, sh);
-                    if (z > 0.5f) roofDetail(g, b, rx, ry, sw, sh, z, roof);
-                    g.color(MapPainter.shade(roof, 0.75f));
-                    g.strokeRect(rx, ry, sw, sh, Math.max(1, z));
-                    if (dark && w.strat.lit(r.sectorOfPx(wx + ww / 2, wy + wh / 2)) && r.bres[b] > 0) windows(g, b, rx, ry, sw, sh, z);
+                    roof(g, b, rx, ry, sw, sh, z, roof, detail);
                 }
             }
         }
     }
 
-    private void wallQuad(Gfx g, float ax, float ay, float bx, float by, float lx, float ly, int c) {
+    /** One wall between its base edge and the roof edge, with rows of windows when it shows enough. */
+    private void face(Gfx g, float ax, float ay, float bx, float by, float lx, float ly, int c, int floors, float depth, boolean detail) {
         poly[0] = ax;
         poly[1] = ay;
         poly[2] = bx;
@@ -182,76 +345,261 @@ public final class WorldView {
         poly[7] = ay + ly;
         g.color(c);
         g.fillPoly(poly, 4);
-    }
-
-    private void roofDetail(Gfx g, int b, float x, float y, float w2, float h2, float z, int roof) {
-        int k = w.r.bkind[b];
-        switch (k) {
-            case Region.B_HOUSE:
-            case Region.B_FARMHOUSE:
-                // a ridge
-                g.color(MapPainter.shade(roof, 0.82f));
-                if (w2 >= h2) g.line(x + 2, y + h2 / 2, x + w2 - 2, y + h2 / 2, Math.max(1, z * 1.5f));
-                else g.line(x + w2 / 2, y + 2, x + w2 / 2, y + h2 - 2, Math.max(1, z * 1.5f));
-                break;
-            case Region.B_HOSPITAL:
-                g.color(0xFFC03030);
-                g.fillRect(x + w2 / 2 - 6 * z, y + h2 / 2 - 2 * z, 12 * z, 4 * z);
-                g.fillRect(x + w2 / 2 - 2 * z, y + h2 / 2 - 6 * z, 4 * z, 12 * z);
-                break;
-            case Region.B_POLICE:
-                g.color(0xFFE0E0E0);
-                g.text("POLICE", x + w2 / 2, y + h2 / 2 + 3 * z, 8 * z, Gfx.ALIGN_CENTER, true);
-                break;
-            case Region.B_BARN:
-                g.color(0xFFE8E0D0);
-                g.line(x, y, x + w2, y + h2, z);
-                g.line(x + w2, y, x, y + h2, z);
-                break;
-            default:
-                // vents and units on flat roofs
-                if (w2 > 30 * z && h2 > 30 * z) {
-                    g.color(MapPainter.shade(roof, 0.85f));
-                    int n = 1 + (b % 3);
-                    for (int i = 0; i < n; i++) {
-                        float px = x + w2 * (0.2f + 0.25f * i), py = y + h2 * (0.25f + 0.2f * ((b + i) % 3));
-                        g.fillRect(px, py, 6 * z, 5 * z);
-                    }
-                }
+        if (!detail || depth < 5) return;
+        int rows = Math.min(floors, (int) (depth / 3.5f));
+        if (rows <= 0) return;
+        g.color(0x58101826);
+        float lw = Math.max(1, depth / rows * 0.38f);
+        float ex = (bx - ax), ey = (by - ay), el = (float) Math.sqrt(ex * ex + ey * ey);
+        if (el < 4) return;
+        float inset = Math.min(3, el * 0.1f) / el;
+        for (int k = 0; k < rows; k++) {
+            float f = (k + 0.55f) / (rows + 0.2f);
+            float px = ax + lx * f, py = ay + ly * f;
+            g.line(px + ex * inset, py + ey * inset, px + ex * (1 - inset), py + ey * (1 - inset), lw);
         }
     }
 
-    private void windows(Gfx g, int b, float x, float y, float w2, float h2, float z) {
-        g.color(0xCCFFD98A);
-        int nx = Math.max(1, (int) (w2 / (12 * z))), ny = Math.max(1, (int) (h2 / (12 * z)));
-        for (int j = 0; j < ny; j++)
-            for (int i = 0; i < nx; i++) {
-                if (Rng.unit(w.r.seed, b * 31 + i, j) < 0.55f) continue;
-                g.fillRect(x + (i + 0.35f) * w2 / nx, y + (j + 0.35f) * h2 / ny, 3 * z, 3 * z);
+    private static final int SHAPE_FLAT = 0, SHAPE_PITCHED = 1;
+
+    private void roof(Gfx g, int b, float x, float y, float rw, float rh, float z, int roof, boolean detail) {
+        Region r = w.r;
+        int kind = r.bkind[b];
+        int shape = kind == Region.B_HOUSE || kind == Region.B_FARMHOUSE || kind == Region.B_BARN || kind == Region.B_CHURCH ? SHAPE_PITCHED : SHAPE_FLAT;
+        if (shape == SHAPE_PITCHED) {
+            // two slopes either side of the ridge, one in the sun
+            boolean wide = rw >= rh;
+            g.color(MapPainter.shade(roof, 1.08f));
+            if (wide) g.fillRect(x, y, rw, rh / 2 + 0.5f);
+            else g.fillRect(x, y, rw / 2 + 0.5f, rh);
+            g.color(MapPainter.shade(roof, 0.82f));
+            if (wide) g.fillRect(x, y + rh / 2, rw, rh / 2);
+            else g.fillRect(x + rw / 2, y, rw / 2, rh);
+            if (detail) {
+                g.color(MapPainter.shade(roof, 0.66f));
+                float lw = Math.max(1, z * 1.4f);
+                if (wide) g.line(x + 1, y + rh / 2, x + rw - 1, y + rh / 2, lw);
+                else g.line(x + rw / 2, y + 1, x + rw / 2, y + rh - 1, lw);
+                if (kind == Region.B_HOUSE && (b & 3) != 0 && rw > 8) {
+                    // a chimney
+                    g.color(0xFF5A4A44);
+                    float cs = Math.max(2, 3 * z);
+                    g.fillRect(x + rw * 0.72f, y + rh * 0.2f, cs, cs);
+                } else if (kind == Region.B_BARN) {
+                    g.color(0x60E8E0D0);
+                    g.line(x, y, x + rw, y + rh, Math.max(1, z));
+                    g.line(x + rw, y, x, y + rh, Math.max(1, z));
+                } else if (kind == Region.B_CHURCH) {
+                    g.color(0xFFE8E0D0);
+                    float cx = x + rw / 2, cy = y + rh / 2, s = Math.min(rw, rh) * 0.3f;
+                    g.line(cx - s * 0.5f, cy - s * 0.2f, cx + s * 0.5f, cy - s * 0.2f, Math.max(1, z * 1.6f));
+                    g.line(cx, cy - s * 0.8f, cx, cy + s * 0.8f, Math.max(1, z * 1.6f));
+                }
             }
+        } else {
+            // a flat roof: the deck a shade darker inside a parapet, light catching the top-left edge
+            g.color(roof);
+            g.fillRect(x, y, rw, rh);
+            float p = Math.max(1, Math.min(2.2f * z, rw * 0.12f));
+            g.color(MapPainter.shade(roof, 0.9f));
+            g.fillRect(x + p, y + p, rw - p * 2, rh - p * 2);
+            g.color(0x18FFFFFF);
+            g.fillRect(x, y, rw, p);
+            g.fillRect(x, y, p, rh);
+            if (detail && rw > 10 && rh > 10) rooftop(g, b, kind, x + p, y + p, rw - p * 2, rh - p * 2, z, roof);
+        }
+        g.color(0x50000000);
+        g.strokeRect(x, y, rw, rh, 1);
+    }
+
+    /** What stands on a flat roof: units, tanks, panels, a helipad, a sign. */
+    private void rooftop(Gfx g, int b, int kind, float x, float y, float rw, float rh, float z, int roof) {
+        float u = Math.max(1.5f, 5 * z);
+        switch (kind) {
+            case Region.B_HOSPITAL: {
+                float cx = x + rw / 2, cy = y + rh / 2, s = Math.min(rw, rh) * 0.34f;
+                g.color(0xFFD02828);
+                g.fillRect(cx - s, cy - s * 0.3f, s * 2, s * 0.6f);
+                g.fillRect(cx - s * 0.3f, cy - s, s * 0.6f, s * 2);
+                if (rw > 50 * z) {
+                    float hx = x + rw * 0.18f, hy = y + rh * 0.25f, hr = Math.min(rw, rh) * 0.14f;
+                    g.color(0xFF3A3F44);
+                    g.fillCircle(hx, hy, hr);
+                    g.color(0xFFE8E8E0);
+                    g.strokeCircle(hx, hy, hr * 0.8f, Math.max(1, z));
+                    g.text("H", hx, hy + hr * 0.4f, hr * 1.1f, Gfx.ALIGN_CENTER, true);
+                }
+                break;
+            }
+            case Region.B_POLICE:
+                g.color(0xFF2B4E9A);
+                g.fillRect(x, y + rh * 0.4f, rw, rh * 0.2f);
+                if (rw > 26 * z) {
+                    g.color(0xFFF0F0F0);
+                    float ts = Math.min(rh * 0.18f, rw / 5.2f);
+                    g.text("POLICE", x + rw / 2, y + rh / 2 + ts * 0.36f, ts, Gfx.ALIGN_CENTER, true);
+                }
+                break;
+            case Region.B_FIRE:
+                g.color(0xFFF0E8D0);
+                g.fillRect(x, y + rh * 0.45f, rw, rh * 0.1f);
+                break;
+            case Region.B_SCHOOL:
+            case Region.B_HALL:
+            case Region.B_GOV: {
+                if (kind == Region.B_GOV) {
+                    g.color(MapPainter.shade(roof, 1.15f));
+                    g.fillCircle(x + rw / 2, y + rh / 2, Math.min(rw, rh) * 0.3f);
+                    g.color(MapPainter.shade(roof, 0.8f));
+                    g.strokeCircle(x + rw / 2, y + rh / 2, Math.min(rw, rh) * 0.3f, Math.max(1, z));
+                    break;
+                }
+                // solar panels
+                g.color(0xFF243A5E);
+                int cols = Math.max(1, (int) (rw / (10 * z + 1)));
+                for (int i = 0; i < cols && i < 8; i++) g.fillRect(x + rw * 0.1f + i * rw * 0.8f / cols, y + rh * 0.15f, rw * 0.7f / cols, rh * 0.3f);
+                break;
+            }
+            case Region.B_WAREHOUSE:
+            case Region.B_DEPOT:
+            case Region.B_HANGAR:
+            case Region.B_DOCK:
+            case Region.B_FOODW: {
+                // corrugated sheets and skylights
+                g.color(MapPainter.shade(roof, 0.82f));
+                boolean wide = rw >= rh;
+                int lines = (int) ((wide ? rw : rh) / Math.max(2.5f, 4 * z));
+                for (int i = 1; i < lines && i < 60; i++) {
+                    if (wide) g.line(x + i * rw / lines, y, x + i * rw / lines, y + rh, 1);
+                    else g.line(x, y + i * rh / lines, x + rw, y + i * rh / lines, 1);
+                }
+                g.color(0x50C8DCE8);
+                for (int i = 0; i < 3; i++) {
+                    if (wide) g.fillRect(x + rw * (0.2f + i * 0.25f), y + rh * 0.3f, u, rh * 0.4f);
+                    else g.fillRect(x + rw * 0.3f, y + rh * (0.2f + i * 0.25f), rw * 0.4f, u);
+                }
+                break;
+            }
+            case Region.B_WATER:
+            case Region.B_POWER: {
+                g.color(MapPainter.shade(roof, 1.25f));
+                float s = Math.min(rw, rh) * 0.28f;
+                g.fillCircle(x + rw * 0.33f, y + rh / 2, s);
+                g.fillCircle(x + rw * 0.7f, y + rh / 2, s * 0.8f);
+                g.color(0x60000000);
+                g.strokeCircle(x + rw * 0.33f, y + rh / 2, s, 1);
+                break;
+            }
+            case Region.B_APARTMENT:
+            case Region.B_CELLBLOCK:
+            case Region.B_BARRACKS:
+            case Region.B_TOWER: {
+                // a stair hut, a water tank, air-conditioning units
+                g.color(MapPainter.shade(roof, 1.12f));
+                g.fillRect(x + rw * 0.6f, y + rh * 0.55f, Math.min(rw * 0.25f, 12 * z), Math.min(rh * 0.25f, 9 * z));
+                if ((b & 1) == 0 || kind == Region.B_TOWER) {
+                    g.color(0xFF6A6058);
+                    g.fillCircle(x + rw * 0.25f, y + rh * 0.3f, Math.max(1.5f, Math.min(rw, rh) * 0.12f));
+                }
+                acUnits(g, b, x, y, rw, rh, u);
+                break;
+            }
+            default:
+                acUnits(g, b, x, y, rw, rh, u);
+        }
+    }
+
+    private void acUnits(Gfx g, int b, float x, float y, float rw, float rh, float u) {
+        if (rw < u * 4 || rh < u * 3) return;
+        int n = 1 + (b % 3);
+        for (int i = 0; i < n; i++) {
+            float px = x + rw * (0.15f + 0.27f * i), py = y + rh * (0.2f + 0.22f * ((b + i) % 3));
+            g.color(0xFFB8B8B4);
+            g.fillRect(px, py, u * 1.2f, u);
+            g.color(0xFF707070);
+            g.fillCircle(px + u * 0.6f, py + u * 0.5f, u * 0.32f);
+        }
+    }
+
+    /** Lit windows in powered places at night (drawn after the dark). */
+    private void lights(Gfx g, Camera cam, float night) {
+        Region r = w.r;
+        float z = cam.zoom;
+        float ccx = cam.cx, ccy = cam.cy;
+        float lk = lean3d ? 0.0016f : 0;
+        int n = visN;
+        int warm = MapPainter.alpha(0xFFFFD58A, 0.25f + night * 0.65f);
+        for (int k = 0; k < n; k++) {
+            int b = vis[k];
+            if (r.bres[b] <= 0 && r.bkind[b] != Region.B_HOSPITAL && r.bkind[b] != Region.B_POLICE) continue;
+            float wx = r.bx[b] * 16f, wy = r.by[b] * 16f, ww = r.bw[b] * 16f, wh = r.bh[b] * 16f;
+            if (scorched[b] || !w.strat.lit(r.sectorOfPx(wx + ww / 2, wy + wh / 2))) continue;
+            float height = Math.min(40, r.bfloors[b]) * 3.2f + 4;
+            float lx = (wx + ww / 2 - ccx) * lk * height * z, ly = (wy + wh / 2 - ccy) * lk * height * z;
+            float ll = (float) Math.sqrt(lx * lx + ly * ly);
+            if (ll > 120 * z) {
+                lx *= 120 * z / ll;
+                ly *= 120 * z / ll;
+            }
+            float sx = cam.toScreenX(wx) + lx, sy = cam.toScreenY(wy) + ly, sw = ww * z, sh = wh * z;
+            g.color(warm);
+            int nx = Math.max(1, (int) (sw / Math.max(3, 11 * z))), ny = Math.max(1, (int) (sh / Math.max(3, 11 * z)));
+            nx = Math.min(nx, 12);
+            ny = Math.min(ny, 12);
+            float s = Math.max(1.2f, 2.6f * z);
+            for (int j = 0; j < ny; j++)
+                for (int i = 0; i < nx; i++) {
+                    if (Rng.unit(r.seed, b * 31 + i, j) < 0.6f) continue;
+                    g.fillRect(sx + (i + 0.35f) * sw / nx, sy + (j + 0.35f) * sh / ny, s, s);
+                }
+        }
     }
 
     // ------------------------------------------------------------------ night
 
     private void nightShade(Gfx g, Camera cam) {
         float d = w.daylight();
-        if (d >= 0.99f) return;
-        int a = (int) ((1 - d) * 120);
-        g.color(a << 24 | 0x0A1030);
-        g.fillRect(0, 0, g.width(), g.height());
-        // places with no power are darker still
-        if (d < 0.6f) {
-            float cs = Region.SECT * Tile.SIZE;
-            int sx0 = Math.max(0, (int) (cam.x0() / cs)), sy0 = Math.max(0, (int) (cam.y0() / cs));
-            int sx1 = Math.min(w.sec.sw - 1, (int) (cam.x1() / cs)), sy1 = Math.min(w.sec.sh - 1, (int) (cam.y1() / cs));
-            int a2 = (int) ((0.6f - d) * 140);
-            g.color(a2 << 24);
-            for (int sy = sy0; sy <= sy1; sy++)
-                for (int sx = sx0; sx <= sx1; sx++) {
-                    int s = sy * w.sec.sw + sx;
-                    if (w.strat.lit(s)) continue;
-                    g.fillRect(cam.toScreenX(sx * cs), cam.toScreenY(sy * cs), cs * cam.zoom + 1, cs * cam.zoom + 1);
+        float z = cam.zoom;
+        if (d < 0.99f) {
+            float night = 1 - d;
+            // dusk and dawn warm first, then a deep blue dark
+            if (d > 0.4f) {
+                g.color(MapPainter.alpha(0xFFFF8A40, (1 - d) * 0.25f));
+                g.fillRect(0, 0, g.width(), g.height());
+            }
+            g.color(MapPainter.alpha(0xFF060C22, night * 0.74f));
+            g.fillRect(0, 0, g.width(), g.height());
+            // places with no power go black
+            if (d < 0.7f) dark.draw(g, cam, (0.7f - d) / 0.7f * 0.8f);
+            // the lights: street lamps, windows, and whole towns from high up
+            if (z >= 0.3f) {
+                streetLights(g, cam, night);
+                if (z >= 0.22f) lights(g, cam, night);
+            } else {
+                for (Region.Settlement s : w.r.settlements) {
+                    if (s.kind == Region.S_HOLDOUT || s.kind == Region.S_CAMP) continue;
+                    if (s.grid >= 0 && !w.strat.gridOn[s.grid]) continue;
+                    float x = cam.toScreenX(s.cx * 16f), y = cam.toScreenY(s.cy * 16f);
+                    float rad = Math.max(s.radius * 16f * z * 2.6f, 10 * dp);
+                    if (x < -rad || y < -rad || x > cam.sw + rad || y > cam.sh + rad) continue;
+                    glow(g, glowWarm, x, y, rad * 2, night * 0.7f);
                 }
+            }
+        }
+    }
+
+    private void streetLights(Gfx g, Camera cam, float night) {
+        RoadGraph rg = w.r.roads;
+        float z = cam.zoom;
+        float size = Math.max(70 * z, 10 * dp);
+        float x0 = cam.x0() - 60, y0 = cam.y0() - 60, x1 = cam.x1() + 60, y1 = cam.y1() + 60;
+        int drawn = 0;
+        for (int i = 0; i < rg.nodeCount && drawn < 400; i++) {
+            float x = rg.nx[i], y = rg.ny[i];
+            if (x < x0 || x > x1 || y < y0 || y > y1) continue;
+            if (rg.nset[i] < 0 || !w.strat.lit(w.r.sectorOfPx(x, y))) continue;
+            glow(g, glowWarm, cam.toScreenX(x), cam.toScreenY(y), size, night * 0.55f);
+            drawn++;
         }
     }
 
@@ -262,14 +610,21 @@ public final class WorldView {
         float z = cam.zoom;
         if (z < 0.6f) {
             // dots, batched by colour: the dead first, units drawn over them
-            float size = Math.max(1.6f, 7 * z);
-            dots(g, cam, x0, y0, x1, y1, Ents.ZOMBIE, 0xFF8FB04A, size);
-            dots(g, cam, x0, y0, x1, y1, Ents.CIV, 0xFFE8DCC0, size);
-            dots(g, cam, x0, y0, x1, y1, Ents.COP, 0xFF4F8CFF, size * 1.25f);
-            dots(g, cam, x0, y0, x1, y1, Ents.SOLDIER, 0xFF9CC060, size * 1.25f);
+            float size = Math.max(2.4f * dp, Math.min(4.2f * dp, 8 * z));
+            dots(g, cam, x0, y0, x1, y1, Ents.ZOMBIE, C_DEAD, DEAD_RIM, size);
+            dots(g, cam, x0, y0, x1, y1, Ents.CIV, C_CIV, LIVING_LINE, size);
+            dots(g, cam, x0, y0, x1, y1, Ents.COP, C_COP, 0xFF0A1A40, size * 1.2f);
+            dots(g, cam, x0, y0, x1, y1, Ents.SOLDIER, C_ARMY, 0xFF2A2610, size * 1.2f);
             if (w.playerEnt >= 0 && e.loc[w.playerEnt] == Ents.FREE) {
                 g.color(0xFFFFE040);
-                g.strokeCircle(cam.toScreenX(e.x[w.playerEnt]), cam.toScreenY(e.y[w.playerEnt]), 10, 2);
+                g.strokeCircle(cam.toScreenX(e.x[w.playerEnt]), cam.toScreenY(e.y[w.playerEnt]), 9 * dp, 2 * dp);
+            }
+            if (selected != null && selected.alive) {
+                g.color(0xFFFFE040);
+                for (int k = 0; k < selected.n; k++) {
+                    int m = selected.mem[k];
+                    if (e.loc[m] == Ents.FREE) g.strokeCircle(cam.toScreenX(e.x[m]), cam.toScreenY(e.y[m]), size, 1.2f * dp);
+                }
             }
             return;
         }
@@ -287,12 +642,12 @@ public final class WorldView {
             g.color(0xFFFFE040);
             for (int k = 0; k < selected.n; k++) {
                 int m = selected.mem[k];
-                if (e.loc[m] == Ents.FREE) g.strokeCircle(cam.toScreenX(e.x[m]), cam.toScreenY(e.y[m]), 9 * z, 1.5f);
+                if (e.loc[m] == Ents.FREE) g.strokeCircle(cam.toScreenX(e.x[m]), cam.toScreenY(e.y[m]), Math.max(9 * z, 6 * dp), 1.5f * dp);
             }
         }
     }
 
-    private void dots(Gfx g, Camera cam, float x0, float y0, float x1, float y1, byte kind, int color, float size) {
+    private void dots(Gfx g, Camera cam, float x0, float y0, float x1, float y1, byte kind, int color, int rim, float size) {
         Ents e = w.e;
         int n = 0;
         for (int i = 0; i < e.top; i++) {
@@ -305,8 +660,8 @@ public final class WorldView {
             n++;
         }
         if (n == 0) return;
-        g.color(0xFF000000 | MapPainter.shade(color, 0.45f));
-        g.points(pts, n, size + 1.2f);
+        g.color(rim);
+        g.points(pts, n, size + Math.max(1.5f, 1.1f * dp));
         g.color(color);
         g.points(pts, n, size);
     }
@@ -318,66 +673,94 @@ public final class WorldView {
         float rad;
         int body, head;
         int kind = e.kind[i];
-        if (kind == Ents.ZOMBIE) {
+        boolean dead = kind == Ents.ZOMBIE;
+        if (dead) {
             Content.ZType t = w.ztypeOf(i);
             rad = t.radius;
             body = t.color;
-            head = MapPainter.shade(t.color, 0.8f);
+            head = MapPainter.shade(t.color, 0.82f);
         } else {
             Content.Unit u = w.unitOf(i);
             rad = u.radius;
             body = u.color;
-            head = kind == Ents.CIV ? 0xFFE0B894 : MapPainter.shade(u.color, 0.7f);
-            if (kind == Ents.CIV) body = civColor(e.uid[i]);
+            head = kind == Ents.CIV ? 0xFFE6C29C : MapPainter.shade(u.color, 0.7f);
+            if (kind == Ents.CIV && u.weapon == null) body = civColor(e.uid[i]);
         }
         float a = e.face[i];
         float fx = (float) Math.cos(a), fy = (float) Math.sin(a);
-        float r = rad * z;
-        // shadow, shoulders, head, and for the armed, a weapon
-        g.color(0x40000000);
-        g.fillCircle(sx + r * 0.3f, sy + r * 0.4f, r * 1.1f);
+        float r = Math.max(rad * z, rad / 4 * 1.9f * dp);
+        if (dead) {
+            // the dead lurch
+            float wob = (float) Math.sin(time * 5 + i * 1.3f) * r * 0.18f;
+            sx += -fy * wob;
+            sy += fx * wob;
+        }
+        float ol = Math.max(1, 0.8f * dp);
+        // shadow, outline, shoulders, head, and for the armed, a weapon
+        g.color(0x48000000);
+        g.fillCircle(sx + r * 0.35f, sy + r * 0.45f, r * 1.15f);
+        if (dead) {
+            // arms out in front, under the body
+            g.color(DEAD_RIM);
+            float aw = Math.max(1.5f, r * 0.55f);
+            g.line(sx - fy * r * 0.7f, sy + fx * r * 0.7f, sx - fy * r * 0.7f + fx * r * 1.7f, sy + fx * r * 0.7f + fy * r * 1.7f, aw + ol);
+            g.line(sx + fy * r * 0.7f, sy - fx * r * 0.7f, sx + fy * r * 0.7f + fx * r * 1.7f, sy - fx * r * 0.7f + fy * r * 1.7f, aw + ol);
+            g.color(body);
+            g.line(sx - fy * r * 0.7f, sy + fx * r * 0.7f, sx - fy * r * 0.7f + fx * r * 1.6f, sy + fx * r * 0.7f + fy * r * 1.6f, aw * 0.6f);
+            g.line(sx + fy * r * 0.7f, sy - fx * r * 0.7f, sx + fy * r * 0.7f + fx * r * 1.6f, sy - fx * r * 0.7f + fy * r * 1.6f, aw * 0.6f);
+        }
+        g.color(dead ? DEAD_RIM : LIVING_LINE);
+        g.fillCircle(sx, sy, r * 1.15f + ol);
         g.color(body);
         g.fillCircle(sx, sy, r * 1.15f);
         if (kind == Ents.COP || kind == Ents.SOLDIER || (kind == Ents.CIV && w.unitOf(i).weapon != null)) {
-            g.color(0xFF202020);
-            g.line(sx + fx * r * 0.3f - fy * r * 0.5f, sy + fy * r * 0.3f + fx * r * 0.5f, sx + fx * r * 2.1f - fy * r * 0.5f, sy + fy * r * 2.1f + fx * r * 0.5f, Math.max(1, r * 0.35f));
-        }
-        if (kind == Ents.ZOMBIE) {
-            // arms out in front
-            g.color(body);
-            g.line(sx - fy * r * 0.7f, sy + fx * r * 0.7f, sx - fy * r * 0.7f + fx * r * 1.6f, sy + fx * r * 0.7f + fy * r * 1.6f, Math.max(1, r * 0.4f));
-            g.line(sx + fy * r * 0.7f, sy - fx * r * 0.7f, sx + fy * r * 0.7f + fx * r * 1.6f, sy - fx * r * 0.7f + fy * r * 1.6f, Math.max(1, r * 0.4f));
+            g.color(0xFF141414);
+            g.line(sx + fx * r * 0.3f - fy * r * 0.5f, sy + fy * r * 0.3f + fx * r * 0.5f, sx + fx * r * 2.2f - fy * r * 0.5f, sy + fy * r * 2.2f + fx * r * 0.5f, Math.max(1.2f, r * 0.38f));
         }
         g.color(head);
-        g.fillCircle(sx + fx * r * 0.15f, sy + fy * r * 0.15f, r * 0.62f);
-        if (kind == Ents.ZOMBIE && (e.flags[i] & Ents.F_HELMET) != 0) {
-            g.color(0xFF3A3F44);
+        g.fillCircle(sx + fx * r * 0.15f, sy + fy * r * 0.15f, r * 0.6f);
+        if (dead) {
+            if ((e.flags[i] & Ents.F_HELMET) != 0) {
+                g.color(0xFF3A3F44);
+                g.fillCircle(sx + fx * r * 0.15f, sy + fy * r * 0.15f, r * 0.5f);
+            }
+            // a smear of blood on the face
+            g.color(0xC0901818);
+            g.fillCircle(sx + fx * r * 0.45f, sy + fy * r * 0.45f, r * 0.25f);
+        } else if (kind == Ents.COP) {
+            g.color(0xFF1A2A50);
+            g.fillCircle(sx + fx * r * 0.15f, sy + fy * r * 0.15f, r * 0.42f);
+        } else if (kind == Ents.SOLDIER) {
+            g.color(MapPainter.shade(body, 0.75f));
             g.fillCircle(sx + fx * r * 0.15f, sy + fy * r * 0.15f, r * 0.5f);
         }
         if (i == w.playerEnt) {
             g.color(0xFFFFE040);
-            g.strokeCircle(sx, sy, r * 2.4f, 2);
+            g.strokeCircle(sx, sy, r * 2.4f, 2 * dp);
         }
-        if (healthBars && z > 0.9f && e.hp[i] < e.maxHp[i] && kind != Ents.ZOMBIE) {
+        if (healthBars && z > 0.9f && e.hp[i] < e.maxHp[i] && !dead) {
             float f = Math.max(0, e.hp[i] / e.maxHp[i]);
-            g.color(0xAA000000);
-            g.fillRect(sx - 6 * z, sy - r - 6 * z, 12 * z, 2 * z);
+            float bw = Math.max(12 * z, 10 * dp), bh = Math.max(2 * z, 2 * dp);
+            g.color(0xC0000000);
+            g.fillRect(sx - bw / 2 - 1, sy - r * 1.4f - bh * 2 - 1, bw + 2, bh + 2);
             g.color(f > 0.5f ? 0xFF60D060 : f > 0.25f ? 0xFFE0C040 : 0xFFE04040);
-            g.fillRect(sx - 6 * z, sy - r - 6 * z, 12 * z * f, 2 * z);
+            g.fillRect(sx - bw / 2, sy - r * 1.4f - bh * 2, bw * f, bh);
         }
         if ((e.flags[i] & Ents.F_INFECTED) != 0 && z > 0.8f) {
-            g.color(0xAA80C040);
-            g.strokeCircle(sx, sy, r * 1.6f, 1);
+            g.color(0xC0D04848);
+            g.strokeCircle(sx, sy, r * 1.7f, Math.max(1, 0.8f * dp));
         }
         if (i == inspectEnt) {
             g.color(0xFFFFFFFF);
-            g.strokeCircle(sx, sy, r * 2.6f, 1.5f);
+            g.strokeCircle(sx, sy, r * 2.6f, 1.5f * dp);
         }
     }
 
+    /** Ordinary clothes: warm, muted. */
+    private static final int[] CIV = {0xFFE8D2A8, 0xFFD9B38C, 0xFFC98A5E, 0xFFE6C27A, 0xFFB7795A, 0xFFF0E0C0, 0xFFCFA070, 0xFFDDA88A, 0xFFA87A5E, 0xFFE0B890};
+
     private static int civColor(int uid) {
-        int[] c = {0xFFB85450, 0xFF4F7FB8, 0xFFD8C060, 0xFF6FA86A, 0xFF8E6AB0, 0xFFE09050, 0xFFDDDDDD, 0xFF555555, 0xFF46A0A0, 0xFFC07890};
-        return c[(uid * 7) % c.length];
+        return CIV[(uid * 7) % CIV.length];
     }
 
     // ------------------------------------------------------------------ vehicles
@@ -385,6 +768,7 @@ public final class WorldView {
     private void vehicles(Gfx g, Camera cam, float x0, float y0, float x1, float y1, boolean air) {
         Vehicles v = w.veh;
         float z = cam.zoom;
+        boolean night = w.daylight() < 0.6f;
         for (int i = 0; i < v.top; i++) {
             if (v.state[i] == Vehicles.V_NONE) continue;
             Content.VType t = v.type(i);
@@ -393,25 +777,32 @@ public final class WorldView {
             float x = v.x[i], y = v.y[i];
             if (x < x0 - 200 || x > x1 + 200 || y < y0 - 200 || y > y1 + 200) continue;
             float sx = cam.toScreenX(x), sy = cam.toScreenY(y);
-            g.save();
-            float lift = inAir ? v.alt[i] * 26 * z : 0;
+            // never smaller than a few dp: a car reads as a car
+            float k = Math.max(z, 9 * dp / Math.max(10, t.length));
+            float L = t.length * k, W = t.width * k;
+            boolean wreck = v.state[i] == Vehicles.V_WRECK;
+            int col = wreck ? 0xFF2A2624 : t.color;
+            float lift = inAir ? v.alt[i] * 26 * k : 0;
             if (inAir) {
                 // shadow on the ground, the aircraft above it
                 g.save();
                 g.translate(sx + lift, sy + lift * 1.3f);
                 g.rotate(v.head[i]);
                 g.color(0x50000000);
-                g.fillRect(-t.length / 2 * z, -t.width / 4 * z, t.length * z, t.width / 2 * z);
+                g.fillRect(-L / 2, -W / 4, L, W / 2);
                 g.restore();
             }
+            if (night && !wreck && !inAir && v.state[i] == Vehicles.V_DRIVE) {
+                // headlights on the road ahead
+                float hx = (float) Math.cos(v.head[i]), hy = (float) Math.sin(v.head[i]);
+                glow(g, glowWarm, sx + hx * L * 1.3f, sy + hy * L * 1.3f, L * 1.9f, 0.55f);
+            }
+            g.save();
             g.translate(sx, sy);
             g.rotate(v.head[i]);
-            float L = t.length * z, W = t.width * z;
-            boolean wreck = v.state[i] == Vehicles.V_WRECK;
-            int col = wreck ? 0xFF2E2A28 : t.color;
             if (!inAir) {
-                g.color(0x45000000);
-                g.fillRect(-L / 2 + 2 * z, -W / 2 + 3 * z, L, W);
+                g.color(0x50000000);
+                g.fillRoundRect(-L / 2 + 2 * k, -W / 2 + 3 * k, L, W, 3 * k);
             }
             if (t.flies && t.weapon != null && t.speed > 400) {
                 // a jet: a dart
@@ -421,51 +812,58 @@ public final class WorldView {
             } else if (t.flies) {
                 g.color(col);
                 g.fillRoundRect(-L / 2.4f, -W / 5, L / 1.3f, W / 2.5f, W / 5);
-                g.fillRect(-L / 2, -1.5f * z, L / 2, 3 * z);
+                g.fillRect(-L / 2, -1.5f * k, L / 2, 3 * k);
                 // rotor
                 g.color(0x90202020);
                 float ra = time * 30;
-                for (int k = 0; k < 2; k++) {
-                    float ax = (float) Math.cos(ra + k * 1.57f) * W * 0.6f, ay = (float) Math.sin(ra + k * 1.57f) * W * 0.6f;
-                    g.line(-ax, -ay, ax, ay, 1.5f * z);
+                for (int q = 0; q < 2; q++) {
+                    float ax = (float) Math.cos(ra + q * 1.57f) * W * 0.6f, ay = (float) Math.sin(ra + q * 1.57f) * W * 0.6f;
+                    g.line(-ax, -ay, ax, ay, 1.5f * k);
                 }
             } else {
+                g.color(0xFF141414);
+                g.fillRoundRect(-L / 2 - 0.8f * dp * 0.5f, -W / 2 - 0.4f * dp, L + 0.8f * dp, W + 0.8f * dp, 3 * k);
                 g.color(col);
-                g.fillRoundRect(-L / 2, -W / 2, L, W, 3 * z);
-                g.color(MapPainter.shade(col, 0.78f));
-                g.fillRect(-L * 0.15f, -W / 2 + 1.5f * z, L * 0.4f, W - 3 * z); // cab / roof
+                g.fillRoundRect(-L / 2, -W / 2, L, W, 3 * k);
+                g.color(MapPainter.shade(col, 0.72f));
+                g.fillRect(-L * 0.12f, -W / 2 + 1.5f * k, L * 0.38f, W - 3 * k); // cab / roof
+                g.color(0x60B0C8E0);
+                g.fillRect(L * 0.18f, -W / 2 + 1.8f * k, L * 0.1f, W - 3.6f * k); // windscreen
                 if (t.stripe != 0 && !wreck) {
                     g.color(t.stripe);
-                    g.fillRect(-L / 2, -1.2f * z, L, 2.4f * z);
+                    g.fillRect(-L / 2, -1.2f * k, L, 2.4f * k);
                 }
                 if (t.weapon != null && !wreck) {
                     // turret and barrel
                     g.color(MapPainter.shade(col, 0.7f));
                     g.fillCircle(0, 0, W * 0.32f);
                     g.color(0xFF222222);
-                    g.line(0, 0, L * (t.tracked ? 0.75f : 0.45f), 0, (t.tracked ? 2.4f : 1.4f) * z);
+                    g.line(0, 0, L * (t.tracked ? 0.75f : 0.45f), 0, (t.tracked ? 2.4f : 1.4f) * k);
                 }
                 if (v.siren[i] && !wreck) {
                     boolean on = ((int) (time * 6) & 1) == 0;
                     g.color(on ? 0xFFFF3030 : 0xFF3050FF);
-                    g.fillRect(-2 * z, -W / 2 + 1, 3 * z, W / 2 - 1);
+                    g.fillRect(-2 * k, -W / 2 + 1, 3 * k, W / 2 - 1);
                     g.color(on ? 0xFF3050FF : 0xFFFF3030);
-                    g.fillRect(-2 * z, 0, 3 * z, W / 2 - 1);
+                    g.fillRect(-2 * k, 0, 3 * k, W / 2 - 1);
                 }
-                if (v.state[i] == Vehicles.V_DRIVE && w.daylight() < 0.5f) {
-                    g.color(0x40FFF0C0);
-                    poly[0] = L / 2; poly[1] = -W / 3; poly[2] = L / 2 + 40 * z; poly[3] = -W; poly[4] = L / 2 + 40 * z; poly[5] = W; poly[6] = L / 2; poly[7] = W / 3;
-                    g.fillPoly(poly, 4);
+                if (wreck) {
+                    g.color(0x80000000);
+                    g.fillCircle(L * 0.1f, 0, W * 0.35f);
                 }
             }
             g.restore();
+            if (v.siren[i] && !wreck) {
+                boolean on = ((int) (time * 6) & 1) == 0;
+                glow(g, on ? glowRed : glowBlue, sx, sy, Math.max(L * 2.2f, 22 * dp), night ? 0.9f : 0.5f);
+            }
             if (i == inspectVehicle) {
                 g.color(0xFFFFFFFF);
-                g.strokeCircle(sx, sy, L * 0.8f, 1.5f);
+                g.strokeCircle(sx, sy, L * 0.85f, 1.5f * dp);
             }
             if (!wreck && z > 0.5f && v.hp[i] < t.hp * 0.5f) {
-                g.color(0x60606060);
-                g.fillCircle(sx + (float) Math.sin(time * 3 + i) * 3, sy - 8 * z - (time * 10 % 10) * z, 5 * z);
+                float ph = (time * 0.8f + i * 0.37f) % 1f;
+                glow(g, smoke, sx + ph * 10 * k, sy - ph * 30 * k, (8 + ph * 18) * k, (1 - ph) * 0.8f);
             }
         }
     }
@@ -473,12 +871,20 @@ public final class WorldView {
     private void vehicleDots(Gfx g, Camera cam) {
         Vehicles v = w.veh;
         float z = cam.zoom;
-        float s = Math.max(2.5f, 30 * z);
+        float s = Math.max(4 * dp, Math.min(7 * dp, 30 * z));
+        float x0 = -s, y0 = -s, x1 = cam.sw + s, y1 = cam.sh + s;
         for (int i = 0; i < v.top; i++) {
             if (v.state[i] == Vehicles.V_NONE || v.state[i] == Vehicles.V_PARKED) continue;
             Content.VType t = v.type(i);
-            g.color(v.state[i] == Vehicles.V_WRECK ? 0xFF303030 : t.faction.equals("police") ? 0xFF7FA8FF : t.faction.equals("army") ? 0xFFC8D890 : 0xFFE3B21F);
             float sx = cam.toScreenX(v.x[i]), sy = cam.toScreenY(v.y[i]);
+            if (sx < x0 || sy < y0 || sx > x1 || sy > y1) continue;
+            boolean wreck = v.state[i] == Vehicles.V_WRECK;
+            if (wreck && z < 0.12f) continue;
+            int c = wreck ? 0xFF303030 : t.faction.equals("police") ? 0xFF7FA8FF : t.faction.equals("army") ? 0xFFD8CC88 : 0xFFE3B21F;
+            if (v.siren[i] && !wreck) glow(g, ((int) (time * 6) & 1) == 0 ? glowRed : glowBlue, sx, sy, s * 3.5f, 0.7f);
+            g.color(0xFF101010);
+            g.fillRect(sx - s / 2 - 1, sy - s / 2 - 1, s + 2, s + 2);
+            g.color(c);
             g.fillRect(sx - s / 2, sy - s / 2, s, s);
         }
     }
@@ -497,34 +903,41 @@ public final class WorldView {
             float sx = cam.toScreenX(x), sy = cam.toScreenY(y);
             switch (fx.kind[i]) {
                 case Effects.TRACER:
-                    if (z < 0.25f) break;
-                    g.color(((int) ((1 - t) * 220) << 24) | 0xFFE890);
-                    g.line(sx, sy, cam.toScreenX(fx.fx2[i]), cam.toScreenY(fx.fy2[i]), Math.max(1, 1.2f * z));
+                    if (z < 0.2f) break;
+                    g.color(((int) ((1 - t) * 230) << 24) | 0xFFE890);
+                    g.line(sx, sy, cam.toScreenX(fx.fx2[i]), cam.toScreenY(fx.fy2[i]), Math.max(0.8f * dp, 1.2f * z));
                     break;
-                case Effects.FLASH:
-                    if (z < 0.4f) break;
-                    g.color(0xDDFFE070);
+                case Effects.FLASH: {
+                    if (z < 0.3f) break;
+                    // a muzzle star
                     float a = fx.fx2[i];
-                    g.fillCircle(sx + (float) Math.cos(a) * 7 * z, sy + (float) Math.sin(a) * 7 * z, 3 * z);
+                    float mx = sx + (float) Math.cos(a) * Math.max(7 * z, 3 * dp), my = sy + (float) Math.sin(a) * Math.max(7 * z, 3 * dp);
+                    float s = Math.max(4 * dp, 6 * z) * (1 - t * 0.5f);
+                    glow(g, glowWarm, mx, my, s * 3, 0.8f);
+                    g.color(0xF0FFF0B0);
+                    g.line(mx - s * 0.5f, my, mx + s * 0.5f, my, Math.max(1, 0.7f * dp));
+                    g.line(mx, my - s * 0.5f, mx, my + s * 0.5f, Math.max(1, 0.7f * dp));
+                    g.fillCircle(mx, my, s * 0.22f);
                     break;
+                }
                 case Effects.BLAST:
                 case Effects.BIGBLAST: {
-                    float rad = fx.fx2[i] * z * (0.4f + t * 0.8f);
+                    float rad = Math.max(fx.fx2[i] * z * (0.4f + t * 0.8f), 5 * dp);
+                    glow(g, glowFire, sx, sy, rad * 3.2f, 1 - t);
                     g.color(((int) ((1 - t) * 200) << 24) | 0xFF8A20);
-                    g.fillCircle(sx, sy, Math.max(3, rad));
-                    g.color(((int) ((1 - t) * 230) << 24) | 0xFFE080);
-                    g.fillCircle(sx, sy, Math.max(2, rad * 0.5f));
+                    g.fillCircle(sx, sy, rad);
+                    g.color(((int) ((1 - t) * 240) << 24) | 0xFFE8A0);
+                    g.fillCircle(sx, sy, rad * 0.5f);
                     break;
                 }
                 case Effects.SMOKE: {
-                    float rad = fx.fx2[i] * z * (0.3f + t * 0.9f);
-                    g.color(((int) ((1 - t) * 90) << 24) | 0x505050);
-                    g.fillCircle(sx + t * 30 * z, sy - t * 50 * z, Math.max(2, rad * 0.6f));
+                    float rad = Math.max(fx.fx2[i] * z * (0.3f + t * 0.9f), 3 * dp);
+                    glow(g, smoke, sx + t * 30 * z, sy - t * 50 * z, rad * 2.4f, (1 - t) * 0.75f);
                     break;
                 }
                 case Effects.SPARK:
                     g.color(0xFFFFFFC0);
-                    g.fillCircle(sx, sy, 2.5f * z);
+                    g.fillCircle(sx, sy, Math.max(2.5f * z, 1.2f * dp));
                     break;
                 default:
             }
@@ -535,62 +948,53 @@ public final class WorldView {
 
     private void overlays(Gfx g, Camera cam) {
         float z = cam.zoom;
-        float cs = Region.SECT * Tile.SIZE;
+        placedN = 0;
         layers(g, cam);
-        // the infection as a stain over the sectors (from far out, and where the dead are only counted)
-        if (z < 0.5f && (overlay == OV_INFECTION || overlay == OV_FORCES)) {
-            int sx0 = Math.max(0, (int) (cam.x0() / cs)), sy0 = Math.max(0, (int) (cam.y0() / cs));
-            int sx1 = Math.min(w.sec.sw - 1, (int) (cam.x1() / cs)), sy1 = Math.min(w.sec.sh - 1, (int) (cam.y1() / cs));
-            for (int sy = sy0; sy <= sy1; sy++)
-                for (int sx = sx0; sx <= sx1; sx++) {
-                    int s = sy * w.sec.sw + sx;
-                    int zz = w.sec.zIn[s] + (z < 0.2f ? w.sp.secZ[s] : 0);
-                    if (zz <= 0) continue;
-                    float a = Math.min(0.62f, 0.12f + (float) Math.log10(1 + zz) * 0.16f);
-                    g.color(((int) (a * 255) << 24) | 0xC01818);
-                    g.fillRect(cam.toScreenX(sx * cs), cam.toScreenY(sy * cs), cs * z + 1, cs * z + 1);
-                }
+        // the infection as a soft red bleed over the sectors (from far out, and where the dead are only counted)
+        if (z < 0.55f && (overlay == OV_INFECTION || overlay == OV_FORCES)) {
+            // close in the dead are drawn one by one: the bleed only hints at those indoors
+            float a = z > 0.3f ? 0.25f + (0.55f - z) / 0.25f * 0.35f : z > 0.2f ? 0.6f + (0.3f - z) * 4 : 1;
+            infection.draw(g, cam, a * (overlay == OV_FORCES ? 0.6f : 1));
         }
         // hordes on the march
         for (Strategic.Horde h : w.strat.hordes) {
             if (!h.alive) continue;
             float sx = cam.toScreenX(h.x), sy = cam.toScreenY(h.y);
-            float rad = Math.max(8, (60 + (float) Math.sqrt(h.count) * 5) * z);
-            g.color(0x88B01818);
+            float rad = Math.max(10 * dp, (60 + (float) Math.sqrt(h.count) * 5) * z);
+            if (sx < -rad * 2 || sy < -rad * 2 || sx > cam.sw + rad * 2 || sy > cam.sh + rad * 2) continue;
+            glow(g, glowRed, sx, sy, rad * 3, 0.65f);
+            g.color(0x70901010);
             g.fillCircle(sx, sy, rad);
             g.color(0xFFFF6060);
-            g.strokeCircle(sx, sy, rad, 2);
-            if (h.target >= 0) {
-                g.color(0x80FF6060);
-                g.line(sx, sy, cam.toScreenX(h.tx), cam.toScreenY(h.ty), 1.5f);
-            }
-            g.color(0xFFFFFFFF);
-            g.text("Horde " + fmt(h.count), sx, sy - rad - 4, 12, Gfx.ALIGN_CENTER, true);
+            g.strokeCircle(sx, sy, rad, 1.6f * dp);
+            if (h.target >= 0) arrow(g, sx, sy, cam.toScreenX(h.tx), cam.toScreenY(h.ty), 0xC0FF7070, rad);
+            label(g, "Horde " + fmt(h.count), sx, sy - rad - 5 * dp, 12, 0xFFFFD0D0, Gfx.ALIGN_CENTER, true);
         }
         // refugee columns
         for (Strategic.Column c : w.strat.columns) {
             if (!c.alive) continue;
             float sx = cam.toScreenX(c.x), sy = cam.toScreenY(c.y);
-            g.color(0xFFF0F0F0);
-            g.fillCircle(sx, sy, Math.max(3, 14 * z));
+            float rad = Math.max(5 * dp, 14 * z);
+            g.color(0xFF0A1830);
+            g.fillCircle(sx, sy, rad + dp);
+            g.color(0xFFF0E6D0);
+            g.fillCircle(sx, sy, rad);
             g.color(0xFF3060A0);
-            g.strokeCircle(sx, sy, Math.max(3, 14 * z), 1.5f);
-            if (z < 0.6f) {
-                g.color(0xFFFFFFFF);
-                g.text(fmt(c.count) + " refugees", sx, sy - 8, 10, Gfx.ALIGN_CENTER, false);
-            }
+            g.strokeCircle(sx, sy, rad, 1.4f * dp);
+            if (z < 0.6f) label(g, people(c.count) + " refugees", sx, sy - rad - 4 * dp, 10.5f, 0xFFE8F0FF, Gfx.ALIGN_CENTER, false);
         }
         // the airliner wreck
         if (w.strat.crashX >= 0) {
             float sx = cam.toScreenX(w.strat.crashX), sy = cam.toScreenY(w.strat.crashY);
+            float k = Math.max(z, 0.4f * dp / 2);
             g.save();
             g.translate(sx, sy);
             g.rotate(0.6f);
             g.color(0xFFB8B8B0);
-            g.fillRect(-60 * z, -6 * z, 90 * z, 12 * z);
-            g.fillRect(-10 * z, -38 * z, 16 * z, 76 * z);
+            g.fillRect(-60 * k, -6 * k, 90 * k, 12 * k);
+            g.fillRect(-10 * k, -38 * k, 16 * k, 76 * k);
             g.color(0xFF303030);
-            g.fillRect(30 * z, -6 * z, 40 * z, 12 * z);
+            g.fillRect(30 * k, -6 * k, 40 * k, 12 * k);
             g.restore();
         }
         // facilities: icons, greyed when overrun
@@ -601,13 +1005,16 @@ public final class WorldView {
                     if (z < 0.15f) continue;
                 }
                 if (z < 0.06f && f.kind != Region.F_POWER && f.kind != Region.F_BASE && f.kind != Region.F_PRISON) continue;
+                if (z < 0.12f && (f.kind == Region.F_FIRE || f.kind == Region.F_FUEL || f.kind == Region.F_WATER || f.kind == Region.F_PHONE || f.kind == Region.F_FOODW)) continue;
                 float sx = cam.toScreenX(f.x), sy = cam.toScreenY(f.y);
-                if (sx < -30 || sy < -30 || sx > cam.sw + 30 || sy > cam.sh + 30) continue;
+                if (sx < -30 * dp || sy < -30 * dp || sx > cam.sw + 30 * dp || sy > cam.sh + 30 * dp) continue;
                 boolean on = w.strat.online[f.id];
-                facilityIcon(g, f.kind, sx, sy, on, z < 0.12f ? 9 : 12);
+                float s = (z < 0.12f ? 7.5f : 9.5f) * dp;
+                facilityIcon(g, f.kind, sx, sy, on, s);
                 if (z > 0.35f && names) {
-                    g.color(on ? 0xEEFFFFFF : 0xEEFF7070);
-                    g.text(f.name + (on ? "" : " (overrun)"), sx, sy + 22, 10, Gfx.ALIGN_CENTER, false);
+                    String fn = on ? f.name : f.name + " (overrun)";
+                    float tw = g.textWidth(fn, 10.5f * dp, false), ly = sy + s + 12 * dp;
+                    if (place(sx - tw / 2, ly - 10 * dp, sx + tw / 2, ly + 3 * dp)) label(g, fn, sx, ly, 10.5f, on ? 0xFFFFFFFF : 0xFFFF8A80, Gfx.ALIGN_CENTER, false);
                 }
             }
         }
@@ -617,70 +1024,154 @@ public final class WorldView {
                 if (!s.alive) continue;
                 float[] p = w.sq.where(s);
                 float sx = cam.toScreenX(p[0]), sy = cam.toScreenY(p[1]);
-                if (sx < -20 || sy < -20 || sx > cam.sw + 20 || sy > cam.sh + 20) continue;
+                if (sx < -20 * dp || sy < -20 * dp || sx > cam.sw + 20 * dp || sy > cam.sh + 20 * dp) continue;
                 if (s.order == Squads.O_IDLE && z < 0.08f) continue;
-                int col = s.faction == Ents.COP ? 0xFF3B6FD8 : 0xFF5D7040;
-                g.color(0xFF101010);
-                g.fillRect(sx - 6, sy - 4, 12, 8);
+                int col = s.faction == Ents.COP ? 0xFF3B6FD8 : 0xFF8A8250;
+                float hw = 6 * dp, hh = 4 * dp;
+                g.color(0xFF0C0C0C);
+                g.fillRect(sx - hw - dp, sy - hh - dp, hw * 2 + 2 * dp, hh * 2 + 2 * dp);
                 g.color(col);
-                g.fillRect(sx - 5, sy - 3, 10, 6);
+                g.fillRect(sx - hw, sy - hh, hw * 2, hh * 2);
+                g.color(0xE0FFFFFF);
+                g.line(sx - hw, sy - hh, sx + hw, sy + hh, Math.max(1, 0.8f * dp));
                 if (s == selected) {
                     g.color(0xFFFFE040);
-                    g.strokeRect(sx - 8, sy - 6, 16, 12, 2);
+                    g.strokeRect(sx - hw - 3 * dp, sy - hh - 3 * dp, hw * 2 + 6 * dp, hh * 2 + 6 * dp, 1.6f * dp);
                 }
             }
         }
         // calls and the cordon
-        if (z < 0.9f && z > 0.05f) {
+        if (z < 0.55f && z > 0.04f) {
+            // close in the fight itself shows; further out a pulsing ring marks each call, the dead counted there
             float pulse = 0.5f + 0.5f * (float) Math.sin(time * 4);
             for (Dispatch.Incident in : w.disp.incidents) {
                 if (!in.open) continue;
                 float sx = cam.toScreenX(in.x), sy = cam.toScreenY(in.y);
-                if (sx < -40 || sy < -40 || sx > cam.sw + 40 || sy > cam.sh + 40) continue;
-                g.color(((int) (120 + pulse * 120) << 24) | (in.army ? 0x80C040 : 0xFF4040));
-                g.strokeCircle(sx, sy, 10 + pulse * 4, 2);
-                if (z > 0.06f) {
-                    g.color(0xFFFFFFFF);
-                    g.text(in.zombies + "", sx, sy + 4, 10, Gfx.ALIGN_CENTER, true);
-                }
+                if (sx < -40 * dp || sy < -40 * dp || sx > cam.sw + 40 * dp || sy > cam.sh + 40 * dp) continue;
+                int col = in.army ? 0xFFE0A030 : 0xFFFF4848;
+                boolean big = in.zombies > 0;
+                float rr = (big ? 9 + pulse * 3 : 5 + pulse * 2) * dp;
+                if (!place(sx - rr, sy - rr, sx + rr, sy + rr)) continue;
+                g.color(MapPainter.alpha(col, 0.25f + pulse * 0.2f));
+                g.fillCircle(sx, sy, rr);
+                g.color(col);
+                g.strokeCircle(sx, sy, rr, 1.8f * dp);
+                if (big && z > 0.06f) label(g, in.zombies >= 1000 ? (in.zombies / 1000) + "k" : in.zombies + "", sx, sy + 4 * dp, 11, 0xFFFFFFFF, Gfx.ALIGN_CENTER, true);
             }
         }
-        if (z > 0.06f) for (Dispatch.Post p : w.disp.posts) {
+        if (z > 0.2f) for (Dispatch.Post p : w.disp.posts) {
             float sx = cam.toScreenX(p.x), sy = cam.toScreenY(p.y);
-            g.color(p.squad >= 0 ? 0xFF4F8CFF : 0x884F8CFF);
-            g.line(sx - p.fy * 14, sy + p.fx * 14, sx + p.fy * 14, sy - p.fx * 14, 3);
+            if (sx < -30 * dp || sy < -30 * dp || sx > cam.sw + 30 * dp || sy > cam.sh + 30 * dp) continue;
+            float l = 9 * dp;
+            g.color(0xFF0A1430);
+            g.line(sx - p.fy * l, sy + p.fx * l, sx + p.fy * l, sy - p.fx * l, 4.5f * dp);
+            g.color(p.squad >= 0 ? 0xFF5A96FF : 0xFF5070A0);
+            g.line(sx - p.fy * l, sy + p.fx * l, sx + p.fy * l, sy - p.fx * l, 2.8f * dp);
         }
-        // the selected squad's goal
+        // the selected squad's goal: a flag
         if (selected != null && selected.alive) {
             float[] p = w.sq.where(selected);
-            g.color(0xCCFFE040);
-            g.line(cam.toScreenX(p[0]), cam.toScreenY(p[1]), cam.toScreenX(selected.gx), cam.toScreenY(selected.gy), 1.5f);
-            g.strokeCircle(cam.toScreenX(selected.gx), cam.toScreenY(selected.gy), 8, 2);
+            float gx = cam.toScreenX(selected.gx), gy = cam.toScreenY(selected.gy);
+            g.color(0xA0FFE040);
+            dashedLine(g, cam.toScreenX(p[0]), cam.toScreenY(p[1]), gx, gy, 1.5f * dp, 6 * dp);
+            flag(g, gx, gy, 0xFFFFE040);
         }
-        // place names
+        // place names: the most important first, and none on top of another
         if (names) {
-            for (Region.Settlement s : w.r.settlements) {
-                float sx = cam.toScreenX(s.cx * 16f), sy = cam.toScreenY(s.cy * 16f);
-                if (sx < -100 || sy < -40 || sx > cam.sw + 100 || sy > cam.sh + 40) continue;
-                float size;
-                if (s.kind == Region.S_CITY) size = z < 0.5f ? 22 : 0;
-                else if (s.kind == Region.S_TOWN || s.kind == Region.S_BASE || s.kind == Region.S_PRISON) size = z < 0.4f ? 15 : 0;
-                else size = z < 0.4f && z > 0.05f ? 11 : 0;
-                if (size == 0) continue;
-                String label = s.name;
-                if (s.kind == Region.S_CITY || s.kind == Region.S_TOWN) {
-                    int zz = w.stats.zBySettlement[s.id];
-                    if (z < 0.2f && (s.kind == Region.S_CITY || z > 0.04f)) label += " " + people(w.stats.popBySettlement[s.id]);
-                    if (w.gov.evacuating(s.id)) label += "  (evacuating)";
-                    else if (zz > 0 && z < 0.2f) label += "  (" + people(zz) + " dead)";
+            for (int pass = 0; pass < 4; pass++)
+                for (Region.Settlement s : w.r.settlements) {
+                    int rank = s.capital ? 0 : s.kind == Region.S_CITY ? 1 : s.kind == Region.S_TOWN || s.kind == Region.S_BASE || s.kind == Region.S_PRISON ? 2 : 3;
+                    if (rank != pass) continue;
+                    float sx = cam.toScreenX(s.cx * 16f), sy = cam.toScreenY(s.cy * 16f);
+                    if (sx < -150 * dp || sy < -40 * dp || sx > cam.sw + 150 * dp || sy > cam.sh + 40 * dp) continue;
+                    float size;
+                    if (s.kind == Region.S_CITY) size = z < 0.5f ? (s.capital ? 16 : 14.5f) : 0;
+                    else if (rank == 2) size = z < 0.4f && z > 0.03f ? 12 : 0;
+                    else size = z < 0.4f && z > 0.07f ? 10.5f : 0;
+                    if (size == 0) continue;
+                    String label = s.capital ? "★ " + s.name : s.name;
+                    boolean two = (s.kind == Region.S_CITY || s.kind == Region.S_TOWN) && z < 0.2f && (s.kind == Region.S_CITY || z > 0.045f);
+                    float tw = g.textWidth(label, size * dp, true);
+                    if (!place(sx - tw / 2 - 2 * dp, sy - size * dp, sx + tw / 2 + 2 * dp, sy + (two ? 12 * dp : 3 * dp))) continue;
+                    label(g, label, sx, sy, size, s.kind == Region.S_CITY ? 0xFFFFFFFF : 0xFFE8E8E8, Gfx.ALIGN_CENTER, true);
+                    if (two) {
+                        // a second line: how many live there, and how many of the dead
+                        int zz = w.stats.zBySettlement[s.id];
+                        String sub = people(w.stats.popBySettlement[s.id]);
+                        float sy2 = sy + (size * 0.4f + 11) * dp;
+                        if (w.gov.evacuating(s.id)) {
+                            label(g, sub + "  evacuating", sx, sy2, 10, 0xFFA0C8FF, Gfx.ALIGN_CENTER, false);
+                        } else if (zz > 0) {
+                            float t1 = g.textWidth(sub + "  ", 10 * dp, false), t2 = g.textWidth(people(zz) + " dead", 10 * dp, true);
+                            float left = sx - (t1 + t2) / 2;
+                            label(g, sub, left, sy2, 10, 0xFFE0E0E0, Gfx.ALIGN_LEFT, false);
+                            label(g, people(zz) + " dead", left + t1, sy2, 10, 0xFFFF7A70, Gfx.ALIGN_LEFT, true);
+                        } else label(g, sub, sx, sy2, 10, 0xFFE0E0E0, Gfx.ALIGN_CENTER, false);
+                    }
                 }
-                if (s.capital) label = "\u2605 " + label;
-                g.color(0xA0000000);
-                g.text(label, sx + 1.5f, sy + 1.5f, size, Gfx.ALIGN_CENTER, true);
-                g.color(0xFFFFFFFF);
-                g.text(label, sx, sy, size, Gfx.ALIGN_CENTER, true);
-            }
         }
+    }
+
+    // labels already placed this frame (x0, y0, x1, y1 each), so the next ones don't land on them
+    private final float[] placed = new float[4 * 256];
+    private int placedN;
+
+    /** Takes a screen rectangle for a label if it's free; false if it would overlap one already placed. */
+    boolean place(float x0, float y0, float x1, float y1) {
+        for (int i = 0; i < placedN; i++) {
+            int k = i * 4;
+            if (x0 < placed[k + 2] && x1 > placed[k] && y0 < placed[k + 3] && y1 > placed[k + 1]) return false;
+        }
+        if (placedN < 256) {
+            int k = placedN * 4;
+            placed[k] = x0;
+            placed[k + 1] = y0;
+            placed[k + 2] = x1;
+            placed[k + 3] = y1;
+            placedN++;
+        }
+        return true;
+    }
+
+    /** An arrow from a point to another, starting outside a radius. */
+    void arrow(Gfx g, float x, float y, float tx, float ty, int color, float startR) {
+        float dx = tx - x, dy = ty - y, dl = (float) Math.sqrt(dx * dx + dy * dy);
+        if (dl < startR + 12 * dp) return;
+        float ux = dx / dl, uy = dy / dl;
+        float ax = x + ux * startR, ay = y + uy * startR;
+        g.color(color);
+        g.line(ax, ay, tx, ty, 2 * dp);
+        float ah = 8 * dp;
+        poly[0] = tx;
+        poly[1] = ty;
+        poly[2] = tx - ux * ah - uy * ah * 0.55f;
+        poly[3] = ty - uy * ah + ux * ah * 0.55f;
+        poly[4] = tx - ux * ah + uy * ah * 0.55f;
+        poly[5] = ty - uy * ah - ux * ah * 0.55f;
+        g.fillPoly(poly, 3);
+    }
+
+    /** A little flag on a pole, planted at a point (an order's goal). */
+    void flag(Gfx g, float x, float y, int color) {
+        float h = 16 * dp;
+        g.color(0xC0000000);
+        g.fillCircle(x, y, 2.5f * dp);
+        g.line(x, y, x, y - h, 2.6f * dp);
+        g.color(0xFFF0F0F0);
+        g.line(x, y, x, y - h, 1.4f * dp);
+        poly[0] = x;
+        poly[1] = y - h;
+        poly[2] = x + 10 * dp;
+        poly[3] = y - h + 3.5f * dp;
+        poly[4] = x;
+        poly[5] = y - h + 7 * dp;
+        g.color(0xC0000000);
+        g.fillPoly(poly, 3);
+        poly[2] -= dp;
+        poly[1] += dp * 0.6f;
+        poly[5] -= dp * 0.6f;
+        g.color(color);
+        g.fillPoly(poly, 3);
     }
 
     // ------------------------------------------------------------------ the national map's layers
@@ -694,47 +1185,31 @@ public final class WorldView {
         Sectors sec = w.sec;
         int sx0 = Math.max(0, (int) (cam.x0() / cs)), sy0 = Math.max(0, (int) (cam.y0() / cs));
         int sx1 = Math.min(sec.sw - 1, (int) (cam.x1() / cs)), sy1 = Math.min(sec.sh - 1, (int) (cam.y1() / cs));
-        if (overlay == OV_FORCES) {
-            g.color(0x70000000);
+        if (overlay == OV_FORCES || overlay == OV_UTIL || overlay == OV_SUPPLY) {
+            g.color(0x80000000);
             g.fillRect(0, 0, g.width(), g.height());
         }
         if (overlay == OV_TRUST || overlay == OV_DEATHS || overlay == OV_PEAK || overlay == OV_UTIL) {
-            for (int sy = sy0; sy <= sy1; sy++)
-                for (int sx = sx0; sx <= sx1; sx++) {
-                    int s = sy * sec.sw + sx;
-                    int c = 0;
-                    if (overlay == OV_TRUST) {
-                        float p = sec.panic[s];
-                        if (p > 0.02f && sec.home[s] > 0) c = ((int) (40 + p * 170) << 24) | 0xF08020;
-                    } else if (overlay == OV_DEATHS) {
-                        float d = w.director.deaths[s] + sec.bodies[s];
-                        if (d > 0) c = ((int) Math.min(220, 50 + Math.log10(1 + d) * 45) << 24) | 0x9030C0;
-                    } else if (overlay == OV_PEAK) {
-                        float p = w.director.peak[s];
-                        if (p > 0) c = ((int) Math.min(220, 50 + Math.log10(1 + p) * 45) << 24) | (p > 1000 ? 0xFF3010 : 0xFFA020);
-                    } else if (sec.home[s] > 0) {
-                        boolean lit = w.strat.lit(s);
-                        c = lit ? 0x3040C040 : 0x90100808;
-                    }
-                    if (c != 0) {
-                        g.color(c);
-                        g.fillRect(cam.toScreenX(sx * cs), cam.toScreenY(sy * cs), cs * z + 1, cs * z + 1);
-                    }
-                }
+            heat.kindFor(overlay);
+            heat.draw(g, cam, 1);
         }
         if (overlay == OV_UTIL) utilities(g, cam);
         if (overlay == OV_SUPPLY) supplies(g, cam);
         // state borders and names from far out
         if (z < 0.2f && w.r.states.size() > 1) {
-            g.color(0x90FFFFFF);
-            for (int sy = sy0; sy <= sy1; sy++)
-                for (int sx = sx0; sx <= sx1; sx++) {
-                    int s = sy * sec.sw + sx;
-                    int st = w.roles.stateOfSector(s);
-                    float x = cam.toScreenX(sx * cs), y = cam.toScreenY(sy * cs), len = cs * z;
-                    if (sx + 1 < sec.sw && w.roles.stateOfSector(s + 1) != st) dashed(g, x + len, y, x + len, y + len);
-                    if (sy + 1 < sec.sh && w.roles.stateOfSector(s + sec.sw) != st) dashed(g, x, y + len, x + len, y + len);
-                }
+            float lw = 1.4f * dp;
+            for (int pass = 0; pass < 2; pass++) {
+                g.color(pass == 0 ? 0x80000000 : 0xB0F0E8D8);
+                for (int sy = sy0; sy <= sy1; sy++)
+                    for (int sx = sx0; sx <= sx1; sx++) {
+                        int s = sy * sec.sw + sx;
+                        int st = w.roles.stateOfSector(s);
+                        float x = cam.toScreenX(sx * cs), y = cam.toScreenY(sy * cs), len = cs * z;
+                        float o = pass == 0 ? dp * 0.8f : 0;
+                        if (sx + 1 < sec.sw && w.roles.stateOfSector(s + 1) != st) dashedLine(g, x + len + o, y + o, x + len + o, y + len + o, pass == 0 ? lw * 1.8f : lw, 5 * dp);
+                        if (sy + 1 < sec.sh && w.roles.stateOfSector(s + sec.sw) != st) dashedLine(g, x + o, y + len + o, x + len + o, y + len + o, pass == 0 ? lw * 1.8f : lw, 5 * dp);
+                    }
+            }
             if (z < 0.08f) {
                 if (stateX == null) {
                     int ns = w.r.states.size();
@@ -754,35 +1229,57 @@ public final class WorldView {
                     }
                 }
                 for (Region.State st : w.r.states) {
-                    g.color(0x70FFFFFF);
-                    g.text(st.name.toUpperCase(), cam.toScreenX(stateX[st.id]), cam.toScreenY(stateY[st.id]) + 30, 16, Gfx.ALIGN_CENTER, true);
+                    label(g, spaced(st.name.toUpperCase()), cam.toScreenX(stateX[st.id]), cam.toScreenY(stateY[st.id]) + 34 * dp, 12, 0x90F0E8D8, Gfx.ALIGN_CENTER, true);
                 }
             }
         }
     }
 
-    private static void dashed(Gfx g, float x1, float y1, float x2, float y2) {
-        float dx = x2 - x1, dy = y2 - y1, len = (float) Math.sqrt(dx * dx + dy * dy);
-        int n = Math.max(1, (int) (len / 6));
-        for (int i = 0; i < n; i += 2) g.line(x1 + dx * i / n, y1 + dy * i / n, x1 + dx * (i + 1) / n, y1 + dy * (i + 1) / n, 1.5f);
+    private final StringBuilder spacedSb = new StringBuilder();
+
+    /** Letters spaced out, the way a map names a region. */
+    private String spaced(String s) {
+        spacedSb.setLength(0);
+        for (int i = 0; i < s.length(); i++) {
+            if (i > 0) spacedSb.append(' ');
+            spacedSb.append(s.charAt(i));
+        }
+        return spacedSb.toString();
     }
 
-    /** Power, water and telephones for every town: a coloured dot for each. */
+    static void dashedLine(Gfx g, float x1, float y1, float x2, float y2, float lw, float dash) {
+        float dx = x2 - x1, dy = y2 - y1, len = (float) Math.sqrt(dx * dx + dy * dy);
+        int n = Math.max(1, (int) (len / dash));
+        for (int i = 0; i < n; i += 2) g.line(x1 + dx * i / n, y1 + dy * i / n, x1 + dx * (i + 1) / n, y1 + dy * (i + 1) / n, lw);
+    }
+
+    private boolean[] waterNet, phoneNet;
+    private float netT = -10;
+
+    /** Power, water and telephones for every town: a disc for each, with a ring when it's working. */
     private void utilities(Gfx g, Camera cam) {
-        boolean[] water = network(Region.F_WATER), phone = network(Region.F_PHONE);
+        if (time - netT > 1 || waterNet == null) {
+            waterNet = network(Region.F_WATER);
+            phoneNet = network(Region.F_PHONE);
+            netT = time;
+        }
+        float r = 7 * dp;
         for (Region.Settlement s : w.r.settlements) {
             if (s.kind != Region.S_CITY && s.kind != Region.S_TOWN) continue;
-            float x = cam.toScreenX(s.cx * 16f), y = cam.toScreenY(s.cy * 16f) + 14;
-            boolean[] on = {s.grid < 0 || w.strat.gridOn[s.grid], s.water < 0 || s.water >= water.length || water[s.water], s.phone < 0 || s.phone >= phone.length || phone[s.phone]};
-            String[] l = {"P", "W", "T"};
+            float x = cam.toScreenX(s.cx * 16f), y = cam.toScreenY(s.cy * 16f) + 22 * dp;
+            if (x < -40 * dp || y < -40 * dp || x > cam.sw + 40 * dp || y > cam.sh + 40 * dp) continue;
             for (int k = 0; k < 3; k++) {
-                float cx = x + (k - 1) * 16;
-                g.color(0xD0000000);
-                g.fillCircle(cx, y, 8);
-                g.color(on[k] ? 0xFF40C040 : 0xFFE03030);
-                g.fillCircle(cx, y, 6.5f);
-                g.color(0xFF000000);
-                g.text(l[k], cx, y + 3.5f, 9, Gfx.ALIGN_CENTER, true);
+                boolean on = k == 0 ? s.grid < 0 || w.strat.gridOn[s.grid] : k == 1 ? s.water < 0 || s.water >= waterNet.length || waterNet[s.water]
+                        : s.phone < 0 || s.phone >= phoneNet.length || phoneNet[s.phone];
+                float cx = x + (k - 1) * r * 2.4f;
+                g.color(0xE0000000);
+                g.fillCircle(cx, y, r + 1.5f * dp);
+                g.color(on ? 0xFF3A9A48 : 0xFF8A2020);
+                g.fillCircle(cx, y, r);
+                g.color(on ? 0xFF9AF0A0 : 0xFFFF7060);
+                g.strokeCircle(cx, y, r, 1.2f * dp);
+                g.color(0xFFFFFFFF);
+                g.text(k == 0 ? "P" : k == 1 ? "W" : "T", cx, y + r * 0.42f, r * 1.15f, Gfx.ALIGN_CENTER, true);
             }
         }
     }
@@ -796,56 +1293,66 @@ public final class WorldView {
         return on;
     }
 
+    private static final int[] SUPPLY_COL = {0xFFE0C040, 0xFF60C060, 0xFFC08040};
+
     /** Ammunition, food and fuel at each place that keeps them, as bars. */
     private void supplies(Gfx g, Camera cam) {
+        float bw = 5 * dp, bh = 20 * dp, gap = 2 * dp;
         for (Region.Facility f : w.r.facilities) {
             float tot = f.ammo + f.food + f.fuel;
             if (tot <= 0 && f.kind != Region.F_POLICE && f.kind != Region.F_BASE) continue;
             float x = cam.toScreenX(f.x), y = cam.toScreenY(f.y);
-            if (x < -30 || y < -30 || x > cam.sw + 30 || y > cam.sh + 30) continue;
-            float[] v = {f.ammo, f.food, f.fuel};
-            int[] col = {0xFFE0C040, 0xFF60C060, 0xFFB07030};
-            g.color(0xC0000000);
-            g.fillRect(x - 14, y - 26, 28, 22);
+            if (x < -30 * dp || y < -30 * dp || x > cam.sw + 30 * dp || y > cam.sh + 30 * dp) continue;
+            float pw = bw * 3 + gap * 4, ph = bh + gap * 2;
+            g.color(0xD0000000);
+            g.fillRoundRect(x - pw / 2, y - ph, pw, ph, 3 * dp);
             for (int k = 0; k < 3; k++) {
-                float h = (float) Math.min(1, Math.log10(1 + v[k]) / 5) * 18;
-                g.color(col[k]);
-                g.fillRect(x - 11 + k * 8, y - 6 - h, 6, Math.max(1, h));
+                float v = k == 0 ? f.ammo : k == 1 ? f.food : f.fuel;
+                float h = (float) Math.min(1, Math.log10(1 + v) / 5) * bh;
+                g.color(0x40FFFFFF);
+                g.fillRect(x - pw / 2 + gap + k * (bw + gap), y - gap - bh, bw, bh);
+                g.color(SUPPLY_COL[k]);
+                g.fillRect(x - pw / 2 + gap + k * (bw + gap), y - gap - h, bw, Math.max(1, h));
             }
             if (!w.strat.online(f.id)) {
                 g.color(0xFFFF4040);
-                g.line(x - 14, y - 26, x + 14, y - 4, 2);
+                g.line(x - pw / 2, y - ph, x + pw / 2, y, 2 * dp);
             }
         }
     }
 
-    /** A small key for the overlay, at (x, y). */
-    public void legend(Gfx g, float x, float y, float dp) {
+    /** A key for the overlay at (x, y), as wide as wdt; returns its height. */
+    public float legend(Gfx g, float x, float y, float d, float wdt) {
         String[] lines;
         int[] cols;
         switch (overlay) {
-            case OV_UTIL: lines = new String[]{"Power, water, phones", "working", "lost"}; cols = new int[]{0, 0xFF40C040, 0xFFE03030}; break;
-            case OV_SUPPLY: lines = new String[]{"Stocks", "ammunition", "food", "fuel"}; cols = new int[]{0, 0xFFE0C040, 0xFF60C060, 0xFFB07030}; break;
-            case OV_TRUST: lines = new String[]{"Public trust " + (int) w.gov.trust + "%", "fear in the streets"}; cols = new int[]{0, 0xFFF08020}; break;
-            case OV_FORCES: lines = new String[]{"Forces and fronts", "police", "army", "front line"}; cols = new int[]{0, 0xFF3B6FD8, 0xFF6E8A48, 0xFFFFD040}; break;
-            case OV_DEATHS: lines = new String[]{"Where they died", "people and the dead"}; cols = new int[]{0, 0xFF9030C0}; break;
-            case OV_PEAK: lines = new String[]{"Peak infection", "hundreds", "thousands"}; cols = new int[]{0, 0xFFFFA020, 0xFFFF3010}; break;
-            default: return;
+            case OV_INFECTION: lines = new String[]{"Infection", "the dead (counted)", "911 call: the dead there", "army called in"}; cols = new int[]{0, 0xFFC81E1E, 0xFFFF4848, 0xFFE0A030}; break;
+            case OV_UTIL: lines = new String[]{"Power (P), water (W), phones (T)", "working", "lost", "dark: no power"}; cols = new int[]{0, 0xFF3A9A48, 0xFF8A2020, 0xFF000000}; break;
+            case OV_SUPPLY: lines = new String[]{"Stocks at each depot", "ammunition", "food", "fuel"}; cols = new int[]{0, SUPPLY_COL[0], SUPPLY_COL[1], SUPPLY_COL[2]}; break;
+            case OV_TRUST: lines = new String[]{"Public trust " + (int) w.gov.trust + "%", "calm", "fear in the streets"}; cols = new int[]{0, 0x30F08020, 0xFFF08020}; break;
+            case OV_FORCES: lines = new String[]{"Forces and fronts", "police", "army", "front line"}; cols = new int[]{0, 0xFF3B6FD8, 0xFF8A8250, 0xFFFFD040}; break;
+            case OV_DEATHS: lines = new String[]{"Where they died", "a few", "up to " + people((int) heat.max)}; cols = new int[]{0, 0x509030C0, 0xFF9030C0}; break;
+            case OV_PEAK: lines = new String[]{"Most of the dead at once", "hundreds", "up to " + people((int) heat.max)}; cols = new int[]{0, 0xFFFFA020, 0xFFFF3010}; break;
+            default: return 0;
         }
-        float lh = 15 * dp, wdt = 150 * dp;
-        g.color(0xB0000000);
-        g.fillRoundRect(x, y, wdt, lines.length * lh + 8 * dp, 6 * dp);
+        float lh = 17 * d, pad = 8 * d;
+        float h = lines.length * lh + pad;
+        g.color(0xD8101318);
+        g.fillRoundRect(x, y, wdt, h, 8 * d);
         for (int k = 0; k < lines.length; k++) {
-            float ly = y + 4 * dp + (k + 1) * lh - 4 * dp;
+            float ly = y + pad / 2 + (k + 1) * lh - 5 * d;
             if (cols[k] != 0) {
-                g.color(cols[k]);
-                g.fillRect(x + 8 * dp, ly - 8 * dp, 9 * dp, 9 * dp);
+                g.color(cols[k] == 0xFF000000 ? 0xFF000000 : cols[k]);
+                g.fillRoundRect(x + 8 * d, ly - 9 * d, 10 * d, 10 * d, 2 * d);
+                g.color(0x60FFFFFF);
+                g.strokeRect(x + 8 * d, ly - 9 * d, 10 * d, 10 * d, 1);
             }
             g.color(k == 0 ? 0xFFFFFFFF : 0xFFD0D0D0);
-            g.text(lines[k], x + (cols[k] != 0 ? 22 : 8) * dp, ly, 11 * dp, Gfx.ALIGN_LEFT, k == 0);
+            String s = Ui.fit(g, lines[k], wdt - (cols[k] != 0 ? 30 : 16) * d, 12 * d, k == 0);
+            g.text(s, x + (cols[k] != 0 ? 24 : 8) * d, ly, 12 * d, Gfx.ALIGN_LEFT, k == 0);
         }
+        return h;
     }
-
 
     static void facilityIcon(Gfx g, int kind, float x, float y, boolean on, float s) {
         int bg;
@@ -854,16 +1361,18 @@ public final class WorldView {
             case Region.F_HOSPITAL: bg = 0xFFE8E8E8; break;
             case Region.F_POWER: bg = 0xFFE0B020; break;
             case Region.F_FUEL: bg = 0xFFB07030; break;
-            case Region.F_BASE: bg = 0xFF55663A; break;
-            case Region.F_ARMORY: bg = 0xFF6E7A48; break;
+            case Region.F_BASE: bg = 0xFF6E6A3A; break;
+            case Region.F_ARMORY: bg = 0xFF7A7448; break;
             case Region.F_PRISON: bg = 0xFF706860; break;
             case Region.F_FIRE: bg = 0xFFB83020; break;
-            case Region.F_FOB: bg = 0xFF6E8A48; break;
-            default: bg = 0xFF808080;
+            case Region.F_FOB: bg = 0xFF7A7A48; break;
+            case Region.F_WATER: bg = 0xFF3070C0; break;
+            case Region.F_PHONE: bg = 0xFF7A60B0; break;
+            default: bg = 0xFF707880;
         }
         if (!on) bg = 0xFF5A3030;
-        g.color(0xC0000000);
-        g.fillCircle(x, y, s + 1.5f);
+        g.color(0xE0000000);
+        g.fillCircle(x, y, s * 1.16f);
         g.color(bg);
         g.fillCircle(x, y, s);
         g.color(kind == Region.F_HOSPITAL ? 0xFFD02020 : 0xFFFFFFFF);
@@ -873,9 +1382,13 @@ public final class WorldView {
                 g.fillRect(x - s * 0.18f, y - s * 0.55f, s * 0.36f, s * 1.1f);
                 break;
             case Region.F_POWER: {
-                float[] p = {x + s * 0.15f, y - s * 0.7f, x - s * 0.4f, y + s * 0.1f, x, y + s * 0.1f, x - s * 0.15f, y + s * 0.7f, x + s * 0.4f, y - s * 0.1f, x, y - s * 0.1f};
+                float[] p = BOLT;
+                for (int i = 0; i < 6; i++) {
+                    BOLT_XY[i * 2] = x + p[i * 2] * s;
+                    BOLT_XY[i * 2 + 1] = y + p[i * 2 + 1] * s;
+                }
                 g.color(0xFF202020);
-                g.fillPoly(p, 6);
+                g.fillPoly(BOLT_XY, 6);
                 break;
             }
             case Region.F_POLICE:
@@ -883,15 +1396,31 @@ public final class WorldView {
                 break;
             case Region.F_BASE:
             case Region.F_ARMORY:
+            case Region.F_FOB:
                 g.text("★", x, y + s * 0.42f, s * 1.2f, Gfx.ALIGN_CENTER, true);
                 break;
             case Region.F_FUEL:
                 g.text("F", x, y + s * 0.42f, s * 1.2f, Gfx.ALIGN_CENTER, true);
                 break;
+            case Region.F_FIRE:
+                g.text("♨", x, y + s * 0.42f, s * 1.15f, Gfx.ALIGN_CENTER, true);
+                break;
+            case Region.F_WATER:
+                g.text("W", x, y + s * 0.42f, s * 1.1f, Gfx.ALIGN_CENTER, true);
+                break;
+            case Region.F_PHONE:
+                g.text("T", x, y + s * 0.42f, s * 1.1f, Gfx.ALIGN_CENTER, true);
+                break;
+            case Region.F_PRISON:
+                for (int i = -1; i <= 1; i++) g.fillRect(x + i * s * 0.35f - s * 0.07f, y - s * 0.55f, s * 0.14f, s * 1.1f);
+                break;
             default:
                 g.fillCircle(x, y, s * 0.3f);
         }
     }
+
+    private static final float[] BOLT = {0.15f, -0.7f, -0.4f, 0.1f, 0, 0.1f, -0.15f, 0.7f, 0.4f, -0.1f, 0, -0.1f};
+    private static final float[] BOLT_XY = new float[12];
 
     /** People counts as they read best: 950, 12,400, 450k, 2.3M. */
     public static String people(long n) {
@@ -904,5 +1433,168 @@ public final class WorldView {
         if (n >= 10000) return (n / 1000) + "k";
         if (n >= 1000) return (n / 1000) + "," + String.format("%03d", n % 1000);
         return Integer.toString(n);
+    }
+
+    // ------------------------------------------------------------------ soft maps
+
+    /**
+     * Something per sector as a small picture (two pixels a sector, blurred), scaled up over the map with smoothing:
+     * the infection's bleed, the dark of places without power, heatmaps. Rebuilt twice a second.
+     */
+    private final class SecMap {
+        int kind; // 0 infection, 1 unlit, 2+ heatmap of an overlay
+        int heatOf = -1;
+        GImage img;
+        int[] px;
+        float[] v, tmp;
+        int iw, ih;
+        float builtAt = -100;
+        float max;
+
+        SecMap(int kind) {
+            this.kind = kind;
+        }
+
+        void kindFor(int ov) {
+            if (heatOf != ov) {
+                heatOf = ov;
+                builtAt = -100;
+            }
+        }
+
+        void build() {
+            Sectors sec = w.sec;
+            if (img == null) {
+                iw = sec.sw * 2;
+                ih = sec.sh * 2;
+                px = new int[iw * ih];
+                v = new float[iw * ih];
+                tmp = new float[iw * ih];
+                img = pf.newImage(iw, ih);
+            }
+            max = 0;
+            for (int s = 0; s < sec.n; s++) {
+                float val = 0;
+                switch (kind) {
+                    case 0: {
+                        int zz = sec.zIn[s] + w.sp.secZ[s];
+                        val = zz <= 0 ? 0 : Math.min(0.8f, (float) Math.log10(1 + zz) * 0.19f);
+                        break;
+                    }
+                    case 1:
+                        val = sec.home[s] > 0 && !w.strat.lit(s) ? 1 : 0;
+                        break;
+                    default:
+                        if (heatOf == OV_TRUST) val = sec.home[s] > 0 ? Math.min(1, sec.panic[s]) : 0;
+                        else if (heatOf == OV_DEATHS) {
+                            float d = w.director.deaths[s] + sec.bodies[s];
+                            max = Math.max(max, d);
+                            val = d <= 0 ? 0 : Math.min(1, 0.2f + (float) Math.log10(1 + d) * 0.2f);
+                        } else if (heatOf == OV_PEAK) {
+                            float p = w.director.peak[s];
+                            max = Math.max(max, p);
+                            val = p <= 0 ? 0 : Math.min(1, 0.15f + (float) Math.log10(1 + p) * 0.2f);
+                        } else if (heatOf == OV_UTIL) val = sec.home[s] > 0 && !w.strat.lit(s) ? 0.8f : 0;
+                }
+                int x = (s % sec.sw) * 2, y = (s / sec.sw) * 2;
+                v[y * iw + x] = v[y * iw + x + 1] = v[(y + 1) * iw + x] = v[(y + 1) * iw + x + 1] = val;
+            }
+            blur();
+            blur();
+            for (int i = 0; i < px.length; i++) px[i] = colour(v[i]);
+            img.setPixels(px, iw, ih);
+            builtAt = time;
+        }
+
+        /** A 3x3 box blur. */
+        void blur() {
+            for (int y = 0; y < ih; y++)
+                for (int x = 0; x < iw; x++) {
+                    float s = 0;
+                    int n = 0;
+                    for (int dx = -1; dx <= 1; dx++) {
+                        int xx = x + dx;
+                        if (xx < 0 || xx >= iw) continue;
+                        s += v[y * iw + xx];
+                        n++;
+                    }
+                    tmp[y * iw + x] = s / n;
+                }
+            for (int y = 0; y < ih; y++)
+                for (int x = 0; x < iw; x++) {
+                    float s = 0;
+                    int n = 0;
+                    for (int dy = -1; dy <= 1; dy++) {
+                        int yy = y + dy;
+                        if (yy < 0 || yy >= ih) continue;
+                        s += tmp[yy * iw + x];
+                        n++;
+                    }
+                    v[y * iw + x] = s / n;
+                }
+        }
+
+        int colour(float a) {
+            if (a <= 0.004f) return 0;
+            switch (kind) {
+                case 0: return MapPainter.alpha(0xFFC81E1E, a);
+                case 1: return MapPainter.alpha(0xFF000005, a);
+                default:
+                    if (heatOf == OV_TRUST) return MapPainter.alpha(0xFFF08020, a * 0.75f);
+                    if (heatOf == OV_DEATHS) return MapPainter.alpha(0xFF9030C0, a * 0.85f);
+                    if (heatOf == OV_PEAK) return MapPainter.alpha(MapPainter.mix(0xFFFFB020, 0xFFFF2010, Math.min(1, a * 1.3f)), a * 0.85f);
+                    return MapPainter.alpha(0xFF000005, a);
+            }
+        }
+
+        void draw(Gfx g, Camera cam, float alpha) {
+            if (time - builtAt > 0.5f || time < builtAt) build();
+            float cs = Region.SECT * Tile.SIZE;
+            g.image(img, cam.toScreenX(0), cam.toScreenY(0), w.sec.sw * cs * cam.zoom, w.sec.sh * cs * cam.zoom, alpha);
+        }
+    }
+
+    /**
+     * Where people and the dead stand thickest, from the 64 px grid, as a soft glow under the dots at the middle
+     * zooms: so a crowd of hundreds reads as a crowd, not as a speckle. A window of cells round the view.
+     */
+    private final class CrowdMap {
+        static final int N = 224;
+        GImage img;
+        final int[] px = new int[N * N];
+        int ox, oy; // the window's first cell
+        float builtAt = -100;
+
+        void build(Camera cam) {
+            Spatial sp = w.sp;
+            if (img == null) img = pf.newImage(N, N);
+            int ccx = (int) (cam.cx / Spatial.CELL), ccy = (int) (cam.cy / Spatial.CELL);
+            ox = ccx - N / 2;
+            oy = ccy - N / 2;
+            for (int y = 0; y < N; y++)
+                for (int x = 0; x < N; x++) {
+                    int cx = ox + x, cy = oy + y;
+                    int c = 0;
+                    if (cx >= 0 && cy >= 0 && cx < sp.cw && cy < sp.ch) {
+                        int cell = cy * sp.cw + cx;
+                        int nz = sp.zEnd[cell] - sp.zStart[cell], nl = sp.lEnd[cell] - sp.lStart[cell];
+                        int n = nz + nl;
+                        if (n > 1) {
+                            float a = Math.min(0.8f, 0.12f + (float) Math.sqrt(n) * 0.11f);
+                            c = MapPainter.alpha(MapPainter.mix(0xFFE8D4A8, 0xFFB01E1E, nz / (float) n), a);
+                        }
+                    }
+                    px[y * N + x] = c;
+                }
+            img.setPixels(px, N, N);
+            builtAt = time;
+        }
+
+        void draw(Gfx g, Camera cam) {
+            if (time - builtAt > 0.2f || time < builtAt || Math.abs(cam.cx / Spatial.CELL - (ox + N / 2)) > N / 4 || Math.abs(cam.cy / Spatial.CELL - (oy + N / 2)) > N / 4) build(cam);
+            float a = cam.zoom > 0.45f ? (0.6f - cam.zoom) / 0.15f : 1;
+            float cpx = Spatial.CELL;
+            g.image(img, cam.toScreenX(ox * cpx), cam.toScreenY(oy * cpx), N * cpx * cam.zoom, N * cpx * cam.zoom, a * 0.85f);
+        }
     }
 }

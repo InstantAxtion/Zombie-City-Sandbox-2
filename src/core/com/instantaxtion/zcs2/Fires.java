@@ -323,41 +323,51 @@ public final class Fires extends Module {
     @Override
     public void draw(Gfx g, Camera cam, WorldView view) {
         Region r = w.r;
-        float z = cam.zoom, t = view.time;
-        float x0 = cam.x0() - 200, y0 = cam.y0() - 200, x1 = cam.x1() + 200, y1 = cam.y1() + 200;
+        float z = cam.zoom, t = view.time, dp = cam.dp;
+        float x0 = cam.x0() - 400, y0 = cam.y0() - 400, x1 = cam.x1() + 400, y1 = cam.y1() + 400;
         boolean dark = w.daylight() < 0.5f;
-        for (int b : burning) {
+        float wxv = (float) Math.cos(wind), wyv = (float) Math.sin(wind);
+        for (int k0 = 0; k0 < burning.size(); k0++) {
+            int b = burning.get(k0);
             float h = heat[b];
             if (h <= 0) continue;
             float wx = (r.bx[b] + r.bw[b] / 2f) * 16, wy = (r.by[b] + r.bh[b] / 2f) * 16;
             if (wx < x0 || wx > x1 || wy < y0 || wy > y1) continue;
             float sx = cam.toScreenX(wx), sy = cam.toScreenY(wy);
-            float size = (float) Math.sqrt(r.bw[b] * r.bh[b]) * 16 * z;
+            float size = Math.max((float) Math.sqrt(r.bw[b] * r.bh[b]) * 16 * z, 6 * dp);
+            float flick = 0.85f + 0.15f * (float) Math.sin(t * 11 + b * 1.7f) * (float) Math.sin(t * 7.3f + b);
             if (z < 0.2f) {
-                g.color(0xE0FF7020);
-                g.fillCircle(sx, sy, Math.max(2.5f, size * 0.4f));
+                view.glow(g, view.glowFire, sx, sy, size * 2.6f * flick, 0.9f);
+                g.color(0xFFFFD060);
+                g.fillCircle(sx, sy, Math.max(1.5f * dp, size * 0.12f));
                 continue;
             }
-            if (dark) {
-                g.color(((int) (h * 55)) << 24 | 0xFF8030);
-                g.fillCircle(sx, sy, size * 0.95f);
-            }
-            // smoke drifting downwind
-            float wxv = (float) Math.cos(wind), wyv = (float) Math.sin(wind);
-            for (int k = 0; k < 4; k++) {
-                float ph = ((t * 0.3f + k * 0.25f + b * 0.17f) % 1f);
-                g.color(((int) ((1 - ph) * 90 * h)) << 24 | 0x404040);
-                g.fillCircle(sx + wxv * ph * size * 2.5f, sy + wyv * ph * size * 2.5f - ph * 20 * z, size * (0.3f + ph * 0.5f));
+            // the glow on everything round it, stronger by night
+            view.glow(g, view.glowFire, sx, sy, size * (dark ? 3.4f : 2.2f) * flick, (dark ? 0.85f : 0.5f) * (0.4f + h * 0.6f));
+            // smoke rising and drifting downwind
+            for (int k = 0; k < 6; k++) {
+                float ph = ((t * 0.22f + k / 6f + b * 0.17f) % 1f);
+                float px = sx + wxv * ph * size * 3 + (float) Math.sin(t + k) * size * 0.1f, py = sy + wyv * ph * size * 3 - ph * size * 1.2f;
+                view.glow(g, view.smoke, px, py, size * (0.7f + ph * 1.8f), Math.min(1, (1 - ph) * (dark ? 0.75f : 1.1f) * (0.5f + h * 0.5f)));
             }
             // flames over the roof
-            int nf = 3 + (int) (h * 5);
+            int nf = 3 + (int) (h * 6);
             for (int k = 0; k < nf; k++) {
                 float fx = sx + (Rng.unit(b, k, 1) - 0.5f) * size * 0.8f, fy = sy + (Rng.unit(b, k, 2) - 0.5f) * size * 0.8f;
                 float fl = 0.6f + 0.4f * (float) Math.sin(t * 9 + k * 1.7f + b);
-                g.color(0xD0FF5010);
-                g.fillCircle(fx, fy, size * 0.14f * fl * (0.5f + h));
-                g.color(0xE0FFD040);
-                g.fillCircle(fx, fy - 2 * z, size * 0.07f * fl * (0.5f + h));
+                float fr = size * 0.15f * fl * (0.5f + h);
+                g.color(0xD8E04010);
+                g.fillCircle(fx, fy, fr);
+                g.color(0xE8FF9020);
+                g.fillCircle(fx - wxv * fr * 0.2f, fy - fr * 0.3f, fr * 0.65f);
+                g.color(0xF0FFE070);
+                g.fillCircle(fx - wxv * fr * 0.3f, fy - fr * 0.45f, fr * 0.3f);
+            }
+            // embers
+            g.color(0xE0FFB040);
+            for (int k = 0; k < 4; k++) {
+                float ph = ((t * 0.6f + k * 0.25f + b * 0.31f) % 1f);
+                g.fillCircle(sx + wxv * ph * size * 1.6f + (Rng.unit(b, k, 5) - 0.5f) * size * 0.6f, sy + wyv * ph * size * 1.6f - ph * size * 0.8f, Math.max(1, 0.9f * dp) * (1 - ph));
             }
         }
     }
