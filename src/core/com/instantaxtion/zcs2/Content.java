@@ -45,7 +45,7 @@ public final class Content {
 
     public static final class Scenario {
         public String id, name, mode, origin, goal, desc;
-        public int zombies, days, index;
+        public int zombies, days, index, hordes, hordeSize;
     }
 
     public final List<Weapon> weapons = new ArrayList<Weapon>();
@@ -217,6 +217,8 @@ public final class Content {
         sc.desc = s(b, "desc", "");
         sc.zombies = (int) f(b, "zombies", 0);
         sc.days = (int) f(b, "days", 0);
+        sc.hordes = (int) f(b, "hordes", 0);
+        sc.hordeSize = (int) f(b, "hordeSize", 800);
         sc.index = scenarios.size();
         scenarios.add(sc);
         scById.put(id, sc);

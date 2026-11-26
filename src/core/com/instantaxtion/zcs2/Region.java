@@ -162,7 +162,14 @@ public final class Region {
         rebuildNav(bx[i] - 2, by[i] - 2, bx[i] + bw[i] + 2, by[i] + bh[i] + 2);
     }
 
+    /** Map changes (rubble, blown bridges) for the painter to redraw: a counter and the changed tile rectangles. */
+    public int changes;
+    public final List<int[]> dirty = new ArrayList<int[]>();
+
     public void rebuildNav(int x0, int y0, int x1, int y1) {
+        changes++;
+        dirty.add(new int[]{x0, y0, x1, y1});
+        if (dirty.size() > 64) dirty.remove(0);
         int cx0 = Math.max(0, x0 / NAV), cy0 = Math.max(0, y0 / NAV);
         int cx1 = Math.min(navW - 1, x1 / NAV), cy1 = Math.min(navH - 1, y1 / NAV);
         for (int cy = cy0; cy <= cy1; cy++)

@@ -158,6 +158,16 @@ public final class Setup {
         if (o.equals("lab")) at = facility(w, Region.F_LAB);
         else if (o.equals("prison")) at = facility(w, Region.F_PRISON);
         else if (o.equals("festival")) at = facility(w, Region.F_PARK);
+        if (at != null && o.equals("prison")) {
+            originX = at.x;
+            originY = at.y;
+            // it started inside: the cell blocks, among the inmates
+            int s = r.sectorOfPx(at.x, at.y);
+            w.sec.zIn[s] += n;
+            w.sec.hot[s] = 30;
+            at = null;
+            o = "done";
+        }
         if (at != null) {
             originX = at.x;
             originY = at.y;
@@ -175,6 +185,16 @@ public final class Setup {
                     w.e.home[i] = s;
                     w.e.gx[i] = x;
                     w.e.gy[i] = y;
+                }
+            }
+            if (o.equals("lab")) {
+                // the staff who were bitten went home before anyone knew: hidden outbreaks round the city
+                int c = r.city().id;
+                java.util.List<Integer> homes = new java.util.ArrayList<Integer>();
+                for (int s = 0; s < w.sec.n; s++) if (w.sec.settlement[s] == c && w.sec.popIn[s] > 200) homes.add(s);
+                for (int k = 0; k < 6 && !homes.isEmpty(); k++) {
+                    int s = homes.get(Rng.hashInt(w.seed, k, 91, homes.size()));
+                    w.sec.inf[s] += 10 + Rng.hashInt(w.seed, k, 92, 14);
                 }
             }
             for (int k = 0; k < n; k++) {
@@ -249,12 +269,23 @@ public final class Setup {
             originX = r.city().cx * 16f;
             originY = r.city().cy * 16f;
         }
+        // hordes marching in from the region's edges
+        for (int k = 0; k < sc.hordes; k++) {
+            float m = r.px();
+            double ang = Rng.unit(w.seed, k, 301) * 6.283;
+            float x = m / 2 + (float) Math.cos(ang) * m * 0.46f, y = m / 2 + (float) Math.sin(ang) * m * 0.46f;
+            for (int a = 0; a < 60 && !r.walkablePx(x, y); a++) {
+                x += (m / 2 - x) * 0.04f;
+                y += (m / 2 - y) * 0.04f;
+            }
+            w.strat.addHorde(x, y, sc.hordeSize);
+        }
         if (sc.mode.equals("survivor")) {
             // you: somewhere near the start, not in it
             Content.Unit u = w.c.unit("survivor");
             float[] p = null;
             for (int a = 0; a < 100 && p == null; a++) {
-                float ang = a * 0.7f, d = 260 + a * 6;
+                float ang = a * 0.7f, d = 650 + a * 8;
                 float x = originX + (float) Math.cos(ang) * d, y = originY + (float) Math.sin(ang) * d;
                 int t = r.tileAtPx(x, y);
                 if (t == Tile.PAVEMENT || t == Tile.PLAZA || t == Tile.YARD) p = new float[]{x, y};

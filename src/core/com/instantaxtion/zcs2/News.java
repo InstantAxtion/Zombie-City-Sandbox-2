@@ -34,6 +34,11 @@ public final class News {
     }
 
     public void radio(String text, float x, float y, int kind) {
+        // the same message again within a few seconds: once is enough
+        for (int i = log.size() - 1; i >= Math.max(0, log.size() - 4); i--) {
+            Item it = log.get(i);
+            if (it.text.equals(text) && w.time - it.time < 12) return;
+        }
         add(new Item(text, x, y, kind, w.time));
     }
 

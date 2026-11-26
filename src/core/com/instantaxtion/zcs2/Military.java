@@ -88,16 +88,17 @@ public final class Military {
             supplyT = 90;
         }
         // outside help, growing with the crisis
-        if (w.gov.level >= 2 && waveT <= 0) {
+        int dead = w.totalZombies();
+        if (w.gov.level >= 2 && waveT <= 0 && dead > 40) {
             outsideWave("trooper", "patrol_car", 3, "State Police", Ents.COP);
             waveT = 150;
         }
-        if (w.gov.level >= 3 && guardT <= 0 && guardsArrived < 16) {
+        if (w.gov.level >= 3 && guardT <= 0 && guardsArrived < 16 && dead > 300) {
             outsideWave("guard", "army_truck", 4, "National Guard", Ents.SOLDIER);
             guardsArrived += 4;
             guardT = 200;
         }
-        if (w.gov.level >= 4 && regularT <= 0 && regularsArrived < 20) {
+        if (w.gov.level >= 4 && regularT <= 0 && regularsArrived < 20 && dead > 1500) {
             outsideWave("rifleman", "army_truck", 3, "Army", Ents.SOLDIER);
             outsideWave("gunner", "apc", 2, "Army", Ents.SOLDIER);
             armour();

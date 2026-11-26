@@ -322,6 +322,7 @@ public final class RegionGen {
                 double ang = Math.atan2(dy, dx);
                 float lim = R * (1 + 0.14f * n3.value((float) Math.cos(ang) * 1.7f + phase, (float) Math.sin(ang) * 1.7f + phase));
                 if (s.kind == Region.S_VILLAGE && (Math.abs(j) > 1 || Math.abs(k) > 1)) continue;
+                if (s.kind == Region.S_VILLAGE) lim *= 1.5f;
                 boolean ok = dx * dx + dy * dy <= lim * lim && r.in(x, y) && !Tile.water(r.t(x, y));
                 in[(j + kmax) * n + (k + kmax)] = ok;
             }

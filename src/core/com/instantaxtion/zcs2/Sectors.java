@@ -206,7 +206,7 @@ public final class Sectors {
             }
             // armed units clearing buildings, one room at a time
             if (arm >= 2 && zIn[s] > 0) {
-                int k = Math.min(zIn[s], stoch(arm * 0.035f, s * 7L + 5));
+                int k = Math.min(zIn[s], stoch(arm * 0.015f, s * 7L + 5));
                 zIn[s] -= k;
                 bodies[s] += k;
                 w.stats.killsBySide[sp.secSol[s] > sp.secCop[s] ? 2 : 1] += k;

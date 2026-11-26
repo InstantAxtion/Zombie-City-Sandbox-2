@@ -160,6 +160,8 @@ public final class Strategic {
             case Region.F_FUEL:
                 w.news.radio(f.name + " lost: vehicles there can't refuel", f.x, f.y, News.LOSS);
                 break;
+            case Region.F_LAB:
+                break;
             default:
                 w.news.radio(f.name + " overrun", f.x, f.y, News.LOSS);
         }
@@ -615,8 +617,9 @@ public final class Strategic {
     }
 
     private String timeSince() {
-        int mins = (int) (w.time / 60);
-        return mins / 24 + " days and " + mins % 24 + " hours";
+        int hours = (int) (w.time / 60), mins = (int) (w.time % 60);
+        if (hours < 24) return hours + (hours == 1 ? " hour and " : " hours and ") + mins + " minutes";
+        return hours / 24 + (hours / 24 == 1 ? " day and " : " days and ") + hours % 24 + " hours";
     }
 
     // ------------------------------------------------------------------ the scenario's goal

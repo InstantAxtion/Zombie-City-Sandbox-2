@@ -1,0 +1,133 @@
+package com.instantaxtion.zcs2;
+
+import android.app.Activity;
+import android.content.Context;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.media.AudioFormat;
+import android.media.AudioManager;
+import android.media.AudioTrack;
+import android.net.Uri;
+import android.os.Vibrator;
+import android.provider.MediaStore;
+import android.widget.Toast;
+
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+
+/** The phone: files, settings, sound (an AudioTrack fed by the game's mixer), vibration, sharing. */
+final class AndroidPlatform implements Platform {
+    private final Activity act;
+    private final SharedPreferences prefs;
+    private final Synth synth = new Synth();
+    private final Mixer mixer = new Mixer(synth);
+    private final short[][] tracks = new short[2][];
+    private volatile boolean audioOn = true;
+    private Thread audio;
+    private int wantTrack = -1;
+    private float wantVolume;
+
+    AndroidPlatform(Activity act) {
+        this.act = act;
+        prefs = act.getSharedPreferences("zcs2", Context.MODE_PRIVATE);
+        // the score takes a moment to make: do it out of the way
+        new Thread(new Runnable() {
+            public void run() {
+                tracks[0] = synth.music(0.15f);
+                tracks[1] = synth.music(0.85f);
+                if (wantTrack >= 0) mixer.setMusic(tracks[wantTrack], wantVolume);
+                for (String s : new String[]{"pistol", "rifle", "mg", "shotgun", "boom", "scream", "click"}) synth.get(s);
+            }
+        }, "synth").start();
+        startAudio();
+    }
+
+    void startAudio() {
+        audioOn = true;
+        if (audio != null) return;
+        audio = new Thread(new Runnable() {
+            public void run() {
+                int min = AudioTrack.getMinBufferSize(Synth.RATE, AudioFormat.CHANNEL_OUT_STEREO, AudioFormat.ENCODING_PCM_16BIT);
+                int frames = 1024;
+                AudioTrack t;
+                try {
+                    t = new AudioTrack(AudioManager.STREAM_MUSIC, Synth.RATE, AudioFormat.CHANNEL_OUT_STEREO,
+                            AudioFormat.ENCODING_PCM_16BIT, Math.max(min, frames * 8), AudioTrack.MODE_STREAM);
+                    t.play();
+                } catch (Throwable e) {
+                    return;
+                }
+                short[] buf = new short[frames * 2];
+                while (audioOn) {
+                    mixer.mix(buf, frames);
+                    t.write(buf, 0, buf.length);
+                }
+                t.stop();
+                t.release();
+            }
+        }, "audio");
+        audio.start();
+    }
+
+    void stopAudio() {
+        audioOn = false;
+        audio = null;
+    }
+
+    public GImage newImage(int w, int h) { return new AndroidImage(w, h); }
+
+    public float density() { return act.getResources().getDisplayMetrics().density; }
+
+    public InputStream openAsset(String name) throws IOException { return act.getAssets().open(name); }
+
+    public InputStream openRead(String name) throws IOException { return new FileInputStream(new File(act.getFilesDir(), name)); }
+
+    public OutputStream openWrite(String name) throws IOException { return new FileOutputStream(new File(act.getFilesDir(), name)); }
+
+    public boolean exists(String name) { return new File(act.getFilesDir(), name).exists(); }
+
+    public void delete(String name) { new File(act.getFilesDir(), name).delete(); }
+
+    public String pref(String key, String def) { return prefs.getString(key, def); }
+
+    public void setPref(String key, String value) { prefs.edit().putString(key, value).apply(); }
+
+    public void playSound(String name, float volume, float pan) { mixer.play(name, volume, pan); }
+
+    public void setMusic(int track, float volume) {
+        wantTrack = track;
+        wantVolume = volume * 0.6f;
+        short[] t = tracks[Math.max(0, Math.min(1, track))];
+        if (t != null) mixer.setMusic(t, wantVolume);
+    }
+
+    @SuppressWarnings("deprecation")
+    public void vibrate(int ms) {
+        try {
+            Vibrator v = (Vibrator) act.getSystemService(Context.VIBRATOR_SERVICE);
+            if (v != null) v.vibrate(ms);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    public void shareImage(GImage img) {
+        try {
+            String url = MediaStore.Images.Media.insertImage(act.getContentResolver(), ((AndroidImage) img).bitmap,
+                    "Zombie City 2 " + System.currentTimeMillis(), "Zombie City Sandbox 2");
+            if (url == null) throw new IllegalStateException();
+            Intent send = new Intent(Intent.ACTION_SEND);
+            send.setType("image/jpeg");
+            send.putExtra(Intent.EXTRA_STREAM, Uri.parse(url));
+            send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            act.startActivity(Intent.createChooser(send, "Share screenshot"));
+        } catch (Throwable e) {
+            Toast.makeText(act, "Couldn't save the screenshot", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    public void exit() { act.finish(); }
+}
