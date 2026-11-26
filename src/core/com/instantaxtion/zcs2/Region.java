@@ -10,17 +10,12 @@ public final class Region {
     public static final int SECT = 32;
     public static final int NAV = 2;   // tiles per navigation cell side
 
-    // building kinds
+    // building kinds (their names and looks are content.ini's [building], Data)
     public static final int B_HOUSE = 0, B_APARTMENT = 1, B_OFFICE = 2, B_TOWER = 3, B_SHOP = 4, B_WAREHOUSE = 5,
             B_FARMHOUSE = 6, B_BARN = 7, B_POLICE = 8, B_HOSPITAL = 9, B_POWER = 10, B_FUEL = 11, B_BARRACKS = 12,
             B_HANGAR = 13, B_PRISON = 14, B_LAB = 15, B_CHURCH = 16, B_SCHOOL = 17, B_MALL = 18, B_ARMORY = 19,
             B_DEPOT = 20, B_CELLBLOCK = 21, B_WATER = 22, B_PHONE = 23, B_FOODW = 24, B_FIRE = 25, B_HALL = 26,
             B_STATION = 27, B_TERMINAL = 28, B_DOCK = 29, B_GOV = 30, B_TENT = 31;
-    public static final String[] BNAMES = {"House", "Apartments", "Offices", "Tower", "Shop", "Warehouse", "Farmhouse",
-            "Barn", "Police station", "Hospital", "Power station", "Fuel depot", "Barracks", "Motor pool", "Prison",
-            "Research lab", "Church", "School", "Mall", "Guard armory", "Bus depot", "Cell block", "Water works",
-            "Telephone exchange", "Food warehouse", "Fire station", "City hall", "Railway station", "Terminal", "Dock warehouse",
-            "State house", "Tent"};
 
     // facility kinds
     public static final int F_POLICE = 0, F_HOSPITAL = 1, F_POWER = 2, F_FUEL = 3, F_BASE = 4, F_ARMORY = 5, F_PRISON = 6,

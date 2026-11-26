@@ -32,7 +32,7 @@ public final class NationShot {
         for (int i = 3; i < a.length; i++) seeds[i - 3] = Long.parseLong(a[i]);
         for (long seed : seeds) {
             Nation n = NationGen.generate(size, preset, seed, 2);
-            String base = "nation_" + size + "_" + RegionGen.PRESETS[preset].replace(' ', '_') + "_" + seed;
+            String base = "nation_" + size + "_" + Data.presetName(preset).replace(' ', '_') + "_" + seed;
             ImageIO.write(country(n), "png", new File(out, base + ".png"));
             ImageIO.write(capital(n, 4, 1.25f), "png", new File(out, base + "_capital.png"));
             ImageIO.write(centre(n), "png", new File(out, base + "_centre.png"));
@@ -111,7 +111,7 @@ public final class NationShot {
         g.setColor(new Color(0, 0, 0, 170));
         g.fillRect(0, 0, s, Math.max(18, s / 70) + 8);
         g.setColor(Color.WHITE);
-        g.drawString(RegionGen.PRESETS[n.preset] + " seed " + n.seed + ", " + n.size + " tiles (" + (int) (n.size / Nation.KM) + " km): " + summary(n), 6, Math.max(14, s / 90) + 4);
+        g.drawString(Data.presetName(n.preset) + " seed " + n.seed + ", " + n.size + " tiles (" + (int) (n.size / Nation.KM) + " km): " + summary(n), 6, Math.max(14, s / 90) + 4);
         g.dispose();
         return img;
     }

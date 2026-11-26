@@ -473,6 +473,424 @@ public final class Tests {
         r2.w.shutdown();
     }
 
+    // ------------------------------------------------------------------ director, editor and modding (1.4)
+
+    /** A session with painting, a squad, orders, panning and a stretch of fast-forward, ending at its own tick. */
+    static World seekSession(int size, long seed) {
+        World w = Setup.newGame(content, size, RegionGen.COAST, seed, content.scenario("lab_leak"), 2, Roles.GOD, 60000);
+        float ox = Setup.originX, oy = Setup.originY;
+        camOver(w, ox, oy);
+        steps(w, 20);
+        Actions.paint(w, ox + 200, oy, 200, 150, -1);
+        Squads.Squad s = Actions.squad(w, "swat", 6, ox - 150, oy);
+        steps(w, 30);
+        if (s != null) Actions.order(w, s, ox + 120, oy);
+        camOver(w, ox + 400, oy + 200);
+        steps(w, 30);
+        w.camDetail = false;
+        Actions.strategic(w, true);
+        for (int k = 0; k < 24; k++) w.step();
+        Actions.strategic(w, false);
+        camOver(w, ox, oy);
+        steps(w, 25);
+        return w;
+    }
+
+    static void seekExact(int size) throws Exception {
+        World w = seekSession(size, 91);
+        long end = w.tick;
+        // played straight through, the state at each checkpoint
+        long[] at = {end / 9, end / 4, end / 2, end * 3 / 5, end * 9 / 10, end};
+        long[] hash = new long[at.length], tick = new long[at.length];
+        Replay straight = Replay.of(content, w, 2);
+        for (int k = 0; k < at.length; k++) {
+            straight.runTo(at[k]);
+            hash[k] = Audit.hash(straight.w);
+            tick[k] = straight.w.tick;
+        }
+        check(hash[at.length - 1] == Audit.hash(w), "the replay itself came out different");
+        straight.w.shutdown();
+        // another, its snapshots squeezed into a small cap (so they thin out), then sought about in no order
+        Replay r = Replay.of(content, w, 2);
+        r.snapEvery = 4;
+        r.snapCap = 1 << 20;
+        r.runTo(end);
+        check(r.snaps.size() >= 3, "only " + r.snaps.size() + " snapshots");
+        check(r.snapBytes() <= r.snapCap || r.snaps.size() <= 2, "snapshots over their cap: " + r.snapBytes());
+        check(r.snapEvery > 4, "the snapshots never thinned out (" + r.snaps.size() + ", " + r.snapBytes() / 1024 + " KB)");
+        int[] order = {2, 0, 5, 1, 4, 3, 0, 5, 2};
+        int loads = 0;
+        for (int k : order) {
+            World old = r.seek(at[k]);
+            if (old != null) {
+                loads++;
+                old.shutdown();
+            }
+            check(r.w.tick == tick[k], "seek to " + at[k] + " landed on " + r.w.tick + ", not " + tick[k]);
+            check(Audit.hash(r.w) == hash[k], "seeking to tick " + at[k] + " (checkpoint " + k + ") came out different from playing straight through");
+            check(Audit.check(r.w).isEmpty(), "audit after a seek: " + Audit.check(r.w));
+        }
+        check(loads >= 4, "only " + loads + " seeks loaded a snapshot");
+        r.w.shutdown();
+        w.shutdown();
+    }
+
+    static void camPathCut() throws Exception {
+        Replay.CamPath p = new Replay.CamPath();
+        p.add(0, 100, 100, 1);
+        p.add(24000, 1100, 1100, 1);
+        p.add(12000, 1100, 100, 0.25f);
+        p.add(12010, 1100, 100, 0.25f); // within a game minute: replaces the key
+        check(p.size() == 3, "keys: " + p.size());
+        check(p.ticks.get(1) == 12010, "kept in order and replaced");
+        float[] a = p.at(0), b = p.at(12010), c = p.at(30000);
+        check(a[0] == 100 && a[1] == 100 && Math.abs(a[2] - 1) < 1e-4, "at the first key");
+        check(Math.abs(b[0] - 1100) < 0.01f && Math.abs(b[1] - 100) < 0.01f && Math.abs(b[2] - 0.25f) < 1e-4, "at the middle key: " + b[0] + "," + b[1] + "," + b[2]);
+        check(c[0] == 1100 && c[1] == 1100, "holds after the last");
+        float[] prev = p.at(0);
+        for (long t = 60; t <= 24000; t += 60) {
+            float[] q = p.at(t);
+            check(Math.abs(q[0] - prev[0]) < 40 && Math.abs(q[1] - prev[1]) < 40, "the path jumps at " + t);
+            check(q[2] > 0.2f && q[2] < 1.2f, "zoom out of range at " + t + ": " + q[2]);
+            prev = q;
+        }
+        // a director's cut: the replay with its path, saved and loaded again, still exact
+        World w = Setup.newGame(content, 768, RegionGen.COAST, 92, content.scenario("lab_leak"), 2, Roles.GOD, 60000);
+        camOver(w, Setup.originX, Setup.originY);
+        steps(w, 20);
+        Actions.paint(w, Setup.originX + 150, Setup.originY, 100, 100, -1);
+        steps(w, 20);
+        Replay r = Replay.of(content, w, 1);
+        r.path.add(0, Setup.originX, Setup.originY, 0.8f);
+        r.path.add(w.tick / 2, Setup.originX + 300, Setup.originY, 0.5f);
+        r.path.add(w.tick, Setup.originX + 300, Setup.originY + 300, 1.2f);
+        ByteArrayOutputStream bo = new ByteArrayOutputStream();
+        r.saveCut(bo);
+        Replay r2 = Replay.load(content, new ByteArrayInputStream(bo.toByteArray()), 1);
+        check(r2.path.size() == 3 && r2.path.ticks.get(1) == w.tick / 2 && r2.path.keys.get(2)[2] == 1.2f, "the camera path didn't come back");
+        r2.runTo(w.tick);
+        check(Audit.hash(r2.w) == Audit.hash(w), "a director's cut plays differently");
+        // a replay saved from a game has no path, and still loads
+        bo.reset();
+        Replay.save(w, bo);
+        Replay r3 = Replay.load(content, new ByteArrayInputStream(bo.toByteArray()), 1);
+        check(r3.path.size() == 0, "a path from nowhere");
+        r.w.shutdown();
+        r2.w.shutdown();
+        r3.w.shutdown();
+        w.shutdown();
+    }
+
+    /** A custom scenario (as the editor writes it), read back through content.ini's reader. */
+    static Content.Scenario custom(String id, String origin, int zombies, String goals, String... triggers) throws Exception {
+        Content.Scenario sc = new Content.Scenario();
+        sc.id = id;
+        sc.name = "Test " + id;
+        sc.mode = "sandbox";
+        sc.origin = origin;
+        sc.goal = "";
+        sc.desc = "a test";
+        sc.zombies = zombies;
+        sc.goals = goals;
+        for (String t : triggers) sc.triggers.add(t);
+        String bad = Script.check(content, sc);
+        check(bad == null, "the scenario doesn't read: " + bad);
+        java.util.List<Content.Scenario> l = content.addScenarios(new ByteArrayInputStream(sc.toIni().getBytes("UTF-8")), true);
+        check(l.size() == 1 && l.get(0).toIni().equals(sc.toIni()), "the scenario changed going through content.ini:\n" + sc.toIni() + "\n" + (l.isEmpty() ? "" : l.get(0).toIni()));
+        return l.get(0);
+    }
+
+    static boolean said(World w, String text) {
+        for (News.Item it : w.news.log) if (it.text.contains(text)) return true;
+        return false;
+    }
+
+    static void scriptTriggers() throws Exception {
+        Content.Scenario sc = custom("trig_test", "lab", 25, "",
+                "time:20 -> horde:0.3,0.3,1500",
+                "time:40 -> message:Riots reported in the north",
+                "time:60 -> weather:4",
+                "dead:0:3 -> strike:0.5,0.5",
+                "time:90 -> send:0.5,0.5",
+                "lost:9999 -> message:never");
+        World a = Setup.newGame(content, 768, RegionGen.COAST, 33, sc, 2, Roles.GOD, 60000);
+        check(a.script != null && a.script.triggers.size() == 6, "no script");
+        camOver(a, Setup.originX, Setup.originY);
+        int hordes0 = a.strat.hordes.size();
+        steps(a, 19);
+        check(!a.script.triggers.get(0).fired && a.strat.hordes.size() == hordes0, "fired early");
+        steps(a, 3);
+        check(a.script.triggers.get(0).fired, "the horde trigger didn't fire at 20 minutes");
+        check(a.strat.hordes.size() > hordes0, "no horde came");
+        steps(a, 20);
+        check(said(a, "Riots reported in the north"), "the message wasn't given");
+        steps(a, 20);
+        check(a.rules.v[Rules.WEATHER] == 4, "the weather didn't change: " + a.rules.v[Rules.WEATHER]);
+        // a save part way keeps what has fired and plays on exactly
+        ByteArrayOutputStream bo = new ByteArrayOutputStream();
+        SaveIO.save(a, bo);
+        World l = SaveIO.load(content, new ByteArrayInputStream(bo.toByteArray()), 2);
+        check(l.script != null, "the loaded game has no script");
+        for (int k = 0; k < 6; k++) check(l.script.triggers.get(k).fired == a.script.triggers.get(k).fired, "trigger " + k + "'s state was lost");
+        for (int k = 0; k < 40 * 20; k++) {
+            a.step();
+            l.step();
+        }
+        check(Audit.hash(l) == Audit.hash(a), "diverged after loading");
+        check(a.script.triggers.get(4).fired, "the formation wasn't sent");
+        boolean sent = false;
+        for (Forces.Formation f : a.forces.formations) if (f.alive && f.player) sent = true;
+        check(sent, "no formation is on its way");
+        check(!a.script.triggers.get(5).fired, "a trigger on a facility that doesn't exist fired");
+        // the script's actions aren't inputs: a replay rebuilds them from the scenario
+        for (Director.Event e : a.director.events) check(e.kind != Actions.HORDE && e.kind != Actions.SEND && e.kind != Actions.MESSAGE, "a scripted action was recorded");
+        Replay r = Replay.of(content, a, 2);
+        r.runTo(a.tick);
+        check(Audit.hash(r.w) == Audit.hash(a), "the replay of a scripted game came out different");
+        for (int k = 0; k < 6; k++) check(r.w.script.triggers.get(k).fired == a.script.triggers.get(k).fired, "trigger " + k + " differs in the replay");
+        // and the same game again fires the same way
+        World b = Setup.newGame(content, 768, RegionGen.COAST, 33, sc, 1, Roles.GOD, 60000);
+        camOver(b, Setup.originX, Setup.originY);
+        while (b.tick < a.tick) {
+            if (b.tick == 0) camOver(b, Setup.originX, Setup.originY);
+            b.step();
+        }
+        check(Audit.hash(b) == Audit.hash(a), "the same scripted game played differently");
+        a.shutdown();
+        l.shutdown();
+        r.w.shutdown();
+        b.shutdown();
+    }
+
+    static void scriptGoals() throws Exception {
+        // held for long enough: won
+        World w = Setup.newGame(content, 768, RegionGen.COAST, 34, custom("goal_days", "none", 0, "days:0.05"), 2, Roles.GOD, 60000);
+        steps(w, 70);
+        check(!w.ended, "ended before the time was up");
+        steps(w, 5);
+        check(w.ended && w.won, "holding on didn't win: " + w.endTitle);
+        check(w.script.progress() != null, "no progress line");
+        w.shutdown();
+        // no dead: cleared, won
+        w = Setup.newGame(content, 768, RegionGen.COAST, 34, custom("goal_clear", "none", 0, "cleared"), 2, Roles.GOD, 60000);
+        steps(w, 40);
+        check(w.ended && w.won, "putting down every one of the dead didn't win");
+        w.shutdown();
+        // losses under 0 with the dead loose in the capital: lost
+        w = Setup.newGame(content, 768, RegionGen.COAST, 34, custom("goal_loss", "lab", 300, "days:5; losses:0"), 2, Roles.GOD, 60000);
+        camOver(w, Setup.originX, Setup.originY);
+        for (int k = 0; k < 120 * 20 && !w.ended; k++) w.step();
+        check(w.ended && !w.won, "losing people didn't lose: " + w.endTitle + " " + w.script.losses());
+        w.shutdown();
+        // keep the capital at 99.99%: lost once anyone there is caught
+        w = Setup.newGame(content, 768, RegionGen.COAST, 34, custom("goal_keep", "lab", 300, "keep:0:99.99"), 2, Roles.GOD, 60000);
+        camOver(w, Setup.originX, Setup.originY);
+        for (int k = 0; k < 240 * 20 && !w.ended; k++) w.step();
+        check(w.ended && !w.won && w.endTitle.contains(w.r.settlements.get(0).name), "losing the town didn't lose: " + w.endTitle);
+        w.shutdown();
+    }
+
+    /** A scenario using everything the editor makes: points, forces, defences, rules, a strain, goals, triggers. */
+    static Content.Scenario everything(String id, boolean national) throws Exception {
+        Content.Scenario sc = new Content.Scenario();
+        sc.id = id;
+        sc.name = "Everything " + id;
+        sc.mode = "sandbox";
+        sc.origin = national ? "xy:0.5,0.5" : "hospital";
+        sc.goal = "";
+        sc.desc = "every feature";
+        sc.zombies = 120;
+        sc.hordes = 1;
+        sc.hordeSize = 900;
+        sc.season = 355;
+        sc.role = "god";
+        sc.points = "0.3,0.4,150; 0.62,0.58,700";
+        sc.place = "squad:swat@0.5,0.52; squad:rifle@0.51,0.52; defence:" + Defences.SANDBAGS + "@0.5,0.53; defence:" + Defences.MG + "@0.502,0.53";
+        sc.rules = Rules.Z_SPEED + ":3, " + Rules.WEATHER + ":2";
+        sc.strain = 2;
+        sc.goals = "days:7; keep:0:30; losses:900000";
+        sc.triggers.add("time:10 -> horde:0.45,0.45,400");
+        sc.triggers.add("dead:0:1 -> message:The dead are in the capital");
+        sc.triggers.add("time:30 -> weather:3");
+        String bad = Script.check(content, sc);
+        check(bad == null, "doesn't read: " + bad);
+        java.util.List<Content.Scenario> l = content.addScenarios(new ByteArrayInputStream(sc.toIni().getBytes("UTF-8")), true);
+        check(l.get(0).toIni().equals(sc.toIni()), "changed going through content.ini");
+        return l.get(0);
+    }
+
+    static void editorEverything(int size) throws Exception {
+        boolean national = Setup.national(size);
+        Content.Scenario sc = everything("every" + size, national);
+        World w = Setup.newGame(content, size, RegionGen.COAST, 35, sc, 2, Roles.GOD, 60000);
+        float m = w.r.px();
+        check(w.script != null && w.script.triggers.size() == 3 && w.script.goals.size() == 3, "the script didn't come");
+        check(w.rules.v[Rules.Z_SPEED] == 3 && w.rules.v[Rules.WEATHER] == 2, "the rules weren't set");
+        check(w.strat.strain == 2, "the strain wasn't set");
+        int players = 0;
+        for (Squads.Squad s : w.sq.list) if (s.alive && s.player) players++;
+        check(players >= 2, "the forces weren't placed: " + players);
+        check(w.defs.list.size() >= 2, "the defences weren't placed: " + w.defs.list.size());
+        // the extra outbreak points: the dead near each (people on the street, or in the counts there)
+        for (float[] p : new float[][]{{0.3f, 0.4f}, {0.62f, 0.58f}}) {
+            int near = 0;
+            for (int i = 0; i < w.e.top; i++)
+                if (w.e.loc[i] == Ents.FREE && w.e.kind[i] == Ents.ZOMBIE && dist(w.e.x[i], w.e.y[i], p[0] * m, p[1] * m) < 900) near++;
+            int s = w.r.sectorOfPx(p[0] * m, p[1] * m);
+            check(near + w.sec.zIn[s] >= 50, "no dead at the point " + p[0] + "," + p[1] + ": " + near + " + " + w.sec.zIn[s]);
+        }
+        check(w.strat.hordes.size() >= 1, "no horde");
+        camOver(w, Setup.originX, Setup.originY);
+        steps(w, 35);
+        check(w.script.triggers.get(0).fired && w.script.triggers.get(2).fired, "the timed triggers didn't fire");
+        check(Audit.check(w).isEmpty(), "audit: " + Audit.check(w));
+        // saved and loaded, it plays on exactly
+        ByteArrayOutputStream bo = new ByteArrayOutputStream();
+        SaveIO.save(w, bo);
+        World l = SaveIO.load(content, new ByteArrayInputStream(bo.toByteArray()), 2);
+        check(l.script != null && l.script.goals.size() == 3, "the loaded game lost its script");
+        for (int k = 0; k < 15 * 20; k++) {
+            w.step();
+            l.step();
+        }
+        check(Audit.hash(l) == Audit.hash(w), "diverged after loading");
+        // and replays exactly, from a file
+        bo.reset();
+        Replay.save(w, bo);
+        Replay r = Replay.load(content, new ByteArrayInputStream(bo.toByteArray()), 2);
+        r.runTo(w.tick);
+        check(Audit.hash(r.w) == Audit.hash(w), "the replay came out different");
+        w.shutdown();
+        l.shutdown();
+        r.w.shutdown();
+    }
+
+    // the code's tables before they moved to content.ini (for the test that they arrived unchanged)
+    static final String[] OLD_PRE = {"Ash", "Brook", "Cedar", "Elm", "Fair", "Glen", "Hart", "Iron", "Kings", "Lake",
+            "Mill", "North", "Oak", "Pine", "Red", "Stone", "West", "Wood", "Clear", "Silver", "Spring", "Maple", "Willow",
+            "Cold", "Black", "Green", "High", "Mason", "Rose", "Bright", "Clay", "Cotton", "Deer", "Eagle", "Fox", "Hazel",
+            "Lin", "Mead", "Port", "Sutton", "Thorn", "Union", "Wal", "Bell", "Bay", "Copper", "Crest"};
+    static final String[] OLD_SUF = {"ford", "ton", "field", "ville", "dale", " Falls", "port", "burg", "wood",
+            " Springs", " Hill", "haven", "brook", "view", " Crossing", "ridge", "mont", " Creek", "water", "bury"};
+    static final String[] OLD_BNAMES = {"House", "Apartments", "Offices", "Tower", "Shop", "Warehouse", "Farmhouse",
+            "Barn", "Police station", "Hospital", "Power station", "Fuel depot", "Barracks", "Motor pool", "Prison",
+            "Research lab", "Church", "School", "Mall", "Guard armory", "Bus depot", "Cell block", "Water works",
+            "Telephone exchange", "Food warehouse", "Fire station", "City hall", "Railway station", "Terminal", "Dock warehouse",
+            "State house", "Tent"};
+    static final String[] OLD_PRESETS = {"Coast", "River Valley", "Highlands", "Lake District"};
+    /** Region checksums (tiles, buildings and junctions, then every roof) and names, recorded on the code before the move. */
+    static final long[] OLD_REGION = {7541346224121036853L, 5717814252102046637L, 1073831598034722776L, -5103872686852295160L,
+            350794609727050026L, -194660480813946018L, -6916372190236208595L, 8371790037975010950L};
+    static final int[] OLD_REGION_NAMES = {-432190659, -1698590290, 987147127, -170146497, 1805316018, -2130176824, -2143075508, -1708706981};
+    static final long[] OLD_NATION = {-2588273170170537126L, 8295708271490474933L, 3116740770274513315L, 4709034136227997975L};
+    static final int OLD_NAMES = 1579710398;
+
+    static void dataMoved() throws Exception {
+        check(java.util.Arrays.equals(Data.names("placePrefixes"), OLD_PRE), "place prefixes");
+        check(java.util.Arrays.equals(Data.names("placeSuffixes"), OLD_SUF), "place suffixes (\"_\" is a space)");
+        for (int k = 0; k < OLD_BNAMES.length; k++) check(Data.buildingName(k).equals(OLD_BNAMES[k]), "building " + k);
+        check(Data.presetCount() == 4, "presets: " + Data.presetCount());
+        for (int k = 0; k < 4; k++) check(Data.presetName(k).equals(OLD_PRESETS[k]) && Data.terrain(k) == k, "preset " + k);
+        check(java.util.Arrays.equals(Data.outside("mobilise", null), new String[]{"infantry", "armour", "infantry", "artillery"}), "mobilisation");
+        for (String o : new String[]{"lab", "crash", "prison", "festival", "port", "random", "state", "countryside", "edges", "none"})
+            check(Data.origin(o) != null, "no origin " + o);
+        check(Data.pitched(Region.B_HOUSE) && Data.pitched(Region.B_CHURCH) && !Data.pitched(Region.B_OFFICE), "roof shapes");
+        check(Data.lit(Region.B_HOSPITAL) && Data.home(Region.B_TOWER) && !Data.lit(Region.B_SHOP), "lights");
+        // the maps, their roofs and names, as the code made them before
+        int k = 0;
+        for (int size : new int[]{768, 1024})
+            for (int p = 0; p < 4; p++, k++) {
+                Region r = RegionGen.generate(size, p, 100 + p * 7 + size);
+                long h = r.checksum();
+                for (int b = 0; b < r.bCount; b++) h = (h ^ r.broof[b]) * 1099511628211L;
+                StringBuilder n = new StringBuilder(r.name);
+                for (Region.Settlement s : r.settlements) n.append('|').append(s.name);
+                for (Region.Facility f : r.facilities) n.append('|').append(f.name);
+                check(h == OLD_REGION[k], "region " + size + " " + p + " changed: " + h);
+                check(n.toString().hashCode() == OLD_REGION_NAMES[k], "region " + size + " " + p + "'s names changed");
+            }
+        for (int p = 0; p < 4; p++) {
+            Nation nt = NationGen.generate(8192, p, 31 + p, 2);
+            long h = nt.checksum();
+            for (int c = 0; c < 6; c++) {
+                Chunk ch = ChunkGen.generate(nt, (c * 37 + 40) % (nt.size / Chunk.SIZE), (c * 23 + 40) % (nt.size / Chunk.SIZE));
+                h = h * 31 + ch.checksum();
+                for (int b = 0; b < ch.bCount; b++) h = (h ^ ch.broof[b]) * 1099511628211L;
+            }
+            check(h == OLD_NATION[p], "nation " + p + " changed: " + h);
+        }
+        StringBuilder ppl = new StringBuilder();
+        for (int i = 0; i < 300; i++) ppl.append(Names.person(9, i)).append(Names.callsign(Content.SOLDIER, i)).append(Names.callsign(Content.COP, i));
+        Rng rng = new Rng(5);
+        for (int i = 0; i < 50; i++) ppl.append(Names.country(rng)).append(Names.state(rng));
+        check(ppl.toString().hashCode() == OLD_NAMES, "people's, states' and countries' names changed");
+    }
+
+    static String builtinIni() throws Exception {
+        return new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get("assets/content.ini")), "UTF-8");
+    }
+
+    static String loadError(String ini) {
+        try {
+            Content.load(new ByteArrayInputStream(ini.getBytes("UTF-8")));
+            return null;
+        } catch (Exception e) {
+            return e.getMessage();
+        }
+    }
+
+    static void dataModded() throws Exception {
+        String ini = builtinIni();
+        try {
+            String mod = ini.replaceFirst("placePrefixes = [^\n]*", "placePrefixes = Zed, Quorn")
+                    + "\n[preset drycoast]\nindex = 4\nname = Dry Coast\nterrain = coast\nlevel = 0.24\nrelief = 0.4\nfeature = 1.2\nfeatureAt = 0.18\nfeatureCap = 0.2\nrivers = 1\nnaval = 1\n"
+                    + "\n[origin mall]\nname = The fuel depot\nstart = facility\nfacility = fuel\nstreet = 40\n"
+                    + "\n[origin biglab]\nname = A bigger lab leak\nstart = lab\n";
+            Content mc = Content.load(new ByteArrayInputStream(mod.getBytes("UTF-8")));
+            check(mc.rulesHash == content.rulesHash, "a data section changed the rules' fingerprint");
+            check(Data.presetCount() == 5 && Data.presetName(4).equals("Dry Coast"), "the mod's preset");
+            Region r = RegionGen.generate(768, 4, 5);
+            check(r.settlements.get(0).name.startsWith("Zed") || r.settlements.get(0).name.contains("Zed") || r.settlements.get(0).name.contains("Quorn"), "the mod's names: " + r.settlements.get(0).name);
+            check(r.checksum() != RegionGen.generate(768, 0, 5).checksum(), "the mod's preset made the coast");
+            // an origin at a kind of facility, and one that reuses a built-in start
+            Content.Scenario sc = new Content.Scenario();
+            sc.id = "modstart";
+            sc.name = "Mod start";
+            sc.mode = "sandbox";
+            sc.origin = "mall";
+            sc.goal = "";
+            sc.desc = "";
+            sc.zombies = 100;
+            World w = Setup.newGame(mc, 768, 4, 6, sc, 1, Roles.GOD, 60000);
+            w.sp.build(w.e);
+            check(w.totalZombies() == 100, "the mod's origin put down " + w.totalZombies() + " of the dead");
+            Region.Facility fuel = null;
+            for (Region.Facility f : w.r.facilities) if (f.kind == Region.F_FUEL && fuel == null) fuel = f;
+            check(fuel == null || dist(Setup.originX, Setup.originY, fuel.x, fuel.y) < 50, "it didn't start at the fuel depot");
+            w.shutdown();
+            sc.origin = "biglab";
+            w = Setup.newGame(mc, 768, 4, 6, sc, 1, Roles.GOD, 60000);
+            Region.Facility lab = null;
+            for (Region.Facility f : w.r.facilities) if (f.kind == Region.F_LAB && lab == null) lab = f;
+            check(lab != null && dist(Setup.originX, Setup.originY, lab.x, lab.y) < 50, "the origin that reuses the lab start");
+            w.shutdown();
+            // mistakes are told plainly, by line
+            String e1 = loadError(ini + "\n[weapon broken]\nrange = far\n");
+            check(e1 != null && e1.contains("line ") && e1.contains("[weapon broken]") && e1.contains("number"), "a bad number: " + e1);
+            String e2 = loadError(ini + "\n[scenario bad]\nname = Bad\ntrigger.1 = sometime -> horde:0.1,0.1,10\n");
+            check(e2 != null && e2.contains("[scenario bad]") && e2.contains("no condition called sometime"), "a bad trigger: " + e2);
+            String e3 = loadError(ini + "\n[building odd]\nindex = 40\nroofs = #123456\n");
+            check(e3 != null && e3.contains("indices"), "a gap in the buildings: " + e3);
+            String e4 = loadError(ini + "\n[gadget x]\nsize = 1\n");
+            check(e4 != null && e4.contains("unknown kind of section"), "an unknown section: " + e4);
+            String e5 = loadError(ini + "\njust some words\n");
+            check(e5 != null && e5.contains("expected key = value"), "a stray line: " + e5);
+        } finally {
+            // the built-in tables back in place for the other tests
+            Content.load(new ByteArrayInputStream(ini.getBytes("UTF-8")));
+        }
+        check(Data.presetCount() == 4, "the built-in presets weren't put back");
+    }
     static void steps(World w, float seconds) {
         for (int k = 0; k < (int) (seconds * 20); k++) w.step();
     }
@@ -593,6 +1011,164 @@ public final class Tests {
         w.shutdown();
         l.shutdown();
         r.w.shutdown();
+    }
+
+    /** A survivor's game (the survivor scenario on a small map), a second in, with the camera on them. */
+    static World survivorGame(long seed) {
+        World w = Setup.newGame(content, 768, RegionGen.COAST, seed, content.scenario("survivor"), 2, Roles.SURVIVOR, 60000);
+        check(w.surv.enabled && w.playerEnt >= 0, "no survivor to play");
+        SurvivalBot.camOn(w);
+        steps(w, 1.5f);
+        return w;
+    }
+
+    /** Puts the survivor at (x, y) (tests only: not an action, so not for replays). */
+    static void putAt(World w, float x, float y) {
+        int p = w.playerEnt;
+        w.act.touchPx(x, y);
+        w.e.x[p] = x;
+        w.e.y[p] = y;
+        SurvivalBot.camOn(w);
+        w.step();
+        w.e.x[p] = x;
+        w.e.y[p] = y;
+    }
+
+    /** Puts the survivor at the door of a home or shop near them; returns the building (or -1). */
+    static int besideBuilding(World w) {
+        int p = w.playerEnt;
+        float px = w.e.x[p], py = w.e.y[p];
+        int best = -1;
+        float bd = Float.MAX_VALUE;
+        for (int b = 0; b < w.r.bCount; b++) {
+            float dx = w.r.doorX(b) - px, dy = w.r.doorY(b) - py, d = dx * dx + dy * dy;
+            int k = w.r.bkind(b);
+            if (d < bd && w.r.walkablePx(w.r.doorX(b), w.r.doorY(b)) && (k == Region.B_HOUSE || k == Region.B_SHOP || k == Region.B_APARTMENT)) {
+                bd = d;
+                best = b;
+            }
+        }
+        if (best >= 0) putAt(w, w.r.doorX(best), w.r.doorY(best));
+        return best;
+    }
+
+    /** The survivor's verbs in a session (only through Actions and the stick), then replayed and saved part way. */
+    static void survivalReplay() throws Exception {
+        World w = Setup.newGame(content, 768, RegionGen.COAST, 5, content.scenario("survivor"), 2, Roles.SURVIVOR, 60000);
+        SurvivalBot bot = new SurvivalBot(w);
+        SurvivalBot.camOn(w);
+        steps(w, 2);
+        Survival s = w.surv;
+        int p = w.playerEnt;
+        check(s.ready && s.owns(Survival.W_PISTOL) && s.gun == Survival.W_PISTOL, "the survivor has no pistol in hand");
+        // to the nearest door we can walk to
+        int bld = -1;
+        float bd = Float.MAX_VALUE;
+        for (int b = 0; b < w.r.bCount; b++) {
+            float dx = w.r.doorX(b) - w.e.x[p], dy = w.r.doorY(b) - w.e.y[p], d = dx * dx + dy * dy;
+            if (d < bd && d < 400 * 400 && w.r.walkablePx(w.r.doorX(b), w.r.doorY(b))) {
+                bd = d;
+                bld = b;
+            }
+        }
+        check(bld >= 0, "no door near the survivor");
+        for (int k = 0; k < 60 * 20 && !bot.toward(w.r.doorX(bld), w.r.doorY(bld), 10); k++) {
+            if (k % 20 == 0) SurvivalBot.camOn(w);
+            w.step();
+        }
+        Actions.joy(w, 0, 0);
+        check(s.can(Survival.ENTER), "no way in at the door");
+        check(Actions.survival(w, Survival.ENTER), "couldn't go in");
+        int sec = w.r.sectorOfPx(s.doorPX, s.doorPY);
+        check(w.e.loc[p] == Ents.INSIDE, "not inside");
+        Actions.survival(w, Survival.SEARCH);
+        check(Actions.survival(w, Survival.BARRICADE) && s.barricaded(), "no barricade");
+        steps(w, 2);
+        Actions.survival(w, Survival.REST, 1, 0);
+        steps(w, 5);
+        Actions.survival(w, Survival.REST, 0, 0);
+        Actions.survival(w, Survival.USE, Survival.I_WATER, 0);
+        int pop0 = w.sec.popIn[sec];
+        check(Actions.survival(w, Survival.LEAVE), "couldn't leave");
+        check(w.sec.popIn[sec] == pop0 - 1, "the count inside didn't let the survivor go");
+        check(w.e.loc[p] == Ents.FREE && !s.barricaded() && w.r.walkablePx(w.e.x[p], w.e.y[p]), "didn't get out through the door");
+        steps(w, 1);
+        // a fight: the manual aim, a shot, a shove and a swing
+        float px = w.e.x[p], py = w.e.y[p];
+        Actions.paint(w, px + 70, py, 2, 6, w.c.ztype("walker").index);
+        steps(w, 0.3f);
+        Actions.survival(w, Survival.AIM, 1, 0);
+        int z = w.sp.nearestZombie(w.e, w.e.x[p], w.e.y[p], 200);
+        check(z >= 0, "no zombie to aim at");
+        check(Actions.survival(w, Survival.AIM_AT, z, w.e.uid[z]), "couldn't aim");
+        int shots = w.stats.shots;
+        Actions.survival(w, Survival.SHOOT);
+        steps(w, 1);
+        check(w.stats.shots > shots, "the manual shot didn't go off");
+        Actions.survival(w, Survival.MELEE, 0, 0);
+        steps(w, 1);
+        Actions.survival(w, Survival.MELEE, 1, 0);
+        Actions.survival(w, Survival.AIM, 0, 0);
+        Actions.erase(w, w.e.x[p], w.e.y[p], 300);
+        steps(w, 2);
+        check(w.playerAlive(), "the survivor died in the fight");
+        // a car: put down near (a recorded action too), walked to, driven, left
+        int v = Actions.vehicle(w, "car", w.e.x[p], w.e.y[p]);
+        check(v >= 0, "no car");
+        for (int k = 0; k < 60 * 20 && w.playerAlive() && !bot.toward(w.veh.x[v], w.veh.y[v], 18); k++) w.step();
+        check(w.playerAlive(), "the survivor died on the way to the car");
+        check(Actions.survival(w, Survival.CAR) && w.orders.driven == v, "couldn't take the car");
+        float fuel = w.veh.fuel[v];
+        Actions.joy(w, 1, 0.2f);
+        steps(w, 4);
+        Actions.joy(w, 0, 0);
+        steps(w, 2);
+        check(w.veh.fuel[v] < fuel, "driving burned no fuel");
+        check(Actions.survival(w, Survival.CAR) && w.e.loc[p] == Ents.FREE, "couldn't get out");
+        // companions
+        Actions.people(w, "civilian", 2, w.e.x[p] + 14, w.e.y[p]);
+        steps(w, 0.5f);
+        Actions.survival(w, Survival.RECRUIT);
+        Actions.survival(w, Survival.RECRUIT);
+        check(s.compN >= 1, "nobody came along");
+        Actions.survival(w, Survival.ORDER, Survival.C_STAY, -1);
+        steps(w, 2);
+        Actions.survival(w, Survival.ORDER, Survival.C_CARRY, 0);
+        Actions.survival(w, Survival.ORDER, Survival.C_FOLLOW, -1);
+        Actions.joy(w, -0.5f, 0);
+        steps(w, 3);
+        Actions.joy(w, 0, 0);
+        Actions.survival(w, Survival.EQUIP, Survival.W_HANDS, 0);
+        Actions.survival(w, Survival.PICKUP);
+        steps(w, 2);
+        check(Audit.check(w).isEmpty(), "audit: " + Audit.check(w));
+        check(Audit.ledger(w) == 0, "the ledger is off by " + Audit.ledger(w));
+        Replay r = Replay.of(content, w, 1);
+        r.runTo(w.tick);
+        check(Audit.hash(r.w) == Audit.hash(w), "the replay of the survivor came out different");
+        check(java.util.Arrays.equals(survBytes(r.w), survBytes(w)), "the replay's survival state came out different");
+        ByteArrayOutputStream bo = new ByteArrayOutputStream();
+        SaveIO.save(w, bo);
+        World l = SaveIO.load(content, new ByteArrayInputStream(bo.toByteArray()), 2);
+        check(l.surv.enabled && l.modules.contains(l.surv), "survival didn't come back from the save");
+        check(java.util.Arrays.equals(survBytes(l), survBytes(w)), "the survival state didn't come back from the save");
+        for (int k = 0; k < 20 * 20; k++) {
+            w.step();
+            l.step();
+        }
+        check(Audit.hash(l) == Audit.hash(w), "diverged after loading");
+        check(java.util.Arrays.equals(survBytes(l), survBytes(w)), "the survival state diverged after loading");
+        w.shutdown();
+        l.shutdown();
+        r.w.shutdown();
+    }
+
+    static byte[] survBytes(World w) throws Exception {
+        ByteArrayOutputStream bo = new ByteArrayOutputStream();
+        java.io.DataOutputStream o = new java.io.DataOutputStream(bo);
+        w.surv.save(o);
+        o.flush();
+        return bo.toByteArray();
     }
 
     /** Runs a test with every new world in sparse mode (ActiveSet: only the chunks the simulation needs are active). */
@@ -782,7 +1358,7 @@ public final class Tests {
         test("region: every preset and size builds", new T() {
             public void run() {
                 for (int size : new int[]{768, 1024}) {
-                    for (int p = 0; p < RegionGen.PRESETS.length; p++) {
+                    for (int p = 0; p < Data.presetCount(); p++) {
                         Region r = RegionGen.generate(size, p, 100 + p);
                         check(r.settlements.get(0).kind == Region.S_CITY, "a city first");
                         int towns = 0, bases = 0;
@@ -791,7 +1367,7 @@ public final class Tests {
                             if (s.kind == Region.S_BASE) bases++;
                             check(s.hubNode >= 0 || s.kind == Region.S_VILLAGE, s.name + " has no centre junction");
                         }
-                        check(towns >= 2, RegionGen.PRESETS[p] + " " + size + ": towns " + towns);
+                        check(towns >= 2, Data.presetName(p) + " " + size + ": towns " + towns);
                         check(bases == 1, "one army base, got " + bases);
                         check(r.city().residents > 5000, "the city has people: " + r.city().residents);
                         check(r.entryNodes.size() >= 2, "roads out of the region");
@@ -1378,6 +1954,46 @@ public final class Tests {
                 replayExact(768);
             }
         });
+        test("director: seeking to any time gives the same hash as playing straight through", new T() {
+            public void run() throws Exception {
+                seekExact(768);
+            }
+        });
+        test("director: a camera path glides through its keyframes and is saved as a director's cut", new T() {
+            public void run() throws Exception {
+                camPathCut();
+            }
+        });
+        test("script: triggers fire deterministically, survive a save, and replay", new T() {
+            public void run() throws Exception {
+                scriptTriggers();
+            }
+        });
+        test("script: the scenario's own goals end the game, won or lost", new T() {
+            public void run() throws Exception {
+                scriptGoals();
+            }
+        });
+        test("editor: a scenario with every new feature saves, loads and replays", new T() {
+            public void run() throws Exception {
+                editorEverything(768);
+            }
+        });
+        test("editor: a scenario with every new feature on a national map (8192)", new T() {
+            public void run() throws Exception {
+                editorEverything(8192);
+            }
+        });
+        test("data: content.ini holds exactly what the code had, maps unchanged", new T() {
+            public void run() throws Exception {
+                dataMoved();
+            }
+        });
+        test("data: a mod's own names, preset and origin work, and mistakes are told by line", new T() {
+            public void run() throws Exception {
+                dataModded();
+            }
+        });
         test("tools: every new action replays exactly, and saves", new T() {
             public void run() throws Exception {
                 toolsReplay(768);
@@ -1501,6 +2117,55 @@ public final class Tests {
                 w = game(33, 768, "officer", 2);
                 check(w.playerEnt >= 0 && w.e.kind[w.playerEnt] == Ents.COP, "On patrol isn't played as an officer");
                 w.shutdown();
+            }
+        });
+        test("mods: a content.ini is imported (checked first, mistakes by line), shared, and reset", new T() {
+            public void run() throws Exception {
+                java.io.File dir = new java.io.File("build/test-mods");
+                dir.mkdirs();
+                for (java.io.File f : dir.listFiles()) f.delete();
+                String ini = builtinIni();
+                try {
+                    DesktopPlatform pf = new DesktopPlatform(dir);
+                    Game g = new Game(pf);
+                    check(!g.customContent && g.dir.modMsg == null, "a fresh game uses the built-in content");
+                    // a broken one: told by line, nothing kept
+                    pf.files.add(new String[]{"broken.ini", ini + "\n[unit odd]\nhp = lots\n"});
+                    g.dir.onButton("mod:import");
+                    frames(g, 2);
+                    check(!g.dir.modOk && g.dir.modMsg.contains("line ") && g.dir.modMsg.contains("[unit odd]"), "the mistake: " + g.dir.modMsg);
+                    check(!pf.exists("content.ini"), "a broken content.ini was kept");
+                    check(Data.presetCount() == 4, "checking it put its data in use");
+                    // a good one with a new preset: kept, and in use at once (no game open)
+                    String mod = ini + "\n[preset dry]\nindex = 4\nname = Dry Coast\nterrain = coast\nlevel = 0.24\nrelief = 0.4\nfeature = 1.2\nfeatureAt = 0.18\nfeatureCap = 0.2\nnaval = 1\n";
+                    pf.files.add(new String[]{"mine.ini", mod});
+                    g.dir.onButton("mod:import");
+                    frames(g, 2);
+                    check(g.dir.modOk && pf.exists("content.ini") && g.customContent, "not imported: " + g.dir.modMsg);
+                    check(Data.presetCount() == 5, "its preset isn't in use");
+                    // shared as it is
+                    g.dir.onButton("mod:share");
+                    check(mod.equals(pf.sharedText) && "content.ini".equals(pf.sharedName), "shared something else");
+                    // the next start reads it; a mod without the data sections keeps the built-in ones
+                    Game g2 = new Game(pf);
+                    check(g2.customContent && Data.presetCount() == 5, "the next start didn't use it");
+                    java.io.FileOutputStream o = new java.io.FileOutputStream(new java.io.File(dir, "content.ini"));
+                    o.write(ini.replaceAll("(?s)# =+ data.*", "").getBytes("UTF-8"));
+                    o.close();
+                    Game g3 = new Game(pf);
+                    check(g3.customContent && Data.presetCount() == 4 && Data.names("first").length > 10, "a mod without data sections");
+                    // a damaged one at start: the built-in content, and Settings says why
+                    o = new java.io.FileOutputStream(new java.io.File(dir, "content.ini"));
+                    o.write("[weapon x]\nrange = far\n".getBytes("UTF-8"));
+                    o.close();
+                    Game g4 = new Game(pf);
+                    check(!g4.customContent && g4.content != null && g4.dir.modMsg != null && g4.dir.modMsg.contains("line 1"), "a damaged mod at start: " + g4.dir.modMsg);
+                    // reset
+                    g2.dir.onButton("mod:builtin");
+                    check(!pf.exists("content.ini") && !g2.customContent, "not reset");
+                } finally {
+                    Content.load(new ByteArrayInputStream(ini.getBytes("UTF-8")));
+                }
             }
         });
         test("shared: challenge codes and your own scenarios", new T() {
@@ -1958,6 +2623,173 @@ public final class Tests {
                     Thread.sleep(20);
                 }
                 check(g2.world() == null && g2.screen() == Game.S_NEW, "a cancelled load still started the game");
+            }
+        });
+        test("survival: every survival action replays exactly and survives a save", new T() {
+            public void run() throws Exception {
+                survivalReplay();
+            }
+        });
+        test("survival: hiding in a barricaded building outlives a horde that kills you in the street", new T() {
+            public void run() throws Exception {
+                boolean[] alive = new boolean[2];
+                boolean[] bitten = new boolean[2];
+                for (int pass = 0; pass < 2; pass++) {
+                    World w = survivorGame(11);
+                    int p = w.playerEnt;
+                    int b = besideBuilding(w);
+                    check(b >= 0, "no building near the survivor");
+                    w.surv.items[Survival.I_TOOLS] = 2;
+                    if (pass == 1) {
+                        check(Actions.survival(w, Survival.ENTER), "couldn't go in");
+                        check(Actions.survival(w, Survival.BARRICADE), "couldn't barricade");
+                        check(Actions.survival(w, Survival.BARRICADE), "couldn't reinforce");
+                        check(w.surv.barricaded() && w.surv.doorStrength() > 2, "the barricade isn't strong: " + w.surv.doorStrength());
+                    }
+                    Actions.paint(w, w.r.doorX(b), w.r.doorY(b), 140, 90, w.c.ztype("walker").index);
+                    for (int k = 0; k < 150 * 20 && w.playerAlive(); k++) {
+                        if (k % 20 == 0) SurvivalBot.camOn(w);
+                        w.step();
+                    }
+                    alive[pass] = w.playerAlive();
+                    bitten[pass] = !alive[pass] || (w.e.flags[p] & Ents.F_INFECTED) != 0;
+                    String a = Audit.check(w);
+                    check(a.isEmpty(), "audit: " + a);
+                    check(Audit.ledger(w) == 0, "the ledger is off by " + Audit.ledger(w));
+                    w.shutdown();
+                }
+                check(bitten[0], "the horde didn't get the survivor in the street");
+                check(alive[1] && !bitten[1], "the survivor didn't outlive the horde behind a barricade");
+            }
+        });
+        test("survival: scavenging depletes", new T() {
+            public void run() throws Exception {
+                World w = survivorGame(12);
+                Survival s = w.surv;
+                int sec = 0;
+                for (int q = 0; q < w.sec.n; q++) if (w.secBuildings[q].length > w.secBuildings[sec].length) sec = q;
+                java.util.List<Integer> bl = new java.util.ArrayList<Integer>();
+                for (int b : w.secBuildings[sec]) bl.add(b);
+                check(bl.size() >= 6, "too few buildings in the busiest street: " + bl.size());
+                int found = 0, searched = 0;
+                float lastYield = s.yieldIn(sec);
+                check(lastYield == 1, "a fresh street isn't full: " + lastYield);
+                for (int k = 0; k < Math.min(10, bl.size()); k++) {
+                    int b = bl.get(k);
+                    putAt(w, w.r.doorX(b), w.r.doorY(b));
+                    if (!Actions.survival(w, Survival.ENTER)) continue;
+                    if (s.inside != b) {
+                        Actions.survival(w, Survival.LEAVE);
+                        continue;
+                    }
+                    java.util.Arrays.fill(s.items, 0);
+                    int before = s.finds;
+                    Actions.survival(w, Survival.SEARCH);
+                    found += s.finds - before;
+                    searched++;
+                    check(!s.can(Survival.SEARCH), "a building can be searched twice");
+                    check(!Actions.survival(w, Survival.SEARCH), "a second search found something");
+                    float y = s.yieldIn(sec);
+                    check(y < lastYield, "the street didn't get poorer: " + y + " after " + lastYield);
+                    lastYield = y;
+                    check(Actions.survival(w, Survival.LEAVE), "couldn't leave");
+                    // and back in: still searched
+                    putAt(w, w.r.doorX(b), w.r.doorY(b));
+                    Actions.survival(w, Survival.ENTER);
+                    check(!s.can(Survival.SEARCH), "the building filled up again");
+                    Actions.survival(w, Survival.LEAVE);
+                }
+                check(searched >= 5, "only " + searched + " buildings could be entered");
+                check(found > 0, "nothing found in " + searched + " buildings");
+                // the loot tables differ by kind: a hospital holds medkits, a police station rounds, a shop food
+                check(Survival.loot(Region.B_HOSPITAL)[Survival.I_MEDS] > Survival.loot(Region.B_SHOP)[Survival.I_MEDS], "hospitals have no more medkits than shops");
+                check(Survival.loot(Region.B_POLICE)[5] > Survival.loot(Region.B_HOUSE)[5], "police stations have no more rounds than homes");
+                check(Survival.loot(Region.B_SHOP)[Survival.I_FOOD] > Survival.loot(Region.B_POLICE)[Survival.I_FOOD], "shops have no more food than police stations");
+                String a = Audit.check(w);
+                check(a.isEmpty(), "audit: " + a);
+                check(Audit.ledger(w) == 0, "the ledger is off by " + Audit.ledger(w));
+                w.shutdown();
+            }
+        });
+        test("survival: needs decay and items restore them", new T() {
+            public void run() throws Exception {
+                World w = survivorGame(13);
+                Survival s = w.surv;
+                int p = w.playerEnt;
+                check(s.needsOn, "the survivor has no needs");
+                float f0 = s.food, w0 = s.water, r0 = s.rest;
+                int b = besideBuilding(w);
+                check(b >= 0 && Actions.survival(w, Survival.ENTER), "couldn't go in");
+                // six game hours (inside, quiet: nothing else wears on them)
+                for (int k = 0; k < 360 * 20 && w.playerAlive(); k++) w.step();
+                check(w.playerAlive(), "died sitting indoors");
+                check(s.food < f0 - 0.04f && s.water < w0 - 0.09f && s.rest < r0 - 0.1f, "needs didn't decay: food " + s.food + " water " + s.water + " rest " + s.rest);
+                check(s.water < s.food, "thirst isn't quicker than hunger");
+                s.items[Survival.I_FOOD] = 1;
+                s.items[Survival.I_WATER] = 1;
+                s.items[Survival.I_MEDS] = 1;
+                s.food = 0.3f;
+                s.water = 0.3f;
+                float f1 = s.food, w1 = s.water;
+                check(Actions.survival(w, Survival.USE, Survival.I_FOOD, 0) && s.food > f1 + 0.3f, "food didn't help");
+                check(Actions.survival(w, Survival.USE, Survival.I_WATER, 0) && s.water > w1 + 0.3f, "water didn't help");
+                check(s.items[Survival.I_FOOD] == 0 && s.items[Survival.I_WATER] == 0, "the items weren't used up");
+                check(!Actions.survival(w, Survival.USE, Survival.I_FOOD, 0), "ate food that wasn't there");
+                w.e.hp[p] = 20;
+                check(Actions.survival(w, Survival.USE, Survival.I_MEDS, 0) && w.e.hp[p] > 45, "the medkit didn't heal");
+                float r1 = s.rest;
+                check(Actions.survival(w, Survival.REST, 1, 0), "couldn't rest inside");
+                for (int k = 0; k < 120 * 20; k++) w.step();
+                check(s.rest > r1 + 0.2f, "rest didn't restore: " + s.rest + " from " + r1);
+                // sprinting drains stamina and walking brings it back
+                Actions.survival(w, Survival.LEAVE);
+                Actions.joy(w, 1, 0);
+                float st0 = s.stamina;
+                for (int k = 0; k < 6 * 20; k++) w.step();
+                check(s.stamina < st0 - 0.3f, "sprinting didn't tire: " + s.stamina);
+                Actions.joy(w, 0, 0);
+                float st1 = s.stamina;
+                for (int k = 0; k < 10 * 20; k++) w.step();
+                check(s.stamina > st1 + 0.2f, "stamina didn't come back: " + s.stamina);
+                w.shutdown();
+            }
+        });
+        test("survival: the officer takes the melee, the weapons and the cars", new T() {
+            public void run() throws Exception {
+                World w = Setup.newGame(content, 768, RegionGen.COAST, 14, content.scenario("officer"), 2, Roles.OFFICER, 60000);
+                check(w.surv.enabled, "no survival for the officer");
+                SurvivalBot.camOn(w);
+                steps(w, 2);
+                Survival s = w.surv;
+                int p = w.playerEnt;
+                check(!s.needsOn && s.owns(Survival.W_BATON) && s.gun == Survival.W_PISTOL, "the officer isn't kitted out");
+                check(!s.can(Survival.ENTER), "the officer can hide (a patrol member can't leave the street)");
+                for (int k = 0; k < 30 * 20 && w.e.loc[p] != Ents.FREE; k++) w.step();
+                check(w.e.loc[p] == Ents.FREE, "the officer isn't on foot: " + w.e.loc[p]);
+                // hand to hand (holding fire): blows until it's down
+                Actions.fire(w, false);
+                float[] q = w.r.openGroundNear(w.e.x[p] + 14, w.e.y[p], false);
+                Actions.paint(w, q[0], q[1], 8, 4, w.c.ztype("walker").index);
+                steps(w, 0.1f);
+                int z = w.sp.nearestZombie(w.e, w.e.x[p], w.e.y[p], 60);
+                check(z >= 0, "no zombie by the officer (" + w.e.loc[p] + ", " + w.stats.zombieKills + " killed)");
+                float hp = w.e.hp[z];
+                int uid = w.e.uid[z];
+                for (int k = 0; k < 10 && w.e.loc[z] == Ents.FREE && w.e.uid[z] == uid; k++) {
+                    Actions.survival(w, Survival.MELEE, 1, 0);
+                    steps(w, 1);
+                }
+                check(w.e.loc[z] != Ents.FREE || w.e.hp[z] < hp, "the baton did nothing (" + s.meleeKills + " kills)");
+                Actions.fire(w, true);
+                int v = Actions.vehicle(w, "car", w.e.x[p], w.e.y[p]);
+                check(v >= 0, "no car");
+                putAt(w, w.veh.x[v] + 10, w.veh.y[v]);
+                check(Actions.survival(w, Survival.CAR), "the officer couldn't take the car");
+                Actions.joy(w, 1, 0);
+                play(w, 20, true);
+                check(Actions.survival(w, Survival.CAR) && w.e.loc[p] == Ents.FREE, "the officer couldn't get out");
+                play(w, 10, true);
+                w.shutdown();
             }
         });
         test("workability: a survivor starts away from the outbreak", new T() {
@@ -3362,7 +4194,7 @@ public final class Tests {
                                 if (w.r.bfloors(b) <= 0 || w.r.building((int) (bx / Tile.SIZE), (int) (by / Tile.SIZE)) != b) continue;
                                 check(Game.buildingAt(w, bx, by) == b, "a tap on building " + Integer.toHexString(b) + " found " + Integer.toHexString(Game.buildingAt(w, bx, by)));
                                 String[] d = Game.describeBuilding(w, b);
-                                check(d != null && d[0].equals(Region.BNAMES[w.r.bkind(b)]), "the sheet of building " + b + " names it " + (d == null ? null : d[0]));
+                                check(d != null && d[0].equals(Data.buildingName(w.r.bkind(b))), "the sheet of building " + b + " names it " + (d == null ? null : d[0]));
                                 tapped++;
                             }
                         }
@@ -3522,7 +4354,7 @@ public final class Tests {
         });
         test("nation: every place can be reached by road, on every preset", new T() {
             public void run() {
-                for (int p = 0; p < RegionGen.PRESETS.length; p++) {
+                for (int p = 0; p < Data.presetCount(); p++) {
                     Nation n = p == RegionGen.COAST ? country() : NationGen.generate(20480, p, 10 + p, 2);
                     RoadGraph g = n.roads;
                     boolean[] seen = new boolean[g.nodeCount];
@@ -3540,8 +4372,8 @@ public final class Tests {
                             }
                         }
                     }
-                    for (Region.Settlement s : n.settlements) check(s.hubNode >= 0 && seen[s.hubNode], RegionGen.PRESETS[p] + ": no road to " + s.name);
-                    check(t == g.nodeCount, RegionGen.PRESETS[p] + ": " + (g.nodeCount - t) + " junctions cut off");
+                    for (Region.Settlement s : n.settlements) check(s.hubNode >= 0 && seen[s.hubNode], Data.presetName(p) + ": no road to " + s.name);
+                    check(t == g.nodeCount, Data.presetName(p) + ": " + (g.nodeCount - t) + " junctions cut off");
                     for (Region.Facility f : n.facilities) check(f.node >= 0, f.name + " has no junction");
                     check(n.entryNodes.size() >= 2 && n.railEntries.size() >= 1, "roads and rails from abroad");
                     for (int e : n.entryNodes) check(seen[e], "a road from abroad is cut off");
@@ -3756,7 +4588,7 @@ public final class Tests {
                         check(c.bres[b] >= 0, "negative residents");
                         for (int y = c.by[b]; y < c.by[b] + c.bh[b]; y++)
                             for (int x = c.bx[b]; x < c.bx[b] + c.bw[b]; x++) {
-                                check(!wet[y * 64 + x], Region.BNAMES[c.bkind[b]] + " on water in chunk " + p[0] + "," + p[1]);
+                                check(!wet[y * 64 + x], Data.buildingName(c.bkind[b]) + " on water in chunk " + p[0] + "," + p[1]);
                                 check(c.bld[y * 64 + x] == b + 1 && c.t(x, y) == Tile.BUILDING, "a building's tiles");
                             }
                         check(c.doorX[b] >= 0 && Tile.walkable(c.t(c.doorX[b], c.doorY[b])), "a building without a door");
@@ -3765,7 +4597,7 @@ public final class Tests {
                     }
                     for (int i = 0; i < Chunk.AREA; i++) {
                         int v = c.bld[i];
-                        if (v < 0) check(!wet[i], "national building " + Region.BNAMES[n.bkind[-v - 1]] + " on water in chunk " + p[0] + "," + p[1]);
+                        if (v < 0) check(!wet[i], "national building " + Data.buildingName(n.bkind[-v - 1]) + " on water in chunk " + p[0] + "," + p[1]);
                     }
                     people += c.residents();
                     buildings += c.bCount;

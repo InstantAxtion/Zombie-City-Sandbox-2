@@ -280,6 +280,7 @@ public final class SaveIO {
         World w = new World(c, r, seed, threads, sparse);
         if (sparse) w.act.read(in);
         w.scenario = scen.length() == 0 ? null : c.scenario(scen);
+        Script.attach(w); // (a scenario with triggers or goals has a module for them)
         w.mode = mode;
         byte[][] generated = null;
         if (ver >= 8) {
@@ -495,6 +496,8 @@ public final class SaveIO {
             byte[] data = new byte[in.readInt()];
             in.readFully(data);
             if (ver < 4) data = upgradeModule(id, data);
+            // (survival is a module only in games with someone to play: a save that has its part brings it in)
+            if (id.equals(w.surv.id())) w.enableSurvival();
             for (Module m : w.modules)
                 if (m.id().equals(id)) m.load(new DataInputStream(new java.io.ByteArrayInputStream(data)));
         }

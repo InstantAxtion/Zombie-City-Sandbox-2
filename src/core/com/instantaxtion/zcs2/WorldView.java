@@ -578,7 +578,7 @@ public final class WorldView {
     private static final int SHAPE_FLAT = 0, SHAPE_PITCHED = 1;
 
     private void roof(Gfx g, int b, int kind, float x, float y, float rw, float rh, float z, int roof, boolean detail) {
-        int shape = kind == Region.B_HOUSE || kind == Region.B_FARMHOUSE || kind == Region.B_BARN || kind == Region.B_CHURCH ? SHAPE_PITCHED : SHAPE_FLAT;
+        int shape = Data.pitched(kind) ? SHAPE_PITCHED : SHAPE_FLAT;
         if (shape == SHAPE_PITCHED) {
             // two slopes either side of the ridge, one in the sun
             boolean wide = rw >= rh;
@@ -745,8 +745,8 @@ public final class WorldView {
         int warm = MapPainter.alpha(0xFFFFD58A, 0.25f + night * 0.65f);
         for (int k = 0; k < visN; k++) {
             int kind = dbk[k], b = dbid[k];
-            boolean home = kind == Region.B_HOUSE || kind == Region.B_APARTMENT || kind == Region.B_TOWER || kind == Region.B_FARMHOUSE;
-            if (!home && kind != Region.B_HOSPITAL && kind != Region.B_POLICE) continue;
+            // (homes, and the hospital and police that never close: content.ini's [building] home and lit)
+            if (!Data.lit(kind)) continue;
             float wx = dbx[k] * 16f, wy = dby[k] * 16f, ww = dbw[k] * 16f, wh = dbh[k] * 16f;
             if (scorchedIds.contains(b) || !w.strat.lit(w.r.sectorOfPx(wx + ww / 2, wy + wh / 2))) continue;
             float height = Math.min(40, dbf[k]) * 3.2f + 4;

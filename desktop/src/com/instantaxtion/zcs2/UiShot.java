@@ -32,6 +32,10 @@ public final class UiShot {
             directorShots(pf);
             return;
         }
+        if (a.length > 4 && a[4].equals("director14")) {
+            director14Shots(pf);
+            return;
+        }
         if (a.length > 4 && a[4].equals("tools")) {
             toolShots();
             return;
@@ -276,6 +280,227 @@ public final class UiShot {
         System.exit(0);
     }
 
+    /** A tap on the editor's map at (fx, fy), fractions of the map's side. */
+    static void edMap(float fx, float fy) {
+        DirectorScreens d = game.dir;
+        tapAt(d.mapX + fx * d.mapS, d.mapY + fy * d.mapS);
+    }
+
+    /** Where a town is on the editor's map, as fractions. */
+    static float[] edTown(int id) {
+        java.util.List<Region.Settlement> l = game.previewSettlements();
+        int side = game.previewSide();
+        Region.Settlement s = l.get(id);
+        return new float[]{s.cx / (float) side, s.cy / (float) side};
+    }
+
+    static void waitSeek() throws Exception {
+        long t0 = System.currentTimeMillis();
+        while (game.seekTarget >= 0 || game.seekProgress() >= 0) {
+            frames(1);
+            Thread.sleep(5);
+            if (System.currentTimeMillis() - t0 > 120000) throw new IllegalStateException("the seek never finished");
+        }
+        frames(2);
+    }
+
+    /** 1.4: the editor's tabs (places, rules, goals, triggers), a scripted game, the replay's scrubber and camera path. */
+    static void tp(String id) {
+        frames(1);
+        tap(id);
+    }
+
+    static void director14Shots(DesktopPlatform pf) throws Exception {
+        tp("new");
+        game.ngSize = 0;
+        long t0 = System.currentTimeMillis();
+        while (System.currentTimeMillis() - t0 < 4000) { frames(1); Thread.sleep(50); }
+        tp("editor");
+        t0 = System.currentTimeMillis();
+        while ((game.previewSide() == 0 || System.currentTimeMillis() - t0 < 1500) && System.currentTimeMillis() - t0 < 30000) { frames(1); Thread.sleep(50); }
+        frames(2);
+        boolean map = game.ui.find("ed:map") != null;
+        float[] cap = edTown(0);
+        if (map) edMap(cap[0] + 0.02f, cap[1]);
+        tp("ed:strain");
+        tp("ed:z");
+        frames(2);
+        shot("e01-editor-start");
+        tp("ed:tab:1");
+        frames(1);
+        if (map) {
+            edMap(cap[0] - 0.12f, cap[1] - 0.08f);
+            tp("ed:plw");
+            edMap(cap[0] + 0.1f, cap[1] + 0.1f);
+            tp("ed:plk");
+            frames(1);
+            edMap(cap[0] + 0.03f, cap[1] + 0.02f);
+            tp("ed:plw");
+            frames(1);
+            edMap(cap[0] + 0.05f, cap[1] + 0.02f);
+            tp("ed:plk");
+            frames(1);
+            edMap(cap[0] + 0.04f, cap[1] + 0.04f);
+            tp("ed:plw");
+            tp("ed:plw");
+            frames(1);
+            edMap(cap[0] + 0.045f, cap[1] + 0.045f);
+        }
+        frames(2);
+        shot("e02-editor-places");
+        tp("ed:tab:2");
+        tp("ed:rule:0");
+        tp("ed:rule:0");
+        tp("ed:rule:6");
+        tp("ed:rule:6");
+        tp("ed:rule:6");
+        frames(2);
+        shot("e03-editor-rules");
+        tp("ed:tab:3");
+        frames(1);
+        tp("ed:gdays");
+        tp("ed:gdays");
+        tp("ed:gdays");
+        if (map) edMap(cap[0], cap[1]);
+        frames(1);
+        tp("ed:gpct");
+        tp("ed:gloss");
+        tp("ed:gloss");
+        tp("ed:gloss");
+        frames(2);
+        shot("e04-editor-goals");
+        tp("ed:tab:4");
+        frames(1);
+        // 1: after 3 hours, a horde of 2,000 out in the fields
+        if (map) edMap(cap[0] - 0.15f, cap[1] + 0.12f);
+        tp("ed:tadd");
+        frames(1);
+        // 2: more than 1,000 dead in the capital: an air strike on it
+        tp("ed:tw");
+        frames(1);
+        tp("ed:ttown");
+        if (map) edMap(cap[0], cap[1]);
+        tp("ed:tdo");
+        frames(1);
+        tp("ed:tplace");
+        if (map) edMap(cap[0] + 0.01f, cap[1] - 0.01f);
+        tp("ed:tadd");
+        frames(1);
+        // 3: the capital falls: the weather turns to storm
+        tp("ed:tw");
+        frames(1);
+        tp("ed:tdo");
+        tp("ed:tdo");
+        frames(1);
+        tp("ed:tadd");
+        frames(1);
+        // 4: after 30 minutes, a message
+        tp("ed:tw");
+        tp("ed:tw");
+        frames(1);
+        for (int k = 0; k < 2; k++) {
+            tp("ed:tt");
+            frames(1);
+        }
+        for (int k = 0; k < 7; k++) tp("ed:tt");
+        tp("ed:tdo");
+        frames(1);
+        pf.answers.add("Reports of the dead in the hills");
+        tp("ed:tmsg");
+        frames(2);
+        tp("ed:tadd");
+        frames(2);
+        shot("e05-editor-triggers");
+        tp("ed:save");
+        frames(2);
+        shot("e06-yours");
+        tp("start");
+        waitPlay();
+        game.speedIdx = 4;
+        frames(150);
+        shot("e07-scripted-game");
+        game.speedIdx = 6;
+        frames(40);
+        game.speedIdx = 4;
+        frames(60);
+        tp("pause");
+        frames(1);
+        tp("savereplay");
+        frames(1);
+        tp("tomenu");
+        frames(2);
+        tp("replays");
+        frames(2);
+        String[] names = pf.pref("replays", "").split(",");
+        tp("rp:" + names[0]);
+        waitPlay();
+        frames(30);
+        shot("e08-replay-bar");
+        // to two thirds of the way along (played on fast), then back to a quarter (from a snapshot)
+        DirectorScreens d = game.dir;
+        float[] sc = game.ui.find("rb:scrub");
+        tapAt(d.rbX0 + (d.rbX1 - d.rbX0) * 0.66f, sc[1]);
+        waitSeek();
+        shot("e09-replay-seeked");
+        tapAt(d.rbX0 + (d.rbX1 - d.rbX0) * 0.25f, sc[1]);
+        frames(1);
+        shot("e10-replay-going-back");
+        waitSeek();
+        // a camera path: three keyframes at different times and places
+        World w = game.world();
+        Region.Settlement c = w.r.city();
+        game.paused = true;
+        game.seekTo(game.replay.endTick / 5);
+        waitSeek();
+        game.cam.cx = c.cx * 16f;
+        game.cam.cy = c.cy * 16f;
+        game.cam.zoom = 0.12f;
+        frames(2);
+        tp("rb:key");
+        game.seekTo(game.world().tick + game.replay.endTick / 4);
+        waitSeek();
+        game.cam.cx = c.cx * 16f + 1500;
+        game.cam.zoom = 0.5f;
+        frames(2);
+        tp("rb:key");
+        game.seekTo(game.world().tick + game.replay.endTick / 4);
+        waitSeek();
+        game.cam.cx = c.cx * 16f + 600;
+        game.cam.cy = c.cy * 16f + 800;
+        game.cam.zoom = 1.0f;
+        frames(2);
+        tp("rb:key");
+        frames(2);
+        shot("e11-camera-keyframes");
+        tp("rb:path");
+        tapAt(d.rbX0 + (d.rbX1 - d.rbX0) * 0.3f, sc[1]);
+        waitSeek();
+        tp("rb:play");
+        frames(45);
+        shot("e12-camera-path-playing");
+        tp("rb:cut");
+        frames(2);
+        tp("pause");
+        frames(1);
+        tp("tomenu");
+        frames(2);
+        tp("replays");
+        frames(2);
+        shot("e13-replays-with-cut");
+        tp("back");
+        frames(1);
+        tp("settings");
+        frames(1);
+        pf.files.add(new String[]{"my_mod.ini", "[weapon pistol]\nrange = far\n"});
+        tp("mod:import");
+        frames(2);
+        game.scroll = 100000;
+        frames(2);
+        shot("e14-settings-mods-import-error");
+        System.out.println("ok director 1.4: replay " + (game.replay != null ? game.replay.snaps.size() + " snapshots" : "over"));
+        game.world().shutdown();
+        System.exit(0);
+    }
     /** Pass-and-play: add players, hand over, and a friend's result on the report. */
     static void coop() throws Exception {
         tap("new");
@@ -479,6 +704,10 @@ public final class UiShot {
             lifeShots(extra != null ? extra : "ZC2-28672-0-7-sandbox");
             return;
         }
+        if (mode.equals("survival")) {
+            survivalShots(extra != null ? extra : "ZC2-1536-0-5-survivor-survivor");
+            return;
+        }
         if (mode.equals("national")) {
             nationalShots(extra != null ? extra : "ZC2-28672-0-7-lab_leak");
             return;
@@ -520,6 +749,141 @@ public final class UiShot {
         }
         System.out.println("ok " + mode + ": " + game.world().clock() + ", " + game.world().totalZombies() + " dead");
         game.world().shutdown();
+        System.exit(0);
+    }
+
+    /** Puts the person you play at (x, y) (screenshots only: not an action). */
+    static void putAt(World w, float x, float y) {
+        int p = w.playerEnt;
+        w.act.touchPx(x, y);
+        w.e.x[p] = x;
+        w.e.y[p] = y;
+        game.cam.cx = x;
+        game.cam.cy = y;
+        frames(2);
+    }
+
+    /** The survivor's HUD on the street, the Kit, hiding in a building, driving, companions, the manual aim. */
+    static void survivalShots(String code) throws Exception {
+        tap("new");
+        frames(2);
+        if (!game.applyCode(code)) throw new IllegalStateException("code refused: " + code);
+        frames(2);
+        tap("start");
+        waitPlay();
+        World w = game.world();
+        int p = w.playerEnt;
+        game.speedIdx = 0;
+        frames(90);
+        Survival s = w.surv;
+        // a little worn and carrying a few things, so the bars and the Kit show something
+        s.food = 0.62f;
+        s.water = 0.41f;
+        s.rest = 0.74f;
+        s.items[Survival.I_FOOD] = 2;
+        s.items[Survival.I_MEDS] = 1;
+        s.items[Survival.I_TOOLS] = 1;
+        s.owned |= 1 << Survival.W_BAT;
+        s.melee = Survival.W_BAT;
+        // the stick pushed a little, so the person walks
+        float[] st = {game.freeL + game.ui.dp(24) + game.ui.dp(54), game.freeB - game.ui.dp(24) - game.ui.dp(54)};
+        game.touch(Game.DOWN, 0, st[0], st[1]);
+        game.touch(Game.MOVE, 0, st[0] + 25, st[1] - 5);
+        frames(40);
+        game.touch(Game.UP, 0, st[0] + 25, st[1] - 5);
+        frames(10);
+        shot("s1-street");
+        // the dead coming: tap to aim
+        float px = w.e.x[p], py = w.e.y[p];
+        Tools.paintZombies(w, px + 110, py - 30, 5, 30, w.c.ztype("walker").index);
+        frames(10);
+        tap("tool:fire");
+        frames(2);
+        int z = w.sp.nearestZombie(w.e, w.e.x[p], w.e.y[p], 300);
+        if (z >= 0) tapAt(game.cam.toScreenX(w.e.x[z]), game.cam.toScreenY(w.e.y[z]));
+        frames(6);
+        shot("s2-aim");
+        tap("tool:fire");
+        frames(1);
+        tap("tool:fire");
+        frames(1);
+        Tools.erase(w, w.e.x[p], w.e.y[p], 400);
+        // (sturdier than a person is, so the rest of the shots aren't cut short)
+        w.e.maxHp[p] = w.e.hp[p] = 400;
+        // the Kit
+        tap("tool:kit");
+        frames(4);
+        shot("s3-kit");
+        tap("tool:look");
+        frames(2);
+        // into a building near by: barricaded, searched
+        int bld = -1;
+        float bd = Float.MAX_VALUE;
+        for (int b = 0; b < w.r.bCount; b++) {
+            float dx = w.r.doorX(b) - w.e.x[p], dy = w.r.doorY(b) - w.e.y[p], d = dx * dx + dy * dy;
+            int k = w.r.bkind(b);
+            if (d < bd && w.r.walkablePx(w.r.doorX(b), w.r.doorY(b)) && (k == Region.B_SHOP || k == Region.B_HOUSE || k == Region.B_APARTMENT)) {
+                bd = d;
+                bld = b;
+            }
+        }
+        if (bld >= 0) {
+            putAt(w, w.r.doorX(bld), w.r.doorY(bld));
+            frames(4);
+            tap("sv:enter");
+            frames(2);
+            tap("sv:search");
+            frames(2);
+            tap("sv:barricade");
+            frames(4);
+            Tools.paintZombies(w, s.doorPX + 60, s.doorPY + 40, 8, 40, w.c.ztype("walker").index);
+            frames(60);
+            shot("s4-inside");
+            tap("sv:leave");
+            frames(4);
+        }
+        // a car: in, and away
+        int v = Tools.placeVehicle(w, "car", w.e.x[p], w.e.y[p]);
+        if (v >= 0) {
+            w.veh.fuel[v] = 0.64f;
+            putAt(w, w.veh.x[v] + 12, w.veh.y[v] + 10);
+            frames(4);
+            tap("sv:car");
+            frames(2);
+            float[] st2 = {game.freeL + game.ui.dp(24) + game.ui.dp(54), game.freeB - game.ui.dp(24) - game.ui.dp(54)};
+            game.touch(Game.DOWN, 0, st2[0], st2[1]);
+            game.touch(Game.MOVE, 0, st2[0] + 50, st2[1]);
+            frames(110);
+            shot("s5-driving");
+            game.touch(Game.UP, 0, st2[0] + 50, st2[1]);
+            frames(10);
+            tap("sv:car");
+            frames(4);
+        }
+        // companions: three people near, recruited, one told to stay
+        px = w.e.x[p];
+        py = w.e.y[p];
+        Tools.placePeople(w, w.c.unit("civilian"), 3, px + 18, py + 6);
+        frames(3);
+        for (int k = 0; k < 3; k++) {
+            if (game.ui.find("sv:recruit") == null) break;
+            tap("sv:recruit");
+            frames(2);
+        }
+        game.touch(Game.DOWN, 0, st[0], st[1]);
+        game.touch(Game.MOVE, 0, st[0] - 30, st[1] + 10);
+        frames(50);
+        game.touch(Game.UP, 0, st[0] - 30, st[1] + 10);
+        frames(30);
+        w.e.hp[p] = 58;
+        w.e.maxHp[p] = 70;
+        frames(2);
+        shot("s6-companions");
+        tap("tool:kit");
+        frames(4);
+        shot("s7-kit-companions");
+        System.out.println("ok survival: " + w.clock() + ", companions " + s.compN + ", searches " + s.searches + ", note: " + s.note);
+        w.shutdown();
         System.exit(0);
     }
 

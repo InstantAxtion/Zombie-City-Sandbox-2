@@ -19,6 +19,11 @@ final class CivAI {
             w.combat.playerThink(i, s);
             return;
         }
+        if ((e.flags[i] & Ents.F_COMPANION) != 0) {
+            // with the survivor: by their orders (Survival)
+            w.surv.companionThink(i, s);
+            return;
+        }
         if (e.aimT[i] > 0) e.aimT[i] -= World.DT;
         // think on alternate steps; between thinks keep going the same way
         if (((w.tick + i) & 1) != 0) return;

@@ -149,16 +149,31 @@ public final class Game {
         settings.load(pf);
         audio = new AudioDirector(pf);
         try {
-            // a content.ini in the app's own files replaces the built-in one (modding)
-            InputStream in;
-            if (pf.exists("content.ini")) {
-                in = pf.openRead("content.ini");
-                customContent = true;
-            } else in = pf.openAsset("content.ini");
+            // the built-in content first (its data sections stay in use where a mod has none of its own)...
+            InputStream in = pf.openAsset("content.ini");
             content = Content.load(in);
             in.close();
         } catch (Exception e) {
-            error = "Couldn't read the game's content" + (customContent ? " (your content.ini)" : "") + ": " + e;
+            error = "Couldn't read the game's content: " + e;
+        }
+        if (content != null && pf.exists("content.ini")) {
+            // ...then a content.ini in the app's own files replaces it (modding); one that can't be read is left out,
+            // and Settings says why
+            try {
+                InputStream in = pf.openRead("content.ini");
+                Content mod = Content.load(in);
+                in.close();
+                content = mod;
+                customContent = true;
+            } catch (Exception e) {
+                dir.modMsg = "Your content.ini couldn't be read, so the built-in one is in use. " + e.getMessage();
+                try {
+                    InputStream in = pf.openAsset("content.ini");
+                    content = Content.load(in);
+                    in.close();
+                } catch (Exception ignored) {
+                }
+            }
         }
         loadCustomScenarios();
         ngSeed = System.currentTimeMillis() % 1000000;
@@ -527,7 +542,7 @@ public final class Game {
             for (int i = 0; i < RegionGen.SIZES.length; i++) if (RegionGen.SIZES[i] == size) si = i;
             // (a real-scale size isn't on the menu yet: a code is the hidden way to one)
             boolean nat = national(size) || size == SMALL_NATIONAL;
-            if ((si < 0 && !nat) || preset < 0 || preset >= RegionGen.PRESETS.length) return false;
+            if ((si < 0 && !nat) || preset < 0 || preset >= Data.presetCount()) return false;
             if (si >= 0) ngSize = si;
             ngNational = nat ? size : 0;
             ngPreset = preset;
@@ -653,7 +668,7 @@ public final class Game {
         ry += Math.min(dh, ui.dp(12) * 1.3f * 5) + ui.dp(12);
         // the map
         float bw = (rightW - ui.dp(16)) / 3;
-        ui.button("preset", rightX, ry, bw, ui.dp(40), RegionGen.PRESETS[ngPreset], false, 13);
+        ui.button("preset", rightX, ry, bw, ui.dp(40), Data.presetName(ngPreset), false, 13);
         ui.button("size", rightX + bw + ui.dp(8), ry, bw, ui.dp(40), ngSizeName(), false, 13);
         ui.button("seed", rightX + (bw + ui.dp(8)) * 2, ry, bw, ui.dp(40), "New map", false, 13);
         ry += ui.dp(46);
@@ -851,6 +866,30 @@ public final class Game {
         return previewKey == key() ? preview : null;
     }
 
+    /** The preview map's towns (today's map or a nation's), or null while it's drawn: the editor picks from them. */
+    java.util.List<Region.Settlement> previewSettlements() {
+        if (previewKey != key()) return null;
+        Region pr = preview;
+        Nation pn = previewNation;
+        return pr != null ? pr.settlements : pn != null ? pn.settlements : null;
+    }
+
+    /** The preview map's facilities, or null. */
+    java.util.List<Region.Facility> previewFacilities() {
+        if (previewKey != key()) return null;
+        Region pr = preview;
+        Nation pn = previewNation;
+        return pr != null ? pr.facilities : pn != null ? pn.facilities : null;
+    }
+
+    /** The preview map's side in tiles, or 0. */
+    int previewSide() {
+        if (previewKey != key()) return 0;
+        Region pr = preview;
+        Nation pn = previewNation;
+        return pr != null ? pr.W : pn != null ? pn.size : 0;
+    }
+
     long key() {
         return ngSeed * 31 + ngPreset * 7 + ngSize + ngNational * 131L;
     }
@@ -911,7 +950,7 @@ public final class Game {
         closeWorld();
         loadingFrom = S_NEW;
         screen = S_LOADING;
-        loadingText = "Building " + ngSizeName().toLowerCase() + " (" + RegionGen.PRESETS[preset].toLowerCase() + ")...";
+        loadingText = "Building " + ngSizeName().toLowerCase() + " (" + Data.presetName(preset).toLowerCase() + ")...";
         loaded = null;
         loadError = null;
         final int gen = ++loadGen;
@@ -988,6 +1027,7 @@ public final class Game {
                 try {
                     InputStream in = pf.openRead(file);
                     Replay r = Replay.load(content, in, settings.simThreads());
+                    r.snapCap = Math.min(r.snapCap, Math.max(8L << 20, pf.maxMemory() / 8)); // (snapshots to seek with: a share of the heap)
                     in.close();
                     startX = Setup.originX;
                     startY = Setup.originY;
@@ -998,6 +1038,91 @@ public final class Game {
                 }
             }
         }, "replay").start();
+    }
+
+    // ------------------------------------------------------------------ seeking in a replay
+
+    /** The tick a replay is being taken to (played on fast, after a snapshot is loaded if one has to be), or -1. */
+    long seekTarget = -1;
+    /** A snapshot being loaded in the background for a seek, and what came of it. */
+    private boolean seekLoading;
+    private volatile World seekLoaded;
+    private volatile Replay.Snap seekSnap;
+    private volatile Throwable seekError;
+    /** The camera follows the replay's camera path (until the player moves it). */
+    boolean pathOn = true;
+
+    /** Takes the replay to a tick: back (or far ahead) by a snapshot, then played on as fast as the phone can. */
+    void seekTo(long tick) {
+        if (replay == null || seekLoading) return;
+        tick = Math.max(0, Math.min(replay.endTick, tick));
+        seekTarget = tick;
+        seekFrom = w.tick;
+        if (!replay.needsLoad(tick)) return;
+        final Replay rp = replay;
+        final Replay.Snap s = rp.nearest(tick);
+        seekLoading = true;
+        seekLoaded = null;
+        seekError = null;
+        new Thread(new Runnable() {
+            public void run() {
+                try {
+                    World nw = rp.load(s);
+                    seekSnap = s;
+                    seekLoaded = nw;
+                } catch (Throwable t) {
+                    seekError = t;
+                }
+            }
+        }, "seek").start();
+    }
+
+    /** A seek's share done, 0..1 (for the progress shown), or -1 when there's none. */
+    float seekProgress() {
+        if (replay == null || seekTarget < 0) return -1;
+        if (seekLoading) return 0;
+        return 1f - Math.max(0, seekTarget - w.tick) / (float) Math.max(1, seekTarget - Math.min(seekTarget, seekFrom));
+    }
+
+    private long seekFrom;
+
+    /** Once a frame in a replay: a loaded snapshot put in place, then the replay played on towards the target. */
+    private void seekStep() {
+        if (seekLoading) {
+            if (seekError != null) {
+                seekLoading = false;
+                seekTarget = -1;
+                toast("Couldn't go there: " + seekError.getMessage());
+                seekError = null;
+            } else if (seekLoaded != null) {
+                World old = w;
+                WorldView oldView = view;
+                w = seekLoaded;
+                seekLoaded = null;
+                seekLoading = false;
+                replay.adopt(w, seekSnap);
+                view = new WorldView(w, pf);
+                applySettings();
+                closeInspector();
+                cam.follow = -1;
+                cam.followVehicle = -1;
+                ended = w.ended;
+                if (oldView != null) oldView.map.clear();
+                old.shutdown();
+                seekFrom = w.tick;
+            }
+            return;
+        }
+        if (seekTarget < 0) return;
+        if (seekFrom > w.tick || seekFrom < 0) seekFrom = w.tick;
+        long t0 = System.nanoTime();
+        stepping = true;
+        while (w.tick < seekTarget && !replay.done() && System.nanoTime() - t0 < 24_000_000L) replay.step();
+        stepping = false;
+        if (w.tick >= seekTarget || replay.done()) {
+            seekTarget = -1;
+            seekFrom = -1;
+        }
     }
 
     /** The tool a role starts with. */
@@ -1201,6 +1326,10 @@ public final class Game {
             if (w.e.loc[f] == Ents.FREE || w.e.loc[f] == Ents.BODY) {
                 cam.cx += (w.e.x[f] - cam.cx) * Math.min(1, dt * 5);
                 cam.cy += (w.e.y[f] - cam.cy) * Math.min(1, dt * 5);
+            } else if (w.e.loc[f] == Ents.INSIDE) {
+                // hiding: the building's door
+                cam.cx += (w.e.x[f] - cam.cx) * Math.min(1, dt * 5);
+                cam.cy += (w.e.y[f] - cam.cy) * Math.min(1, dt * 5);
             } else if (w.e.loc[f] == Ents.ABOARD && w.e.vehicle[f] >= 0) {
                 cam.cx = w.veh.x[w.e.vehicle[f]];
                 cam.cy = w.veh.y[w.e.vehicle[f]];
@@ -1209,6 +1338,13 @@ public final class Game {
         if (cam.followVehicle >= 0 && w.veh.state[cam.followVehicle] != Vehicles.V_NONE) {
             cam.cx += (w.veh.x[cam.followVehicle] - cam.cx) * Math.min(1, dt * 5);
             cam.cy += (w.veh.y[cam.followVehicle] - cam.cy) * Math.min(1, dt * 5);
+        }
+        if (replay != null && pathOn && replay.path.size() > 0 && !seekLoading) {
+            // the replay's camera path: the view glides along it (the step under way counted in, so it doesn't stutter)
+            float[] p = replay.path.at(w.tick + (w.strategic ? acc / World.STRATEGIC_DT * 200 : acc / World.DT));
+            cam.cx = p[0];
+            cam.cy = p[1];
+            cam.zoom = p[2];
         }
         cam.update(dt, w.r.px());
         if (replay == null) {
@@ -1235,7 +1371,11 @@ public final class Game {
         }
         if (alertOf != w) takeAlerts();
         // step the simulation, within a time budget
-        if (!paused && screen == S_PLAY && dt > 0) {
+        if (replay != null && (seekLoading || seekTarget >= 0)) {
+            // going somewhere in the replay: no time passes as usual until it gets there
+            seekStep();
+            acc = 0;
+        } else if (!paused && screen == S_PLAY && dt > 0) {
             if (replay != null && replay.done()) {
                 replay = null;
                 w.director.replaying = false;
@@ -1261,6 +1401,7 @@ public final class Game {
                     stepDt = w.strategic ? World.STRATEGIC_DT : World.DT;
                 }
                 w.step();
+                if (replay != null) replay.afterStep(); // (a snapshot to seek back to, every so often)
                 acc -= stepDt;
                 simulated += stepDt;
                 steps++;
@@ -1351,11 +1492,12 @@ public final class Game {
             paletteW = pal ? Math.min(ui.dp(210), W * 0.27f) : 0;
             sheetW = inspectorOpen() ? Math.min(ui.dp(340), W * 0.42f) : 0;
             left = railW + paletteW;
+            if (replayBarShown()) bottom = dir.replayBarH(true);
             right = sheetW;
         } else {
             railW = paletteW = sheetW = 0;
             toolbarH = ui.dp(60);
-            bottom = toolbarH + (inspectorOpen() ? inspectorH : pal ? paletteFixedH() : 0);
+            bottom = toolbarH + (inspectorOpen() ? inspectorH : pal ? paletteFixedH() : replayBarShown() ? dir.replayBarH(false) : 0);
         }
         freeL = left;
         freeT = topH;
@@ -1469,6 +1611,7 @@ public final class Game {
             float sy0 = legendOpen || view.overlay > WorldView.OV_INFECTION ? ky : ky + ui.dp(44);
             float room = freeR - freeL - m * 2 - (mm ? ui.dp(114) : 0);
             float sh = statsPanel(g, freeL + m, sy0, Math.min(ui.dp(250), room), freeB - ui.dp(90) - sy0);
+            survCardY = sy0 + (statsOpen ? sh : ui.dp(38)) + m;
             keepHud(freeL + m - ui.dp(2), sy0 - ui.dp(2), freeL + m + (statsOpen ? Math.min(ui.dp(250), room) : ui.dp(38)), sy0 + sh + ui.dp(2));
         }
         if (mm) {
@@ -1480,8 +1623,11 @@ public final class Game {
             ui.button("handover", freeL + m + ui.dp(44), y + m, ui.dp(64), ui.dp(34), "P" + (w.roles.current + 1) + " ▸", false, 12);
         }
         bottomBars(g);
+        if (replayBarShown()) dir.replayBar(g, freeL, freeB, freeR - freeL, dir.replayBarH(landscape));
         if (stickOn()) joystick(g);
-        if (replay == null && (w.orders.possessing || w.orders.driven >= 0)) {
+        survTop = survActX = -1;
+        if (survOn()) survivalHud(g);
+        if (replay == null && (w.orders.possessing || w.orders.driven >= 0) && !w.surv.enabled) {
             // God's person or vehicle: the way back to watching, over the stick
             float bw = ui.dp(108), bh = ui.dp(36);
             ui.bigButton("letgo", joyCX - bw / 2, joyCY - ui.dp(54) - bh - ui.dp(12), bw, bh, w.orders.possessing ? "Release" : "Let go", 0xE0B05010);
@@ -1804,15 +1950,22 @@ public final class Game {
         float x0 = freeL + m, x1 = freeR - m;
         // beside the survivor's stick, not over it
         if (stickOn()) x0 = joyCX + ui.dp(64);
+        float ry = freeB - ui.dp(6);
+        // the survival card over the stick and the buttons down the right: the radio goes above the stick, beside the buttons
+        if (survTop >= 0) {
+            x0 = freeL + m;
+            ry = Math.min(ry, survTop - ui.dp(4));
+        }
+        if (survActX >= 0) x1 = Math.min(x1, survActX - m);
         stackX0 = x0;
         stackX1 = x1;
-        float ry = freeB - ui.dp(6);
         if (view.aimX >= 0) ry -= ui.dp(60);
         if (!settings.radio || x1 - x0 < ui.dp(120)) return ry;
         int shown = 0;
         boolean routineShown = false;
         float ts = ui.dp(Ui.S + 0.5f), lh = ui.dp(22);
-        for (int i = w.news.log.size() - 1; i >= 0 && shown < 3; i--) {
+        int most = survTop >= 0 ? 2 : 3; // (playing a person, the street matters more)
+        for (int i = w.news.log.size() - 1; i >= 0 && shown < most; i--) {
             News.Item it = w.news.log.get(i);
             if (it.kind == News.HEADLINE) continue;
             double age = w.time - it.time;
@@ -1892,7 +2045,7 @@ public final class Game {
             case Roles.PRECINCT: return new String[]{"look", "send", "orders", "build", "map"};
             case Roles.SQUAD: return new String[]{"look", "orders", "build", "map"};
             case Roles.OFFICER:
-            case Roles.SURVIVOR: return new String[]{"look", "fire", "map"};
+            case Roles.SURVIVOR: return new String[]{"look", "fire", "kit", "map"};
             default: return new String[]{"look", "dead", "police", "army", "build", "strike", "orders", "town", "erase", "map"};
         }
     }
@@ -1924,6 +2077,7 @@ public final class Game {
             case "build": return "Build";
             case "map": return "Map";
             case "fire": return "Shoot";
+            case "kit": return "Kit";
             case "send": return "Send";
             default: return t;
         }
@@ -1938,6 +2092,7 @@ public final class Game {
     /** A line saying what the current tool does with a tap. */
     private String paletteCaption() {
         switch (tool) {
+            case "kit": return w.surv.enabled ? kitCaption() : null;
             case "dead": return brush >= 10000 ? "Drag to paint " + fmt(brush) + " of the dead (" + fmt(Tools.MASS_INDIVIDUALS) + " as people, the rest counted)" : "Drag on the map to paint the dead: pick a kind and how many";
             case "build": return buildCaption();
             case "police": return placeTemplate != null ? "Tap the map to place the squad and its vehicle" : placeVehicle != null ? "Tap a road to place the vehicle" : "Tap the map to place a squad";
@@ -1966,6 +2121,7 @@ public final class Game {
     /** Rows of (id, label) pairs for the current tool's options; an id starting with "x:" is shown greyed. */
     private String[][] palette() {
         switch (tool) {
+            case "kit": return w.surv.enabled ? kitPalette() : null;
             case "dead": {
                 // every kind of the dead in content.ini (a mod's own too), and the brush sizes up to a quarter million
                 java.util.List<String> types = new java.util.ArrayList<String>();
@@ -2200,6 +2356,16 @@ public final class Game {
     }
 
     private boolean paletteOn(String id) {
+        if (id.startsWith("sv:eq:")) {
+            int k = Integer.parseInt(id.substring(6));
+            return k == w.surv.gun || k == w.surv.melee;
+        }
+        if (id.startsWith("sv:co:")) {
+            int k = Integer.parseInt(id.substring(6));
+            if (w.surv.compN == 0) return false;
+            for (int j = 0; j < w.surv.compN; j++) if (w.surv.order[j] != k) return false;
+            return true;
+        }
         if (id.startsWith("z:")) return id.substring(2).equals(zType < 0 ? "-1" : content.ztypes.get(zType).id);
         if (id.startsWith("b:")) return Integer.parseInt(id.substring(2)) == brush && !(tool.equals("erase") && eraseMode.equals("town"));
         if (id.startsWith("u:")) return placeVehicle == null && placeTemplate == null && id.substring(2).equals(placeUnit);
@@ -2281,10 +2447,10 @@ public final class Game {
 
     private void toolButton(String t, float x, float y, float w2, float h) {
         if (t.equals("fire")) {
-            // not a tool but a switch: firing at will or holding fire
-            boolean on = w.strat.playerFire;
-            g0Fill(x, y, w2, h, on ? 0xFF2E5A34 : 0xFF3A2A2A);
-            ui.iconButton("tool:fire", x, y, w2, h, "fire", on ? "Firing" : "Hold fire", false);
+            // not a tool but a switch: firing at will, aiming by tapping (survival), or holding fire
+            boolean on = w.strat.playerFire, aim = w.surv.enabled && w.surv.manual;
+            g0Fill(x, y, w2, h, aim ? 0xFF5A4A24 : on ? 0xFF2E5A34 : 0xFF3A2A2A);
+            ui.iconButton("tool:fire", x, y, w2, h, "fire", aim ? "Tap aim" : on ? "Auto fire" : "Hold fire", false);
             return;
         }
         ui.iconButton("tool:" + t, x, y, w2, h, t, toolName(t), t.equals(tool));
@@ -2347,6 +2513,11 @@ public final class Game {
     // ------------------------------------------------------------------ the inspector
 
     private float inspectorH;
+
+    /** The replay's controls under the map (not while a sheet is open there). */
+    boolean replayBarShown() {
+        return replay != null && !inspectorOpen() && !hideUi;
+    }
 
     boolean inspectorOpen() {
         return inspEnt >= 0 || inspVeh >= 0 || inspFac >= 0 || inspSettle >= 0 || inspBuilding >= 0 || inspDistrict >= 0 || ((inspSquad != null || inspFormation != null) && !tool.equals("orders"));
@@ -2693,6 +2864,283 @@ public final class Game {
         ui.button("tomenu", x + ui.dp(32) + bw * 2, y + ph - ui.dp(56), bw, ui.dp(40), "Menu", false, 13);
     }
 
+    // ------------------------------------------------------------------ survival: the person's HUD
+
+    /** The survival HUD is up (the survivor or the officer, alive, the game going). */
+    private boolean survOn() {
+        return w != null && w.surv.enabled && w.playerEnt >= 0 && w.playerAlive() && !w.ended;
+    }
+
+    private double survNoteSeen = -1;
+    /** The top of the survival card and the left edge of its buttons (the radio keeps clear of both). */
+    private float survTop = -1, survActX = -1;
+    /** Where the survival card goes: under the key's and the numbers' buttons, top left, clear of the person in the middle. */
+    private float survCardY = -1;
+
+    /** The survival HUD: marks on the map, the card (needs, weapon, the way to safety, companions) and the buttons. */
+    private void survivalHud(Gfx g) {
+        Survival s = w.surv;
+        Ents e = w.e;
+        int p = w.playerEnt;
+        if (s.noteAt != survNoteSeen) {
+            survNoteSeen = s.noteAt;
+            if (s.noteAt >= 0 && w.time - s.noteAt < 4 && replay == null && s.note.length() > 0) toast(s.note);
+        }
+        // on the map: where you hide, who is with you, what you aim at
+        if (e.loc[p] == Ents.INSIDE) {
+            float x = cam.toScreenX(s.doorPX), y = cam.toScreenY(s.doorPY);
+            float pulse = (view.time * 0.7f) % 1f;
+            g.color(MapPainter.alpha(0xFFFFE08A, 0.9f * (1 - pulse)));
+            g.strokeCircle(x, y, ui.dp(11 + pulse * 18), ui.dp(2));
+            g.color(0xC0101418);
+            g.fillCircle(x, y, ui.dp(10));
+            Icons.draw(g, "town", x, y, ui.dp(13), 0xFFFFE08A);
+            view.label(g, s.barricaded() ? "Hiding, barricaded" : "Hiding", x, y - ui.dp(20), 11, 0xFFFFF0C0, Gfx.ALIGN_CENTER, true);
+        }
+        for (int k = 0; k < s.compN; k++) {
+            int c = s.comp[k];
+            if (e.loc[c] != Ents.FREE) continue;
+            float x = cam.toScreenX(e.x[c]), y = cam.toScreenY(e.y[c]);
+            g.color(s.order[k] == Survival.C_STAY ? 0xE0E0C060 : 0xE070E090);
+            g.strokeCircle(x, y, ui.dp(7), ui.dp(1.6f));
+        }
+        int t = s.manual ? s.target() : -1;
+        if (t >= 0) {
+            float x = cam.toScreenX(e.x[t]), y = cam.toScreenY(e.y[t]), r = ui.dp(9);
+            g.color(0xF0FF5040);
+            g.strokeCircle(x, y, r, ui.dp(1.8f));
+            g.line(x - r * 1.6f, y, x - r * 0.5f, y, ui.dp(1.8f));
+            g.line(x + r * 0.5f, y, x + r * 1.6f, y, ui.dp(1.8f));
+            g.line(x, y - r * 1.6f, x, y - r * 0.5f, ui.dp(1.8f));
+            g.line(x, y + r * 0.5f, x, y + r * 1.6f, ui.dp(1.8f));
+        }
+        survivalCard(g);
+        survivalButtons(g);
+    }
+
+    /** One need as a thin bar with its name; flashes when low. */
+    private void needBar(Gfx g, String name, float v, int col, float x, float y, float wdt) {
+        float lw = ui.dp(38), bh = ui.dp(6), ts = ui.dp(10.5f);
+        boolean low = v < 0.2f;
+        g.color(low && ((int) (view.time * 3)) % 2 == 0 ? 0xFFFF8070 : Ui.DIM);
+        g.text(name, x, y + ts * 0.36f, ts, Gfx.ALIGN_LEFT, false);
+        float bx = x + lw, bw = wdt - lw;
+        g.color(0x40FFFFFF);
+        g.fillRoundRect(bx, y - bh / 2, bw, bh, bh / 2);
+        g.color(col);
+        g.fillRoundRect(bx, y - bh / 2, Math.max(bh, bw * Math.max(0, Math.min(1, v))), bh, bh / 2);
+    }
+
+    private void survivalCard(Gfx g) {
+        Survival s = w.surv;
+        Ents e = w.e;
+        int p = w.playerEnt;
+        float m = ui.dp(8);
+        float cw = Math.min(ui.dp(178), (freeR - freeL) * 0.5f);
+        java.util.List<String> lines = new java.util.ArrayList<String>();
+        java.util.List<Integer> cols = new java.util.ArrayList<Integer>();
+        // the weapon in hand and the one for close up
+        String wp = s.gun >= 0 ? Survival.W_NAMES[s.gun] + " " + s.rounds(s.gun) : "No gun";
+        if (s.melee != Survival.W_HANDS) wp += " · " + Survival.W_NAMES[s.melee];
+        lines.add(wp + (s.manual ? " · aim" : w.strat.playerFire ? "" : " · hold"));
+        cols.add(Ui.TEXT);
+        // where you are
+        byte l = e.loc[p];
+        if ((e.flags[p] & Ents.F_INFECTED) != 0) {
+            lines.add("Bitten: it's in you");
+            cols.add(0xFFFF7A6A);
+        }
+        if (l == Ents.INSIDE) {
+            String st = s.barricaded() ? "Barricaded " + Math.round(s.doorStrength() * 100) + "%" : "Door open";
+            lines.add("Inside · " + st + (s.resting ? " · resting" : ""));
+            cols.add(s.deadInside > 0 ? 0xFFFF7A6A : 0xFFFFE08A);
+        } else if (l == Ents.ABOARD && s.car >= 0) {
+            int v = s.car;
+            boolean mob = w.veh.mobbed(v) || w.sp.zombiesNear(e, w.veh.x[v], w.veh.y[v], 26, 7) >= 5;
+            lines.add((mob ? "Mobbed! " : "Car · ") + "fuel " + Math.round(w.veh.fuel[v] * 100) + "% · " + Math.round(w.veh.hp[v] * 100 / w.veh.type(v).hp) + "%");
+            cols.add(mob || w.veh.fuel[v] < 0.1f ? 0xFFFF7A6A : 0xFF9EC4FF);
+        }
+        // the way to safety
+        String safe = null;
+        if (s.safeKind >= 0) {
+            String[] names = {"Army base", "Evacuation", "Settlement", "Boats"};
+            float km = s.safeD / 16f * 0.004f * 16f / 16f * 4f;
+            km = s.safeD * 0.25f / 1000f;
+            safe = names[s.safeKind] + " " + (km >= 10 ? "" + Math.round(km) : String.format("%.1f", km)) + " km " + compassShort(s.safeX - w.playerX(), s.safeY - w.playerY());
+        }
+        if (s.compN > 0) {
+            int stay = 0;
+            for (int k = 0; k < s.compN; k++) if (s.order[k] == Survival.C_STAY) stay++;
+            lines.add(s.compN + (s.compN == 1 ? " with you" : " with you") + (stay > 0 ? " (" + stay + " staying)" : ""));
+            cols.add(0xFF8EE0A0);
+        }
+        int bars = s.needsOn ? 5 : 2;
+        float bh = ui.dp(12), lh = ui.dp(15), pad = ui.dp(7);
+        float ch = pad * 2 + bars * bh + lines.size() * lh + (safe != null ? lh + ui.dp(2) : 0) + ui.dp(2);
+        float x = freeL + m, y = survCardY >= 0 ? survCardY : freeT + m;
+        // the radio goes above the stick
+        survTop = stickOn() ? joyCY - ui.dp(54) - ui.dp(10) : -1;
+        g.color(0xD0101820);
+        g.fillRoundRect(x, y, cw, ch, ui.dp(10));
+        ui.block(x, y, cw, ch);
+        keepHud(x, y, x + cw, y + ch);
+        float yy = y + pad + bh / 2;
+        float iw = cw - pad * 2;
+        needBar(g, "Health", e.hp[p] / Math.max(1, e.maxHp[p]), 0xFFE05A50, x + pad, yy, iw);
+        yy += bh;
+        needBar(g, s.sprinting ? "Sprint" : "Breath", s.stamina, 0xFFE8C850, x + pad, yy, iw);
+        yy += bh;
+        if (s.needsOn) {
+            needBar(g, "Food", s.food, 0xFF7CC860, x + pad, yy, iw);
+            yy += bh;
+            needBar(g, "Water", s.water, 0xFF58A8E8, x + pad, yy, iw);
+            yy += bh;
+            needBar(g, "Rest", s.rest, 0xFFB090E8, x + pad, yy, iw);
+            yy += bh;
+        }
+        float ts = ui.dp(11.5f);
+        yy += ui.dp(2) - bh / 2;
+        for (int k = 0; k < lines.size(); k++) {
+            g.color(cols.get(k));
+            g.text(Ui.fit(g, lines.get(k), iw, ts, k == 0), x + pad, yy + lh * 0.75f, ts, Gfx.ALIGN_LEFT, k == 0);
+            yy += lh;
+        }
+        if (safe != null) {
+            // an arrow towards the nearest safe place
+            float dx = s.safeX - w.playerX(), dy = s.safeY - w.playerY(), d = (float) Math.sqrt(dx * dx + dy * dy) + 0.01f;
+            float ax = x + pad + ui.dp(6), ay = yy + lh * 0.55f, r = ui.dp(6);
+            g.color(0xFF8EE0A0);
+            float ux = dx / d, uy = dy / d;
+            g.line(ax - ux * r, ay - uy * r, ax + ux * r, ay + uy * r, ui.dp(2));
+            g.line(ax + ux * r, ay + uy * r, ax + ux * r * 0.2f - uy * r * 0.6f, ay + uy * r * 0.2f + ux * r * 0.6f, ui.dp(2));
+            g.line(ax + ux * r, ay + uy * r, ax + ux * r * 0.2f + uy * r * 0.6f, ay + uy * r * 0.2f - ux * r * 0.6f, ui.dp(2));
+            g.text(Ui.fit(g, safe, iw - ui.dp(18), ts, true), x + pad + ui.dp(16), yy + lh * 0.75f, ts, Gfx.ALIGN_LEFT, true);
+        }
+    }
+
+    private static String compassShort(float dx, float dy) {
+        String[] names = {"E", "SE", "S", "SW", "W", "NW", "N", "NE"};
+        double a = Math.atan2(dy, dx);
+        int k = (int) Math.round(a / (Math.PI / 4));
+        return names[((k % 8) + 8) % 8];
+    }
+
+    /** The buttons for what the person can do now, down the right: in a building, in a car, on the street. */
+    private void survivalButtons(Gfx g) {
+        survActX = -1;
+        if (replay != null) return;
+        Survival s = w.surv;
+        Ents e = w.e;
+        int p = w.playerEnt;
+        java.util.List<String[]> acts = new java.util.ArrayList<String[]>();
+        byte l = e.loc[p];
+        if (l == Ents.INSIDE) {
+            if (s.can(Survival.SEARCH)) acts.add(new String[]{"sv:search", "Search", "E0346048"});
+            if (s.can(Survival.BARRICADE)) acts.add(new String[]{"sv:barricade", s.barricaded() ? "Reinforce" : "Barricade", "E0705028"});
+            if (s.can(Survival.REST) || s.resting) acts.add(new String[]{"sv:rest", s.resting ? "Get up" : "Rest", "E0403C68"});
+            acts.add(new String[]{"sv:leave", "Leave", "E0304860"});
+        } else if (l == Ents.ABOARD) {
+            acts.add(new String[]{"sv:car", "Get out", "E0304860"});
+        } else {
+            if (s.can(Survival.PICKUP)) acts.add(new String[]{"sv:pickup", "Take gun", "E0346048"});
+            if (s.can(Survival.RECRUIT)) acts.add(new String[]{"sv:recruit", "Recruit", "E0346048"});
+            if (s.can(Survival.CAR)) acts.add(new String[]{"sv:car", "Get in", "E0304860"});
+            if (s.can(Survival.ENTER)) acts.add(new String[]{"sv:enter", "Go in", "E0304860"});
+            if (s.manual) acts.add(new String[]{"sv:shoot", s.target() >= 0 ? "Fire" : "Tap target", s.target() >= 0 ? "E0A02820" : "E0503A3A"});
+            if (s.melee != Survival.W_HANDS) acts.add(new String[]{"sv:swing", Survival.W_NAMES[s.melee], "E0705028"});
+            acts.add(new String[]{"sv:shove", "Shove", "E0604848"});
+        }
+        float m = ui.dp(8), bw = ui.dp(84), bh = ui.dp(40), gap = ui.dp(7);
+        float x = freeR - m - bw, y = freeB - m - bh;
+        survActX = x;
+        for (String[] a : acts) {
+            boolean down = a[0].equals(ui.pressed);
+            int col = (int) Long.parseLong(a[2], 16);
+            g.color(down ? MapPainter.shade(col, 0.75f) : col);
+            g.fillRoundRect(x, y, bw, bh, ui.dp(10));
+            g.color(0x30FFFFFF);
+            g.fillRoundRect(x + ui.dp(8), y + ui.dp(1), bw - ui.dp(16), ui.dp(1.5f), ui.dp(1));
+            g.color(0xFFFFFFFF);
+            float ts = ui.dp(13.5f);
+            g.text(Ui.fit(g, a[1], bw - ui.dp(8), ts, true), x + bw / 2, y + bh / 2 + ts * 0.36f, ts, Gfx.ALIGN_CENTER, true);
+            ui.area(a[0], x, y, bw, bh);
+            y -= bh + gap;
+        }
+        keepHud(x, y + bh, x + bw, freeB - m);
+    }
+
+    /** A survival button: carried out through Actions (recorded); a word when it can't be done. */
+    private void survButton(String id) {
+        Survival s = w.surv;
+        String k = id.substring(3);
+        boolean ok = true;
+        switch (k) {
+            case "enter": ok = Actions.survival(w, Survival.ENTER); break;
+            case "leave": ok = Actions.survival(w, Survival.LEAVE); break;
+            case "barricade": ok = Actions.survival(w, Survival.BARRICADE); break;
+            case "search": Actions.survival(w, Survival.SEARCH); break;
+            case "rest": ok = Actions.survival(w, Survival.REST, s.resting ? 0 : 1, 0); break;
+            case "car": ok = Actions.survival(w, Survival.CAR); break;
+            case "recruit": ok = Actions.survival(w, Survival.RECRUIT); break;
+            case "pickup": ok = Actions.survival(w, Survival.PICKUP); break;
+            case "shove": Actions.survival(w, Survival.MELEE, 0, 0); break;
+            case "swing": Actions.survival(w, Survival.MELEE, 1, 0); break;
+            case "shoot":
+                if (s.target() < 0) {
+                    toast("Tap one of the dead to aim at it");
+                    return;
+                }
+                ok = Actions.survival(w, Survival.SHOOT);
+                if (!ok) toast("Out of rounds: change weapon in the Kit");
+                return;
+            default:
+                if (k.startsWith("use:")) ok = Actions.survival(w, Survival.USE, Integer.parseInt(k.substring(4)), 0);
+                else if (k.startsWith("eq:")) ok = Actions.survival(w, Survival.EQUIP, Integer.parseInt(k.substring(3)), 0);
+                else if (k.startsWith("co:")) ok = Actions.survival(w, Survival.ORDER, Integer.parseInt(k.substring(3)), -1);
+                if (!ok && k.startsWith("use:")) toast("You don't need that now");
+                return;
+        }
+        if (!ok && k.equals("car")) toast("No car to get into here");
+    }
+
+    /** The Kit: what you carry (use it), your weapons (take one in hand) and orders for those with you. */
+    private String[][] kitPalette() {
+        Survival s = w.surv;
+        java.util.List<String[]> rows = new java.util.ArrayList<String[]>();
+        if (s.needsOn || s.items[Survival.I_MEDS] > 0) {
+            java.util.List<String> r = new java.util.ArrayList<String>();
+            String[] verbs = {"Eat", "Drink", "Medkit", "", "Fuel"};
+            for (int it : new int[]{Survival.I_FOOD, Survival.I_WATER, Survival.I_MEDS, Survival.I_FUEL}) {
+                if (!s.needsOn && it != Survival.I_MEDS && it != Survival.I_FUEL) continue;
+                r.add((s.items[it] > 0 ? "sv:use:" : "x:use:") + it);
+                r.add(verbs[it] + " " + s.items[it]);
+            }
+            rows.add(r.toArray(new String[0]));
+        }
+        java.util.List<String> wr = new java.util.ArrayList<String>();
+        for (int k = Survival.W_PISTOL; k < Survival.NW; k++)
+            if (s.owns(k)) {
+                wr.add("sv:eq:" + k);
+                wr.add(Survival.W_NAMES[k] + " " + s.rounds(k));
+            }
+        for (int k = Survival.W_HANDS; k < Survival.W_PISTOL; k++)
+            if (s.owns(k) && (k != Survival.W_HANDS || s.owned != (1 << Survival.W_HANDS))) {
+                wr.add("sv:eq:" + k);
+                wr.add(k == Survival.W_HANDS ? "Hands" : Survival.W_NAMES[k]);
+            }
+        if (!wr.isEmpty()) rows.add(wr.toArray(new String[0]));
+        if (s.compN > 0) rows.add(new String[]{"sv:co:0", "Follow me", "sv:co:1", "Stay here", "sv:co:2", "Carry"});
+        return rows.toArray(new String[0][]);
+    }
+
+    private String kitCaption() {
+        Survival s = w.surv;
+        String c = "Carrying " + s.carried() + " of " + s.capacity();
+        if (s.items[Survival.I_TOOLS] > 0) c += " · tools " + s.items[Survival.I_TOOLS];
+        if (s.compN > 0) c += " · " + s.compN + " with you";
+        return c + ". Tap to use or take in hand";
+    }
+
     // ------------------------------------------------------------------ survivor stick
 
     private void joystick(Gfx g) {
@@ -2818,7 +3266,11 @@ public final class Game {
                 {"#", "The simulation"},
                 {"set:max", "People in detail", WorldView.fmt(s.maxIndividuals)},
                 {"set:threads", "Threads", s.threads == 0 ? "Auto (" + s.simThreads() + ")" : "" + s.threads},
-                {"set:gpu", "Renderer (next start)", s.gpu ? "GPU (test)" : "Canvas"}};
+                {"set:gpu", "Renderer (next start)", s.gpu ? "GPU (test)" : "Canvas"},
+                {"#", "Mods"},
+                {"mod:import", "Import a content.ini", "Import"},
+                {"mod:share", "Share the content.ini in use", "Share"},
+                {"mod:builtin", "Content in use", customContent ? "Yours (reset)" : "Built-in"}};
         boolean land = W > H * 1.15f;
         float colW = land ? (W - m * 3) / 2 : W - m * 2;
         float top = ui.dp(60), rh = ui.dp(46), sh = ui.dp(34);
@@ -2851,8 +3303,10 @@ public final class Game {
         }
         y += ui.dp(6);
         float ny = ui.wrap("More people in detail look better and cost more on a slow phone. The rest are still simulated, as counts.", m, y + ui.dp(16), W - m * 2, ui.dp(12), Ui.DIM, 3);
+        if (dir.modMsg != null) ny += ui.dp(8) + ui.wrap(dir.modMsg, m, y + ny + ui.dp(30), W - m * 2, ui.dp(12.5f), dir.modOk ? Ui.GOOD : 0xFFFF8A70, 8);
         g.restore();
         maxScroll = Math.max(0, y + ny + ui.dp(30) + scroll - H);
+        if (scroll > maxScroll) scroll = maxScroll;
         g.color(Ui.SCREEN);
         g.fillRect(0, 0, W, ui.dp(54));
         ui.button("back", m, ui.dp(10), ui.dp(70), ui.dp(36), "Back", false, 13);
@@ -3808,6 +4262,10 @@ public final class Game {
     private void onButton(String id) {
         pf.playSound("click", 0.4f, 0); // (the mixer applies the sound setting)
         if (id.length() == 0) return;
+        if (id.startsWith("sv:")) {
+            if (w != null && replay == null && w.surv.enabled) survButton(id);
+            return;
+        }
         switch (id) {
             case "new": screen = S_NEW; scroll = 0; return;
             case "replays": back = screen; screen = S_REPLAYS; scroll = 0; return;
@@ -3914,7 +4372,7 @@ public final class Game {
                 scroll = 0;
                 return;
             case "start": start(); return;
-            case "preset": ngPreset = (ngPreset + 1) % RegionGen.PRESETS.length; return;
+            case "preset": ngPreset = (ngPreset + 1) % Data.presetCount(); return;
             case "size": ngSize = (ngSize + 1) % RegionGen.SIZES.length; ngNational = 0; return;
             case "seed": ngSeed = (ngSeed * 1103515245L + 12345L + System.nanoTime()) % 1000000L; if (ngSeed < 0) ngSeed = -ngSeed; return;
             case "pause": screen = S_PAUSE; return;
@@ -4165,7 +4623,14 @@ public final class Game {
         else if (id.startsWith("tool:")) {
             String t = id.substring(5);
             if (t.equals("fire")) {
-                Actions.fire(w, !w.strat.playerFire);
+                // auto fire -> tap to aim (survival) -> hold fire -> auto fire
+                if (w.surv.enabled && w.strat.playerFire && !w.surv.manual) {
+                    Actions.survival(w, Survival.AIM, 1, 0);
+                    toast("Tap one of the dead to aim, then Fire");
+                } else if (w.surv.enabled && w.surv.manual) {
+                    Actions.survival(w, Survival.AIM, 0, 0);
+                    Actions.fire(w, false);
+                } else Actions.fire(w, !w.strat.playerFire);
                 return;
             }
             tool = t;
@@ -4451,6 +4916,11 @@ public final class Game {
                 if (isScrollScreen()) scroll = Math.max(0, Math.min(maxScroll, scroll - (y - oy)));
                 return;
             }
+            if (replay != null && pathOn && replay.path.size() > 0 && moved) {
+                // the player takes the camera from the path (the Path button gives it back)
+                pathOn = false;
+                toast("Camera path off: the camera is yours");
+            }
             if (pointers >= 2) {
                 pinch();
                 return;
@@ -4677,6 +5147,8 @@ public final class Game {
 
     /** Is the stick on screen: the survivor, someone God took over, or a vehicle driven? */
     private boolean stickOn() {
+        // (hiding in a building there's nowhere to walk: the stick goes until you leave)
+        if (w.playerEnt >= 0 && w.e.loc[w.playerEnt] == Ents.INSIDE) return false;
         return replay == null && (w.mode == World.MODE_SURVIVOR && w.playerEnt >= 0 || w.orders.possessing || w.orders.driven >= 0);
     }
 
@@ -4741,6 +5213,14 @@ public final class Game {
         rippleY = sy;
         rippleT = 0;
         if (brushTool()) return; // painted on the way down
+        if (w.surv.enabled && w.surv.manual && replay == null && w.playerAlive() && (tool.equals("look") || tool.equals("kit"))) {
+            // tap-to-aim: the nearest of the dead to the tap
+            int z = w.sp.nearestZombie(w.e, x, y, ui.dp(28) / cam.zoom);
+            if (z >= 0) {
+                Actions.survival(w, Survival.AIM_AT, z, w.e.uid[z]);
+                return;
+            }
+        }
         switch (tool) {
             case "build": {
                 if (buildItem.startsWith("bu:")) {
@@ -5133,7 +5613,7 @@ public final class Game {
             body.append(floors <= 0 ? ". " : "; about " + WorldView.people(Math.min(in, res * 3)) + " sheltering inside now. ");
         }
         if (w.fires.heat(b) > 0) body.append("On fire. ");
-        return new String[]{Region.BNAMES[kind], sub, body.toString()};
+        return new String[]{Data.buildingName(kind), sub, body.toString()};
     }
 
     /** A district's people indoors and out, the dead, the bitten, home count and fires: {people, dead, infected, homes, fires}. */

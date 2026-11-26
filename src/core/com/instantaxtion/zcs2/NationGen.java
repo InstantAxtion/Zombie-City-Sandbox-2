@@ -44,7 +44,7 @@ public final class NationGen {
     private NationGen(int size, int preset, long seed, int threads) {
         n = new Nation(size, preset, seed);
         roads = n.roads;
-        this.preset = preset;
+        this.preset = Data.terrain(preset); // (the kind of land: a preset of content.ini's may reuse one)
         this.seed = seed;
         this.threads = Math.max(1, threads);
         rng = new Rng(seed * 131 + preset * 17 + size);

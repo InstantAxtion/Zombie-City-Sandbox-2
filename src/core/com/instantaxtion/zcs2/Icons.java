@@ -104,6 +104,13 @@ final class Icons {
                 }
                 break;
             }
+            case "kit": // a backpack
+                g.fillRoundRect(x - h * 0.6f, y - h * 0.5f, h * 1.2f, h * 1.35f, h * 0.35f);
+                g.strokeCircle(x, y - h * 0.62f, h * 0.3f, lw);
+                g.color(0xFF101418);
+                g.fillRoundRect(x - h * 0.4f, y + h * 0.05f, h * 0.8f, h * 0.45f, h * 0.15f);
+                g.fillRect(x - h * 0.6f, y - h * 0.18f, h * 1.2f, lw);
+                break;
             case "people": // a person
                 g.fillCircle(x, y - h * 0.45f, h * 0.32f);
                 g.fillRoundRect(x - h * 0.5f, y - h * 0.05f, h, h * 0.85f, h * 0.35f);

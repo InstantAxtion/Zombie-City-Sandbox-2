@@ -1182,8 +1182,8 @@ public final class Strategic {
             if (z > 500) end(false, c.name + " is overrun", "More than 500 of the dead are inside the city.");
             else if (late) end(true, c.name + " stands", "The capital held for " + sc.days + " days.");
         } else if (g.equals("survive")) {
-            if (w.playerEnt >= 0 && w.e.loc[w.playerEnt] == Ents.FREE) {
-                float[] safe = safeAt(w.e.x[w.playerEnt], w.e.y[w.playerEnt]);
+            if (w.playerAlive()) {
+                float[] safe = w.e.loc[w.playerEnt] == Ents.INSIDE ? null : safeAt(w.playerX(), w.playerY());
                 if (safe != null)
                     end(true, "You reached safety", "You made it to " + SAFE_NAMES[(int) safe[2]] + " after " + timeSince() + ".");
                 else if (late) end(true, "You survived", "You lived through " + sc.days + " days of it.");

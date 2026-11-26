@@ -11,8 +11,8 @@ import java.util.Map;
  * them, and every building and facility. The same seed, size and preset always build the same region.
  */
 public final class RegionGen {
+    /** The four kinds of land (a preset's terrain); the presets themselves, names and all, are content.ini's [preset]. */
     public static final int COAST = 0, VALLEY = 1, HIGHLANDS = 2, LAKES = 3;
-    public static final String[] PRESETS = {"Coast", "River Valley", "Highlands", "Lake District"};
     /** Map sides in tiles: a state, a country, a large country (a tile is 16 px, about 4 m). */
     public static final int[] SIZES = {1536, 2304, 3072};
     public static final String[] SIZE_NAMES = {"One state", "Country", "Large country"};
@@ -23,10 +23,15 @@ public final class RegionGen {
     private final float[] height;
     private final int W, H;
     private final float scale;
+    /** The preset (content.ini's [preset]) and the kind of land it makes. */
+    private final Data.Preset P;
+    private final int terrain;
     private final List<int[]> highwayCells = new ArrayList<int[]>();
 
     private RegionGen(int size, int preset, long seed) {
         r = new Region(size, size, seed, preset);
+        P = Data.preset(preset);
+        terrain = P.terrain;
         rng = new Rng(seed * 31 + preset * 7 + size);
         n1 = new Noise(seed + 1);
         n2 = new Noise(seed + 2);
@@ -90,7 +95,7 @@ public final class RegionGen {
                 throw new RuntimeException(e);
             }
         }
-        if (r.preset == COAST) sideOfSea = side;
+        if (terrain == COAST) sideOfSea = side;
     }
 
     private void terrainRow(int y, int side, float riverBias) {
@@ -99,25 +104,25 @@ public final class RegionGen {
                 float base = n1.fbm(x / (190f * scale), y / (190f * scale), 5);
                 float h;
                 float fx = x / (float) W, fy = y / (float) H;
-                switch (r.preset) {
+                switch (terrain) {
                     case COAST: {
                         float d = side == 0 ? fx : side == 1 ? 1 - fx : side == 2 ? fy : 1 - fy;
-                        h = 0.18f + base * 0.45f + Math.min(d - 0.2f, 0.22f) * 1.4f;
+                        h = P.level + base * P.relief + Math.min(d - P.featureAt, P.featureCap) * P.feature;
                         break;
                     }
                     case HIGHLANDS: {
-                        float ridge = 1 - Math.abs(n3.fbm(x / (260f * scale), y / (260f * scale), 4)) * 2;
-                        h = 0.3f + base * 0.5f + Math.max(0, ridge) * 0.45f;
+                        float ridge = 1 - Math.abs(n3.fbm(x / (P.featureScale * scale), y / (P.featureScale * scale), 4)) * 2;
+                        h = P.level + base * P.relief + Math.max(0, ridge) * P.feature;
                         break;
                     }
                     case LAKES: {
-                        float lake = n3.fbm(x / (120f * scale), y / (120f * scale), 3);
-                        h = 0.25f + base * 0.4f - Math.max(0, lake - 0.22f) * 2.5f;
+                        float lake = n3.fbm(x / (P.featureScale * scale), y / (P.featureScale * scale), 3);
+                        h = P.level + base * P.relief - Math.max(0, lake - P.featureAt) * P.feature;
                         break;
                     }
                     default: {
                         float c = (side & 1) == 0 ? fx : fy;
-                        h = 0.25f + base * 0.45f + Math.abs(c - riverBias) * 0.5f;
+                        h = P.level + base * P.relief + Math.abs(c - riverBias) * P.feature;
                     }
                 }
                 height[y * W + x] = h;
@@ -139,12 +144,12 @@ public final class RegionGen {
     private int sideOfSea = -1;
 
     private void rivers() {
-        int count = r.preset == VALLEY ? 1 : r.preset == LAKES ? 2 : r.preset == HIGHLANDS ? 1 : rng.range(1, 2);
+        int count = P.riversMin == P.riversMax ? P.riversMin : rng.range(P.riversMin, P.riversMax);
         if (W > 1024) count += W / 1024;
         for (int i = 0; i < count; i++) {
             float x, y, dx, dy;
-            float width = r.preset == VALLEY && i == 0 ? 7 : rng.range(4f, 5.5f);
-            if (r.preset == COAST && sideOfSea >= 0) {
+            float width = terrain == VALLEY && i == 0 ? 7 : rng.range(4f, 5.5f);
+            if (terrain == COAST && sideOfSea >= 0) {
                 // from deep inland to the sea
                 int s = sideOfSea;
                 float along = rng.range(0.25f, 0.75f);
@@ -170,7 +175,7 @@ public final class RegionGen {
                 x += mx / len * 1.5f;
                 y += my / len * 1.5f;
                 if (x < -4 || y < -4 || x > W + 4 || y > H + 4) break;
-                if (s > 40 && r.preset == COAST) {
+                if (s > 40 && terrain == COAST) {
                     int t = r.t((int) x, (int) y);
                     if (t == Tile.DEEP) {
                         hitWater = true;
@@ -304,7 +309,7 @@ public final class RegionGen {
             // an air base, a civilian airport by the capital, and a naval base on the coast
             placeNear(Region.S_AIRBASE, cityList.get(Math.min(1, cityList.size() - 1)), 46, 90, 300, 40, 0.98f);
             placeNear(Region.S_AIRPORT, cap, 40, 60, 160, 30, 0.98f);
-            if (r.preset == COAST || r.preset == LAKES) placeCoastal(Region.S_NAVAL, 30);
+            if (P.naval) placeCoastal(Region.S_NAVAL, 30);
         }
         // prisons, near towns
         int prisons = country ? 1 + W / 1536 : 1;
@@ -651,43 +656,9 @@ public final class RegionGen {
         return f;
     }
 
+    /** A new building's roof: one of its kind's colours (content.ini's [building] roofs). */
     private int roofFor(int kind) {
-        int[] pal;
-        switch (kind) {
-            case Region.B_HOUSE: pal = new int[]{0xFF9A5B44, 0xFF7E5A4A, 0xFF6B6F78, 0xFF8C4A3C, 0xFF5E5A56, 0xFFA0785A}; break;
-            case Region.B_APARTMENT: pal = new int[]{0xFF8A8580, 0xFF7C7670, 0xFF9C948A, 0xFF6E6A66}; break;
-            case Region.B_OFFICE: pal = new int[]{0xFF7A8088, 0xFF8C9298, 0xFF6C737C, 0xFF9AA0A6}; break;
-            case Region.B_TOWER: pal = new int[]{0xFF5E6A78, 0xFF6E7A88, 0xFF4E5866, 0xFF80909E}; break;
-            case Region.B_SHOP: pal = new int[]{0xFFA89A84, 0xFF9C8C74, 0xFFB4A48A}; break;
-            case Region.B_WAREHOUSE: pal = new int[]{0xFF8E9296, 0xFF7E8488, 0xFF9AA0A0}; break;
-            case Region.B_POLICE: return 0xFF4A5A7A;
-            case Region.B_HOSPITAL: return 0xFFD8D8D4;
-            case Region.B_POWER: return 0xFF8A7A6A;
-            case Region.B_FUEL: return 0xFFB0A060;
-            case Region.B_LAB: return 0xFFC8D0D4;
-            case Region.B_BARRACKS: return 0xFF6A6E4E;
-            case Region.B_HANGAR: return 0xFF7A7E6A;
-            case Region.B_ARMORY: return 0xFF6E7250;
-            case Region.B_DEPOT: return 0xFF8A8A70;
-            case Region.B_CELLBLOCK: return 0xFF8E8A84;
-            case Region.B_WATER: return 0xFF6A8AA0;
-            case Region.B_PHONE: return 0xFF7A7090;
-            case Region.B_FOODW: return 0xFF9A8A60;
-            case Region.B_FIRE: return 0xFFA83A30;
-            case Region.B_HALL: return 0xFFB8AC90;
-            case Region.B_STATION: return 0xFF8A6A50;
-            case Region.B_TERMINAL: return 0xFFB0B8C0;
-            case Region.B_DOCK: return 0xFF7A8088;
-            case Region.B_GOV: return 0xFFD0C8B0;
-            case Region.B_TENT: return 0xFFC8C0A0;
-            case Region.B_FARMHOUSE: pal = new int[]{0xFF8C4A3C, 0xFF6E5040}; break;
-            case Region.B_BARN: return 0xFF9A3A2E;
-            case Region.B_CHURCH: return 0xFF7A6A5A;
-            case Region.B_SCHOOL: return 0xFFA07A5A;
-            case Region.B_MALL: return 0xFFA8A8A0;
-            default: return 0xFF888888;
-        }
-        return pal[rng.nextInt(pal.length)];
+        return Data.roof(kind, rng, false);
     }
 
     private void fillBlock(Region.Settlement s, Block b) {

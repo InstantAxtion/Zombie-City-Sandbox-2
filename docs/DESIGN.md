@@ -24,14 +24,14 @@ All in one package, `com.instantaxtion.zcs2`. The core (`src/core`) never touche
 
 | Area | Files | What they do |
 |---|---|---|
-| Content | `Content`, `assets/content.ini` | Weapons, units, zombie types, vehicles, scenarios |
+| Content | `Content`, `Data`, `assets/content.ini` | Weapons, units, zombie types, vehicles, scenarios; names, buildings, presets, origins, outside help |
 | The region | `RegionGen`, `Region`, `RoadGraph`, `Tile`, `Noise`, `Names` | Terrain, rivers, settlements, street grids, blocks and lots, facilities, the army base and prison, highways (A* over the terrain, smoothed, bridged), farms; the road graph and its routing |
 | The world | `World`, `Ents`, `Spatial`, `Flow`, `NavPath`, `Parallel`, `Rng` | Entity storage, the spatial grid, the scent field, foot paths, the worker pool, deterministic randomness, and the order of a step |
 | Two tiers | `Sectors` | The counted population and dead, indoor infection, coming out onto the streets and going back in, migration |
 | Behaviour | `ZombieAI`, `Undead`, `CivAI`, `ArmedAI`, `Combat` | Thinking (in parallel) and carrying it out (in order): bites, shots, blasts, deaths, rising; the dead smashing, feeding, leading, lunging |
 | Forces | `Squads`, `Vehicles`, `Dispatch`, `Military` | Squads and their orders; driving on the road graph and flying; 911 calls, cordons; the army, gunships, tanks, air strikes, supply, outside help |
 | The region-wide | `Strategic`, `Gov`, `News`, `Stats`, `Records` | Facilities, power grids, ammunition, hordes, refugees, bridges, strains, goals; the alert level, trust, curfews, evacuations, rumours; the radio log; the numbers and the report; why things happened (a tracer of each fighter's last seconds, why towns fell, each formation's story, decisive moments, callouts and the alerts fast-forward stops for: read-only, a module of its own) |
-| Player | `Tools`, `Setup`, `Actions`, `Roles`, `Defences`, `Orders`, `Rules` | Everything the player can do (every change goes through `Actions`, which records it); building a new game, its scenario and the player's role; the country-scale campaign goals; what the player builds, lasting orders, driving and possession, and the rules sheet |
+| Player | `Tools`, `Setup`, `Actions`, `Roles`, `Defences`, `Orders`, `Rules`, `Survival` | Everything the player can do (every change goes through `Actions`, which records it); building a new game, its scenario and the player's role; the country-scale campaign goals; what the player builds, lasting orders, driving and possession, and the rules sheet; living through it as one person (hiding, scavenging, needs, weapons, melee, cars, companions) |
 | Director | `Director`, `Replay`, `DirectorScreens` | The record of inputs, replays from a game's start, the timelapse, heatmaps; the replay list, timelapse and scenario editor screens |
 | Checking | `Audit`, `SaveIO` | Invariants and state hashes; saves |
 | Presentation | `Gfx`, `GImage`, `Platform`, `Camera`, `MapPainter`, `WorldView`, `Ui`, `Icons`, `Game`, `Settings`, `Texts` | Drawing at every zoom, the interface, the screens |
@@ -134,8 +134,9 @@ phase never writes (position, velocity, uid, type). Leaders are a hash of the ui
 
 ## One owner for every entity
 
-`Ents.loc` is one of NONE (free slot), FREE (on the map), ABOARD (in a vehicle), BODY. Only `spawn`, `board`,
-`alight`, `die`, `rise` and `remove` change it, and each checks the state it expects and throws if wrong. A
+`Ents.loc` is one of NONE (free slot), FREE (on the map), ABOARD (in a vehicle), BODY, or INSIDE (the survivor and
+their companions hiding in a building, see below). Only `spawn`, `board`, `alight`, `goInside`, `comeOut`, `die`,
+`rise` and `remove` change it, and each checks the state it expects and throws if wrong. A
 vehicle's crew list and its crew's `loc` are changed in the same call. `Audit.check` verifies every invariant
 (crews agree, squads agree, nothing off the map or NaN, the live count matches) and runs inside the tests every
 five seconds of every outbreak. The first game's "people listed twice" and "police lost off the map" can't happen
@@ -231,6 +232,58 @@ be fast-forwarded (that would fold them into the counts); instead, while none of
 steps the world in person as fast as the device can and stops when the dead come close. Speed is not an input, so
 replays don't change. A new game opens on the player's own piece (`Roles.focusOf`), with a button to the outbreak.
 
+## Living through it as one person
+
+`Survival` is a module only in games with someone to play (the survivor, and the officer's own play): `Setup`
+calls `World.enableSurvival`, and a save that carries its part brings it back (`SaveIO.readModules`), so every
+other game, its saves and the golden hashes are exactly as before. Every verb is one `Actions.SURV` record
+(`i[0]` the verb, then its arguments), carried out on the game's thread; its randomness is hashes of the seed, the
+clock and the thing concerned. The player's think (`Combat.playerThink` hands it to `Survival.think`) and the
+companions' (`CivAI` hands anyone flagged `F_COMPANION` to `Survival.companionThink`) write only their own slots.
+
+- **Hiding.** Go in at a door within reach: the person goes `INSIDE` (off the street, out of the spatial grid, so
+  the dead neither see nor smell them) and is counted in the door's sector like everyone indoors (`popIn`, so the
+  population's ledger holds); `ActiveSet` keeps their chunk. Leaving takes them out of the count again (a count
+  bitten while they hid lets them out bitten). Barricading turns the door's tile into a `BARRICADE` (tools add hit
+  points as negative damage in `Undead`'s map), so the dead at the door have to smash it with their own
+  `smashPower`; each second each of the dead within 30 px notices someone inside with a chance (more after a
+  search or a shot). Without a barricade they get in (`Sectors.breakIn`) and every one inside raises the chance
+  they find you: a bite, perhaps the infection, and you are thrown out into the street. The sector's counted dead
+  add a small risk too, and a building may hold the dead already when you go in. Leaving takes our barricade down.
+- **Scavenging.** Each building can be searched once (`searched`, by building id); a table by kind (homes, shops,
+  police stations, hospitals, filling stations, warehouses, barracks) gives food, water, medkits, tools, fuel cans,
+  rounds for each gun and the chance of a bat, a crowbar, a shotgun or a rifle, scaled by the building's size and
+  by how often its sector has been searched (`yieldIn`: each search leaves the street poorer). The bag holds 12,
+  and 8 more for each companion told to carry.
+- **Needs.** Stamina goes with sprinting (the stick pushed past 0.6) and comes back walking or resting; food lasts
+  four game days, water two (quicker in the heat), rest two (resting indoors restores it in five hours). Empty, they
+  wear health away; full, small hurts heal; tired and hungry, blows and aim are less sure. The officer has none.
+- **Fighting.** Weapons carried (`owned`), the gun in hand (its rounds are `Ents.ammo`, the others' kept apart) and
+  the melee weapon; `Combat.shoot` takes the player's weapon from `Survival.gunWeapon`. A shove pushes everything
+  within reach back and off balance (no damage, the big ones don't budge); a bat, crowbar or baton hits the
+  nearest, killing with a chance or wearing it down. Manual aim (the Shoot switch's Tap aim) stops the automatic
+  fire: a tap picks a target and Fire asks for one shot, which goes as soon as the gun is ready. Take gun takes a
+  fallen officer's or soldier's weapon and rounds.
+- **Cars.** An empty car within reach (one of Life's parked or abandoned ones, which then leaves Life as
+  `R_TRANSPORT` with what's in its tank, or a squad-less one) is boarded and driven with `Orders.drive`/`wheel`;
+  fuel burns with distance (40 km a tank) and an empty tank stops it. The dead claw at a slow car and drag you out
+  (the existing clawing); then the wheel is let go.
+- **Companions.** Up to three people near you, with orders follow, stay or carry; they keep to your trail round
+  corners, step away from the dead, come into buildings and cars with you, are never folded into the counts, and
+  can be bitten and turn (they leave the list).
+- **The way out.** The nearest of `Strategic.safePoints` each second, for the card. The goals judge the person
+  alive on foot, in a car or hidden (`World.playerAlive`, `playerX/Y`); reaching a survivor settlement joins it, and
+  what you carry goes into its stores.
+
+`SurvivalBot` (desktop) plays a survivor through Actions alone: it eats and drinks, searches, fights off what comes
+close, hides and barricades when too many come, takes a car and drives the roads to the nearest safe place. On the
+default map (2304, the survivor scenario, two days, seeds 1-6) it reached safety 6 times in 6, in 23-117 game
+seconds (always by car); standing still, the idle survivor reached safety 0 times in 6 (alive at the end in all
+six: the survivor starts well away from the outbreak). Walking only (`BOTNOCAR=1`), it still reached safety 6 of 6,
+in 135-1,339 game seconds. On the small test map (768, one day, seeds 1-8): 8 of 8 against 0 of 8. The scenario is
+forgiving at the start (the army base is a kilometre or two off); the needs, the dead inside and the mobbed cars bite
+over days.
+
 ## The player's tools
 
 Every verb is an `Actions` kind, so it is recorded and a replay carries it out at the same tick. The palettes are
@@ -266,6 +319,46 @@ seed, scenario as text, role) plus those events: `Replay` rebuilds the world and
 each step, and the test `director: a replay rebuilds the same outbreak` checks the state hash matches after a
 session with painting, orders, strikes, panning and fast-forward. The timelapse stores the dead and the people of
 every sector once a game hour as log-scale bytes (about 10 KB an hour on the default map, inside the save).
+
+**Seeking.** While a replay plays, `Replay` keeps snapshots: a save's bytes (`SaveIO.snapshot`, compressed), the
+tick and the next input, at the start and every 30 game minutes, up to 48 MB; past the cap every other one is
+dropped (the start stays) and the interval doubles. Going to a tick behind the world, or more than a game hour
+behind a snapshot ahead of it, loads the nearest snapshot at or before it (on another thread: `SaveIO.load`
+rebuilds the map from its seed, then the state) and plays on to the tick as fast as the device can; ahead, it
+just plays on. A loaded save plays on exactly as the game did, so a seek lands on the same state as playing
+straight through: the test `director: seeking to any time...` checks the hash at six checkpoints sought in a
+scrambled order, with the snapshots squeezed until they thin out. The replay bar (`DirectorScreens.replayBar`)
+shows the track with the snapshots and the camera's keyframes, and the clock; Step goes a game minute.
+
+**Camera paths.** A keyframe is (tick, centre, zoom); `Replay.CamPath.at(tick)` is a Catmull-Rom curve through
+them, the zoom on a log scale, eased at each key, holding before the first and after the last. The view follows
+it (counting the step under way, so it doesn't stutter) until the player moves the camera. The camera in a replay
+is not an input (the recorded camera events are), so a path changes nothing. A director's cut is the replay file
+again (version 2) with the path after the inputs; version 1 files still load.
+
+**Scripts.** A scenario can carry triggers and goals of its own (`Script`): a module added only to games whose
+scenario has them (`Script.attach`, from `Setup.newGame` and `SaveIO.load`, before `Records`, which stays last),
+so every other game and its save are unchanged. Once a game second each trigger not yet fired checks its
+condition (time since the start, the dead in a town over N from `Stats.zBySettlement`, a town fallen by `Records`'
+measure, a facility offline) and carries its action out through `Actions.scripted`: the same `apply` an input
+uses, but not recorded, because a replay rebuilds the scenario from the header and the script fires again at
+the same step. Goals end the game: survive N days or kill all the dead to win; a town losing more than (100 - N)%
+of its people (`Stats.lostBySettlement`, which commuting doesn't move) or losses (civilians bitten or killed and
+forces lost) over N to lose. The editor's other additions (outbreak points, squads and defences, rules, strain)
+are carried out once by `Setup.extras` after the scenario's start.
+
+**Data in content.ini.** `Data` holds the sections that were code: `[names]`, `[building]` (names, today's and
+national roof palettes, pitched or flat, lit at night), `[preset]` (terrain kind and its numbers, rivers, a
+naval station), `[origin]` and `[outside]`. Maps are made from size, preset and seed with no Content, so each kind
+a loaded file has is installed for `RegionGen`, `ChunkGen`, `NationGen`, `NationPainter`, `Names` and `WorldView`
+(a file without it keeps the one in use; a desktop tool with no content loaded reads `assets/content.ini`). The
+built-in values are the old literals, parsed to the same floats and picked with the same dice (a one-colour roof
+never rolls), so maps are byte-identical: the test `data: content.ini holds exactly...` compares region and
+nation checksums, roofs and names recorded on the code before. These sections are left out of
+`Content.rulesHash`, so saves and the golden test are unchanged. A content.ini is read with the line and section
+of any mistake; an import (`Platform.pickFile`: Android's `ACTION_GET_CONTENT`, a file chooser on a desktop) is
+checked without being put in use, then kept as the app's `content.ini`; Share sends the one in use
+(`ACTION_SEND`).
 
 ## Lessons from the first game, and where they went
 
@@ -391,3 +484,5 @@ do, the rest is dropped rather than queued, and the speed button shows the rate 
 - Online play: co-op is pass-and-play on one phone and results are compared by code; playing together over the
   internet would need a server.
 - Several countries; the sea as a place.
+- Exporting a stretch of a replay as pictures (PNG frames, or a GIF): Android can write PNGs without a library
+  (`Bitmap.compress`), so it is feasible, but it is not built yet.
