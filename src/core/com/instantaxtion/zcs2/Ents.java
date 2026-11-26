@@ -24,6 +24,8 @@ public final class Ents {
     public static final int F_CREW = 1 << 21;
     /** Waiting for the ambulance that is coming for them (they stay where they are unless the dead come). */
     public static final int F_PATIENT = 1 << 22;
+    /** Stopped at a checkpoint already (counted once). */
+    public static final int F_STOPPED = 1 << 23;
 
     public int cap, top, live;
     public float[] x, y, vx, vy, hp, maxHp, face, timer, aimT, infT, gx, gy, dvx, dvy;

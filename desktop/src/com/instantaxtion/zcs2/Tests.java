@@ -27,6 +27,15 @@ public final class Tests {
         tests.add(t);
     }
 
+    /** For the tests defined in other files (ServicesTests). */
+    static void add(String name, T t) {
+        test(name, t);
+    }
+
+    static Content content() {
+        return content;
+    }
+
     static void check(boolean ok, String what) {
         if (!ok) throw new AssertionError(what);
     }
@@ -3893,6 +3902,7 @@ public final class Tests {
         sparseTests();
         nationalTests();
         lifeTests();
+        ServicesTests.define();
     }
 
     // ------------------------------------------------------------------ active-area paging (docs/SCALE_PLAN.md P2)

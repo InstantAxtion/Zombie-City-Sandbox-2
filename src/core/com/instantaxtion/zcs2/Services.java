@@ -299,12 +299,13 @@ public final class Services extends Module {
             boolean covered = false;
             for (AirTask a : air) if (a.kind == T_ASSAULT && dist(a.tx, a.ty, in.x, in.y) < 900) covered = true;
             if (covered) continue;
+            // (soldiers already there, or nearly: no need)
             int soldiers = 0;
             for (int q = 0; q < w.sq.list.size() && soldiers == 0; q++) {
                 Squads.Squad s = w.sq.list.get(q);
                 if (!s.alive || s.faction != Ents.SOLDIER) continue;
                 float[] p = w.sq.where(s);
-                if (dist(p[0], p[1], in.x, in.y) < 2500 || dist(s.gx, s.gy, in.x, in.y) < 900) soldiers++;
+                if (dist(p[0], p[1], in.x, in.y) < 2500) soldiers++;
             }
             if (soldiers > 0) continue;
             int v = nearestHeli(in.x, in.y);
@@ -941,8 +942,9 @@ public final class Services extends Module {
                             w.news.count("caught:" + c.settlement, "Checkpoint at " + w.r.settlements.get(c.settlement).name + ": someone bitten found and held|Checkpoints at "
                                     + w.r.settlements.get(c.settlement).name + ": %d more of the bitten found and held", 1, x, y);
                             w.sec.shelter(o);
-                        } else if (e.state[o] != CivAI.S_HOME) {
+                        } else if ((e.flags[o] & Ents.F_STOPPED) == 0) {
                             // turned back: home, and stay there
+                            e.flags[o] |= Ents.F_STOPPED;
                             c.stopped++;
                             stoppedTotal++;
                             e.state[o] = CivAI.S_SHELTER;
@@ -1032,7 +1034,7 @@ public final class Services extends Module {
 
     /** Opens an escorted corridor out of a town being evacuated (the mayor's, or the player's order). */
     public boolean openCorridor(int st, boolean player) {
-        if (st < 0 || st >= w.r.settlements.size()) return false;
+        if (st < 0 || st >= w.r.settlements.size() || !w.gov.evacuating(st)) return false;
         for (Corridor c : corridors) if (c.settlement == st) return false;
         Region.Settlement s = w.r.settlements.get(st);
         float[] p = w.strat.evacPoint(st);

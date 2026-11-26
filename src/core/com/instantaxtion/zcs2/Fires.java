@@ -433,6 +433,8 @@ public final class Fires extends Module {
     /** The nearest station with a crew sends one (and, near the camera, an engine you can watch). */
     private void dispatch(int b, float x, float y) {
         if (unitFF < 0) return;
+        // (crews on foot don't go back in while the dead are at the door)
+        if (footOn && !w.strategic && w.sp.zombiesNear(w.e, x, y, 220, 1) > 0) return;
         Region.Facility best = null;
         float bd = 4500f * 4500f;
         for (Region.Facility f : w.r.facilities) {
@@ -552,7 +554,8 @@ public final class Fires extends Module {
                 e.gy[i] = spot[1];
             }
         }
-        if (f.retreat) {
+        if (f.retreat || out == 0) {
+            // (all of them lost, or back aboard: the engine pulls out)
             f.retreatT += dt;
             if (out == 0 || f.retreatT > 25) {
                 for (int k = 0; k < f.foot.length; k++) if (alive(f.foot[k], f.footUid[k])) w.services.stray(f.foot[k], f.crewFrom);
