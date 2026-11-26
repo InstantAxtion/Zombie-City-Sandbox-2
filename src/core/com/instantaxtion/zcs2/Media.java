@@ -169,7 +169,7 @@ public final class Media extends Module {
                     if (st < 0 || w.sec.inf[s] < 2) continue;
                     int hs = w.strat.hospitalSector(st);
                     if (hs < 0 || hs == s) continue;
-                    float m = w.sec.inf[s] * 0.3f * stick;
+                    float m = (int) (w.sec.inf[s] * 0.3f * stick);
                     w.sec.inf[s] -= m;
                     w.sec.inf[hs] += m;
                 }
@@ -206,9 +206,9 @@ public final class Media extends Module {
     }
 
     private static String round(int n) {
-        if (n >= 10000) return (n / 1000) + ",000";
-        if (n >= 1000) return (n / 100 * 100) + "";
-        return n + "";
+        if (n >= 10000) return News.num(n / 1000 * 1000);
+        if (n >= 1000) return News.num(n / 100 * 100);
+        return News.num(n);
     }
 
     @Override

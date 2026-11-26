@@ -105,7 +105,7 @@ public final class Parallel {
             j.run(0, n, scratch[0]);
             return;
         }
-        Batch b = new Batch(j, n, Math.max(256, n / (threads * 6)));
+        Batch b = new Batch(j, n, Math.max(256, n / (threads * 16)));
         synchronized (lock) {
             batch = b;
             generation++;

@@ -15,6 +15,8 @@ public final class Flow {
     private final int w, h;
     final short[] dist;
     final short[] stamp; // which build each cell's distance belongs to (16 bits: reset when it wraps)
+    /** Each cell's downhill step, worked out once a build: (build & 0xFFF) << 4 | step (1 + 3 * (dy + 1) + dx + 1). */
+    private final short[] step;
     int cur;
     private int[] q, q2;
     /** Cells searched in the last build (for the probe). */
@@ -26,6 +28,7 @@ public final class Flow {
         h = r.navH;
         dist = new short[w * h];
         stamp = new short[w * h];
+        step = new short[w * h];
         q = new int[4096];
         q2 = new int[4096];
     }
@@ -50,6 +53,8 @@ public final class Flow {
             Arrays.fill(stamp, (short) 0);
             cur = 1;
         }
+        // the step cache keeps 12 bits of the build: emptied when they wrap
+        if ((cur & 0xFFF) == 0 || cur == 1) Arrays.fill(step, (short) 0);
         return cur;
     }
 
@@ -129,18 +134,29 @@ public final class Flow {
         int cx = (int) (px / cs), cy = (int) (py / cs);
         short here = atCell(cx, cy);
         if (here == INF) return INF;
-        int best = here, bx = 0, by = 0;
-        for (int dy = -1; dy <= 1; dy++)
-            for (int dx = -1; dx <= 1; dx++) {
-                if (dx == 0 && dy == 0) continue;
-                short v = atCell(cx + dx, cy + dy);
-                if (v < best) {
-                    if (dx != 0 && dy != 0 && (!r.navOpen(cx + dx, cy) || !r.navOpen(cx, cy + dy))) continue;
-                    best = v;
-                    bx = dx;
-                    by = dy;
+        int bx = 0, by = 0;
+        int ci = cy * w + cx, tag = (cur & 0xFFF) << 4;
+        short cached = step[ci];
+        if ((cached & 0xFFF0) == tag && cached != 0) {
+            int k = (cached & 15) - 1;
+            bx = k % 3 - 1;
+            by = k / 3 - 1;
+        } else {
+            int best = here;
+            for (int dy = -1; dy <= 1; dy++)
+                for (int dx = -1; dx <= 1; dx++) {
+                    if (dx == 0 && dy == 0) continue;
+                    short v = atCell(cx + dx, cy + dy);
+                    if (v < best) {
+                        if (dx != 0 && dy != 0 && (!r.navOpen(cx + dx, cy) || !r.navOpen(cx, cy + dy))) continue;
+                        best = v;
+                        bx = dx;
+                        by = dy;
+                    }
                 }
-            }
+            // (several threads may work the same cell out: they all write the same value)
+            step[ci] = (short) (tag | (1 + 3 * (by + 1) + bx + 1));
+        }
         if (bx == 0 && by == 0) {
             out[0] = out[1] = 0;
             return here;

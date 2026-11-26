@@ -354,7 +354,7 @@ public final class Logistics extends Module {
         StringBuilder sb = new StringBuilder();
         if (c.ammo > 0) sb.append((int) c.ammo).append(" rounds");
         if (c.fuel > 0) sb.append(sb.length() > 0 ? ", " : "").append((int) c.fuel).append(" t of fuel");
-        if (c.food > 0) sb.append(sb.length() > 0 ? ", " : "").append("a day's food for ").append(WorldView.fmt((int) c.food)).append(" people");
+        if (c.food > 0) sb.append(sb.length() > 0 ? ", " : "").append("a day's food for ").append(News.num((int) c.food)).append(" people");
         if (c.med > 0) sb.append(sb.length() > 0 ? ", " : "").append((int) c.med).append(" doses of medicine");
         return sb.length() == 0 ? "nothing left" : sb.toString();
     }
@@ -402,7 +402,7 @@ public final class Logistics extends Module {
             c.infected = inf;
             w.strat.infPending[st] -= inf;
             convoys.add(c);
-            w.news.tally("trainOut:" + st, "Evacuation train leaves " + s.name + " with " + c.refugees + " people|Evacuation trains out of " + s.name + ": {n} more, {m} people", 1, c.refugees, c.x, c.y, News.CALL);
+            w.news.tally("trainOut:" + st, "Evacuation train leaves " + s.name + " with " + News.num(c.refugees) + " people|Evacuation trains out of " + s.name + ": {n} more, {m} {mpeople}", 1, c.refugees, c.x, c.y, News.CALL);
         }
     }
 
@@ -509,8 +509,8 @@ public final class Logistics extends Module {
             settle(c.toSettlement, c.refugees - c.infected, c.infected);
             int origin = c.from >= 0 ? w.r.facilities.get(c.from).settlement : -1;
             w.strat.arrivedFrom(origin, c.toSettlement, c.refugees - c.infected, c.infected);
-            w.news.tally("train:" + c.toSettlement, "Evacuation train arrives in " + w.r.settlements.get(c.toSettlement).name + " with " + c.refugees + " people"
-                    + (c.infected > 20 ? ". Some of them have been bitten." : "") + "|Evacuation trains into " + w.r.settlements.get(c.toSettlement).name + ": {n} more, {m} people", 1, c.refugees, f.x, f.y, News.CALL);
+            w.news.tally("train:" + c.toSettlement, "Evacuation train arrives in " + w.r.settlements.get(c.toSettlement).name + " with " + News.num(c.refugees) + " people"
+                    + (c.infected > 20 ? ". Some of them have been bitten." : "") + "|Evacuation trains into " + w.r.settlements.get(c.toSettlement).name + ": {n} more, {m} {mpeople}", 1, c.refugees, f.x, f.y, News.CALL);
             return;
         }
         f.ammo += c.ammo;

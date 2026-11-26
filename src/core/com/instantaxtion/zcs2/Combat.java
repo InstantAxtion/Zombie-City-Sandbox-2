@@ -49,6 +49,10 @@ final class Combat {
         e.aimT[z] = 1.0f + w.rng.nextFloat() * 0.4f;
         if (dmg > 3 && (e.flags[v] & Ents.F_INFECTED) == 0 && w.rng.chance(zt.infect * u.infect)) {
             e.flags[v] |= Ents.F_INFECTED;
+            if (e.kind[v] == Ents.CIV && w.stats.resident(v)) {
+                int st = w.sec.settlement[w.r.sectorOfPx(e.x[v], e.y[v])];
+                if (st >= 0) w.stats.lostBySettlement[st]++;
+            }
             e.infT[v] = w.rng.range(25f, 70f);
             w.stats.infectedTotal++;
         }
@@ -218,7 +222,10 @@ final class Combat {
         w.director.died(e.x[v], e.y[v]);
         e.timer[v] = rises ? (cause == CAUSE_TURNED ? 1.5f : w.rng.range(6f, 16f)) : 90;
         w.fx.blood(e.x[v], e.y[v], 4);
-        if (e.kind[v] == Ents.CIV) w.stats.civDeaths++;
+        if (e.kind[v] == Ents.CIV) {
+            if (w.stats.resident(v)) w.stats.civDeaths++;
+            else w.stats.crewDeaths++;
+        }
         else {
             w.stats.armedDeaths[e.kind[v]]++;
             w.stats.noteFallen(v, cause);

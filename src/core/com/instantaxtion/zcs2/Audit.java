@@ -62,8 +62,17 @@ public final class Audit {
         long n = 0;
         for (int s = 0; s < w.sec.n; s++) n += w.sec.popIn[s] + (long) Math.ceil(w.sec.inf[s] - 1e-4);
         Ents e = w.e;
-        for (int i = 0; i < e.top; i++) if ((e.loc[i] == Ents.FREE || e.loc[i] == Ents.ABOARD) && e.kind[i] == Ents.CIV) n++;
-        return n + w.strat.refugeeTotal() + w.strat.evacuatedOut + w.strat.evacuatedArrived * 0;
+        for (int i = 0; i < e.top; i++) if ((e.loc[i] == Ents.FREE || e.loc[i] == Ents.ABOARD) && e.kind[i] == Ents.CIV && w.stats.resident(i)) n++;
+        for (Logistics.Convoy c : w.logistics.convoys) if (c.alive) n += c.refugees;
+        return n + w.strat.refugeeTotal() + w.strat.abroad();
+    }
+
+    /**
+     * The population's ledger: everyone alive (at home, sheltering, on the road, abroad) plus the civilians killed
+     * plus those who turned, less everyone at the start. Zero, always.
+     */
+    public static long ledger(World w) {
+        return people(w) + w.stats.civDeaths + w.stats.civTurned - w.stats.startPeople;
     }
 
     /** A hash of the whole simulation state, for determinism tests. */

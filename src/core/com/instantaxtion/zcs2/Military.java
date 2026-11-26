@@ -11,6 +11,10 @@ import java.util.List;
 public final class Military {
     private final World w;
     public final boolean[] armyCalled;
+    /** Per settlement: the reported dead when the army was last asked for (asked again only once it is much worse), and when. */
+    public final float[] armyAsked, armyAskedT;
+    /** Per settlement: the player (its incident commander) asked for the army; the general plans for it then. */
+    public final float[] playerAskedT;
     float strikeT, supplyT, waveT, guardT, regularT, bridgeT;
     public int strikesLeft = -1; // -1 = unlimited (sandbox); commander scenarios set a budget
     public int wavesArrived, guardsArrived, regularsArrived;
@@ -18,19 +22,53 @@ public final class Military {
 
     Military(World w) {
         this.w = w;
-        armyCalled = new boolean[64];
+        int n = Math.max(64, w.r.settlements.size());
+        armyCalled = new boolean[n];
+        armyAsked = new float[n];
+        armyAskedT = new float[n];
+        playerAskedT = new float[n];
+        java.util.Arrays.fill(armyAskedT, -1e9f);
+        java.util.Arrays.fill(playerAskedT, -1e9f);
     }
+
+    /** Game seconds before a town asks for the army again, and how much worse it must be by then. */
+    static final float ASK_AGAIN = 360, ASK_STEP = 2.5f;
 
     public Region.Facility base() {
         for (Region.Facility f : w.r.facilities) if (f.kind == Region.F_BASE) return f;
         return null;
     }
 
+    /**
+     * A town's police ask for the army: once for each step the outbreak there gets worse (two and a half times what
+     * it was when they last asked), and not again for a few hours. The incident commander's own city asks only when
+     * the player does.
+     */
     void requestArmy(int settlement, int zombies) {
-        if (settlement < 0 || settlement >= armyCalled.length || armyCalled[settlement]) return;
+        if (settlement < 0 || settlement >= armyCalled.length) return;
+        if (w.roles.holds(Roles.INCIDENT, settlement)) return;
+        if (zombies < armyAsked[settlement] * ASK_STEP || w.time - armyAskedT[settlement] < ASK_AGAIN) return;
+        boolean again = armyAsked[settlement] > 0;
         armyCalled[settlement] = true;
+        armyAsked[settlement] = zombies;
+        armyAskedT[settlement] = (float) w.time;
         Region.Settlement s = w.r.settlements.get(settlement);
-        w.news.radio("Army: requested in " + s.name + " (" + zombies + " of the dead). Convoy rolling.", s.cx * 16f, s.cy * 16f, News.COMMAND);
+        w.news.radio("army:" + settlement, again ? "Army: " + s.name + " asks for more soldiers (about " + News.num(zombies) + " of the dead now)."
+                : "Army: requested in " + s.name + " (about " + News.num(zombies) + " of the dead). Convoy rolling.", s.cx * 16f, s.cy * 16f, News.COMMAND);
+    }
+
+    /** The player (incident commander, or anyone with a say) asks for the army for a town. */
+    public void playerAsked(int settlement) {
+        if (settlement < 0 || settlement >= playerAskedT.length) return;
+        playerAskedT[settlement] = (float) w.time;
+        armyCalled[settlement] = true;
+    }
+
+    /** Has the town asked for the army recently (or its incident commander, if the player is)? */
+    public boolean asked(int settlement) {
+        if (settlement < 0 || settlement >= armyCalled.length) return false;
+        if (w.roles.holds(Roles.INCIDENT, settlement)) return w.time - playerAskedT[settlement] < 1440;
+        return true;
     }
 
     /** A call big enough for soldiers: send the nearest free ones. */
@@ -82,10 +120,12 @@ public final class Military {
         guardT -= dt;
         regularT -= dt;
         bridgeT -= dt;
-        // the army goes to every town that asked
+        // a town quiet for half a day starts afresh: the next outbreak there is asked for from the start
         for (int st = 0; st < armyCalled.length && st < w.r.settlements.size(); st++) {
-            if (!armyCalled[st]) continue;
-            if (!w.disp.perimeterMode(st)) armyCalled[st] = false;
+            if (armyAsked[st] > 0 && w.command.calm(st, 720)) {
+                armyAsked[st] = 0;
+                armyCalled[st] = false;
+            }
         }
         if (w.gov.level >= 3 && strikeT <= 0) autoStrike();
         // (supplies travel as convoys now: see Logistics)
@@ -134,7 +174,7 @@ public final class Military {
         if (field != null) {
             f = w.forces.createFormation(t, field.x, field.y, true);
             w.navy.airlifts++;
-            w.news.count("flownIn", "Airlift: the " + f.name + " is flown in to " + field.name + "|Airlift: %d more units flown in from outside", 1, field.x, field.y);
+            w.news.count("flownIn", "Airlift: the " + f.name + " is flown in to " + field.name + "|Airlift: %d more unit{s} flown in from outside", 1, field.x, field.y);
         } else if (train) {
             // by train over the border
             int re = w.r.railEntries.get(w.rng.nextInt(w.r.railEntries.size()));
@@ -147,10 +187,13 @@ public final class Military {
             wavesArrived++;
             w.stats.outsidePolice += f.strength();
         } else w.stats.outsideSoldiers += f.strength();
-        w.news.radio(agency + ": the " + f.name + " (" + f.strength() + ") is entering the country", f.hq.x, f.hq.y, News.COMMAND);
-        // straight to the capital until command has a job for it
-        Region.Settlement c = w.r.city();
-        w.forces.order(f, c.cx * 16f, c.cy * 16f);
+        w.news.radio(agency + ": the " + f.name + " (" + News.num(f.strength()) + ") is entering the country", f.hq.x, f.hq.y, News.COMMAND);
+        // the general sends it straight to the capital until there's a job for it; a player commanding the army
+        // finds it waiting at the border for orders
+        if (w.forces.aiMay(f)) {
+            Region.Settlement c = w.r.city();
+            w.forces.order(f, c.cx * 16f, c.cy * 16f);
+        }
         return f;
     }
 
@@ -193,7 +236,7 @@ public final class Military {
             w.stats.zombieKills += killed;
             w.stats.airStrikes++;
             w.stats.strikeKills += killed;
-            w.news.tally("strikes", "Air strike on " + (horde ? "a horde" : "a mass of the dead") + ": about {m} destroyed|Air strikes since the last report: {n} sorties, about {m} of the dead destroyed", 1, killed, tx, ty, News.COMMAND);
+            w.news.tally("strikes", "Air strike on " + (horde ? "a horde" : "a mass of the dead") + ": about {m} destroyed|Air strikes since the last report: {n} sortie{s}, about {m} of the dead destroyed", 1, killed, tx, ty, News.COMMAND);
             return;
         }
         if (w.sp.livingNear(w.e, tx, ty, 260, 1) > 0) return;

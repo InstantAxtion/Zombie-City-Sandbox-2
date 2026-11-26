@@ -322,7 +322,7 @@ public final class Forces extends Module {
         f.hq.y = rg.ny[a];
         f.state = RAIL;
         for (Squads.Squad s : w.sq.list) if (s.alive && s.home == f.hq.id && !s.player) standDown(s);
-        w.news.count("trains", "The " + f.name + " is boarding a troop train|%d more formations boarded troop trains", 1, f.hq.x, f.hq.y);
+        w.news.count("trains", "The " + f.name + " is boarding a troop train|%d more formation{s} boarded troop trains", 1, f.hq.x, f.hq.y);
         w.stats.troopTrains++;
         return true;
     }
@@ -391,14 +391,14 @@ public final class Forces extends Module {
             if (w.sec.zIn[s] + w.sp.secZ[s] > 60) {
                 f.state = HOLDING;
                 f.route = null;
-                w.news.radio(f.name + ": contact on the road, deploying", f.hq.x, f.hq.y, News.COMMAND);
+                w.news.radio("contact:" + f.id, f.name + ": contact on the road" + placeName(f.hq.x, f.hq.y) + ", deploying", f.hq.x, f.hq.y, News.COMMAND, 720);
                 return;
             }
         }
         if (f.route == null || f.ri >= f.route.length - 1) {
             f.state = HOLDING;
             f.route = null;
-            w.news.radio(f.name + " in position", f.hq.x, f.hq.y, News.COMMAND);
+            w.news.radio("pos:" + f.id, f.name + " in position" + placeName(f.hq.x, f.hq.y), f.hq.x, f.hq.y, News.COMMAND, 1440);
         }
     }
 
@@ -452,7 +452,9 @@ public final class Forces extends Module {
                 }
                 if (f.state != BROKEN && !travelling(f)) {
                     f.state = BROKEN;
-                    w.news.radio(f.name + " is broken and falling back", f.hq.x, f.hq.y, News.LOSS);
+                    // (said when it happens in a fight, not when a worn-out unit is back in barracks)
+                    if (w.sp.zombiesNear(w.e, f.hq.x, f.hq.y, 1500, 1) > 0 || w.sec.zIn[w.r.sectorOfPx(f.hq.x, f.hq.y)] > 0)
+                        w.news.radio(f.name + " is broken and falling back", f.hq.x, f.hq.y, News.LOSS);
                 }
             }
             if (f.state == HOLDING || f.state == BROKEN) {
@@ -570,7 +572,7 @@ public final class Forces extends Module {
         w.stats.artillery++;
         int st = sec.settlement[best];
         String where = st >= 0 ? " round " + w.r.settlements.get(st).name : " in open country";
-        w.news.count("guns:" + f.id, f.name + ": fire mission on a mass of the dead" + where + "|" + f.name + ": %d more fire missions" + where, 1, tx, ty);
+        w.news.count("guns:" + f.id, f.name + ": fire mission on a mass of the dead" + where + "|" + f.name + ": %d more fire mission{s}" + where, 1, tx, ty);
     }
 
     /** Shells landing on a street where people are still sheltering kill some of them: said out loud, not hidden. */
@@ -587,7 +589,7 @@ public final class Forces extends Module {
         int st = w.sec.settlement[s];
         if (st >= 0) w.stats.lostBySettlement[st] += lost;
         w.gov.trust -= lost * 0.02f;
-        w.news.count("shelled:" + st, "Shelling " + (st >= 0 ? "in " + w.r.settlements.get(st).name : "in the country") + " killed %d people sheltering in their homes", lost, w.sec.cx(s), w.sec.cy(s));
+        w.news.count("shelled:" + st, "Shelling " + (st >= 0 ? "in " + w.r.settlements.get(st).name : "in the country") + " killed %d {people} sheltering in their homes", lost, w.sec.cx(s), w.sec.cy(s));
     }
 
     /** Fights nobody is watching: the people at each station and formation against the dead counted near it. */
@@ -728,6 +730,8 @@ public final class Forces extends Module {
         for (Region.Settlement s : w.r.settlements) {
             if (s.kind != Region.S_CITY && s.kind != Region.S_TOWN && s.kind != Region.S_VILLAGE) continue;
             if (z[s.id] < 15 || w.command.isAbandoned(s.id) && !s.capital) continue;
+            // a city whose incident commander is the player gets the army when the player asks for it
+            if (w.roles.holds(Roles.INCIDENT, s.id) && !icAsked(s.id)) continue;
             Job j = new Job();
             j.kind = JOB_TOWN;
             j.id = s.id;
@@ -749,7 +753,7 @@ public final class Forces extends Module {
             j.x = h.x + (tx - h.x) * 0.35f;
             j.y = h.y + (ty - h.y) * 0.35f;
             j.score = h.count * 1.2f;
-            j.name = "a horde of " + WorldView.fmt(h.count);
+            j.name = "a horde of " + News.num(h.count);
             jobs.add(j);
         }
         // nests: the dead massed in the country, outside any town (the biggest few, not next to each other)
@@ -836,7 +840,7 @@ public final class Forces extends Module {
                     best.task = j.kind == JOB_TOWN ? j.id : -3;
                     best.jobT = 0;
                     best.idleT = 0;
-                    w.news.count("ordered:" + j.kind + ":" + j.id, "Command: the " + best.name + " is sent against " + j.name + "|Command: %d more formations sent against " + j.name, 1, p[0], p[1]);
+                    w.news.count("ordered:" + j.kind + ":" + j.id, "Command: the " + best.name + " is sent against " + j.name + "|Command: %d more formation{s} sent against " + j.name, 1, p[0], p[1]);
                     j.have++;
                 } else best.task = -2;
             }
@@ -882,9 +886,47 @@ public final class Forces extends Module {
                 float dx = h.x - f.hq.x, dy = h.y - f.hq.y;
                 if (dx * dx + dy * dy > 800 * 800 && order(f, h.x, h.y)) {
                     f.job = JOB_HOME;
-                    w.news.count("home", "The " + f.name + " returns to barracks|%d more formations returned to barracks", 1, h.x, h.y);
+                    w.news.count("home", "The " + f.name + " returns to barracks|%d more formation{s} returned to barracks", 1, h.x, h.y);
                 }
             }
+        }
+    }
+
+    /** " at Elm Creek" / " near Elm Creek" / "": where a point is, for the radio. */
+    String placeName(float x, float y) {
+        Region.Settlement s = w.r.settlementAt(x, y);
+        if (s != null) return " at " + s.name;
+        Region.Settlement best = null;
+        float bd = 3000f * 3000f;
+        for (Region.Settlement t : w.r.settlements) {
+            if (t.kind != Region.S_CITY && t.kind != Region.S_TOWN && t.kind != Region.S_VILLAGE) continue;
+            float dx = t.cx * 16f - x, dy = t.cy * 16f - y, d = dx * dx + dy * dy;
+            if (d < bd) {
+                bd = d;
+                best = t;
+            }
+        }
+        return best == null ? "" : " near " + best.name;
+    }
+
+    /** Has the player, as this city's incident commander, asked for the army (a formation sent there at their request)? */
+    private boolean icAsked(int st) {
+        if (w.mil.asked(st)) return true;
+        for (Formation f : formations)
+            if (f.alive && f.task == st && f.job == JOB_NONE) {
+                w.mil.playerAsked(st);
+                return true;
+            }
+        return false;
+    }
+
+    /** A town has been declared clear: whoever the general sent there is free for another job. */
+    public void townCleared(int st) {
+        for (Formation f : formations) {
+            if (!f.alive || f.task != st || !aiMay(f)) continue;
+            f.task = -1;
+            f.job = JOB_NONE;
+            f.jobId = -1;
         }
     }
 

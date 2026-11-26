@@ -990,7 +990,7 @@ public final class Tests {
                 for (int k = 0; k < 30; k++) w.step();
                 check(w.tick > t && !w.ended, "keep watching didn't keep it going");
                 w.shutdown();
-                // protect: a moment of the dead in the capital isn't a defeat; holding a fifth of it for half a day is
+                // protect: a moment of the dead in the capital isn't a defeat; holding a fifth of it for a whole day is
                 w = Setup.newGame(content, 1536, RegionGen.COAST, 9, content.scenario("protect"), 2, Roles.PRESIDENT, 0);
                 w.setStrategic(true);
                 for (Strategic.Horde h : w.strat.hordes) h.alive = false;
@@ -1001,11 +1001,11 @@ public final class Tests {
                 for (int s : secs) w.sec.zIn[s] += 300;
                 for (int k = 0; k < 6; k++) w.step();
                 check(!w.ended, "lost at once: " + w.endText);
-                for (int k = 0; k < 120 && !w.ended; k++) {
+                for (int k = 0; k < 170 && !w.ended; k++) {
                     for (int s : secs) w.sec.zIn[s] = Math.max(w.sec.zIn[s], 300);
                     w.step();
                 }
-                check(w.ended && !w.won, "the dead held the capital for half a day and it wasn't lost");
+                check(w.ended && !w.won, "the dead held the capital for a whole day and it wasn't lost");
                 w.shutdown();
                 // hold: the capital's people evacuated safely still count
                 w = Setup.newGame(content, 1536, RegionGen.COAST, 3, content.scenario("hold_city"), 2, Roles.PRESIDENT, 0);
@@ -1397,6 +1397,175 @@ public final class Tests {
                 check(parked == 0, parked + " abandoned squad vehicles left in the streets");
                 check(Audit.check(w).isEmpty(), Audit.check(w));
                 w.shutdown();
+            }
+        });
+        test("story: the army is asked for once a step, counts have commas, nothing said twice", new T() {
+            public void run() {
+                check(News.num(1234567).equals("1,234,567") && News.num(999).equals("999") && News.num(1000).equals("1,000"), "the number format");
+                check(News.keyOf("Army: requested in Elm (212 of the dead)").equals(News.keyOf("Army: requested in Elm (1,260 of the dead)")), "a key ignores the count");
+                check(!News.keyOf("The 3rd Infantry Battalion has been destroyed").equals(News.keyOf("The 5th Infantry Battalion has been destroyed")), "a key keeps names");
+                World w = game(21, 1536, "sandbox", 2);
+                Region.Settlement t = w.r.city();
+                Tools.paintZombies(w, t.cx * 16f, t.cy * 16f, 30000, 900, -1);
+                camOver(w, t.cx * 16f, t.cy * 16f);
+                play(w, 120, false);
+                w.camDetail = false;
+                w.setStrategic(true);
+                for (int k = 0; k < 6 * 144; k++) w.step();
+                java.util.Map<String, Integer> asks = new java.util.HashMap<String, Integer>();
+                java.util.Map<String, Double> last = new java.util.HashMap<String, Double>();
+                for (News.Item it : w.news.log) {
+                    if (it.text.startsWith("Army: requested in ")) {
+                        String town = it.text.substring(19, it.text.indexOf(" (") < 0 ? it.text.length() : it.text.indexOf(" ("));
+                        Integer n = asks.get(town);
+                        asks.put(town, n == null ? 1 : n + 1);
+                    }
+                    check(!it.text.matches(".*(^|[^0-9,A-Za-z])[0-9]{4,}([^0-9,A-Za-z].*|$)"), "a number without commas: " + it.text);
+                    String k = News.keyOf(it.text);
+                    Double was = last.get(k);
+                    check(was == null || it.time - was >= News.REPEAT - 0.01, "said twice in a row: " + it.text);
+                    last.put(k, it.time);
+                }
+                for (java.util.Map.Entry<String, Integer> a : asks.entrySet()) check(a.getValue() <= 2, a.getKey() + " asked for the army " + a.getValue() + " times");
+                check(w.news.log.size() < News.CAP, "the log is full after six days: " + w.news.log.size());
+                w.shutdown();
+            }
+        });
+        test("story: the response follows what was reported, in that order", new T() {
+            public void run() {
+                World w = game(22, 1536, "sandbox", 2);
+                Region.Settlement t = w.r.city();
+                // most of them still indoors: nobody has called yet
+                Tools.paintZombies(w, t.cx * 16f, t.cy * 16f, 400, 300, -1);
+                camOver(w, t.cx * 16f, t.cy * 16f);
+                play(w, 240, false);
+                int report = -1, response = -1;
+                for (int i = 0; i < w.news.log.size(); i++) {
+                    String s = w.news.log.get(i).text;
+                    if (report < 0 && s.startsWith("Reports of violent attacks")) report = i;
+                    if (response < 0 && (s.contains("to hold a perimeter") || s.startsWith("Army: requested"))) response = i;
+                    check(!s.matches("(?i).*martial law\\. martial law.*") && !s.contains("burning apartments") && !s.contains(" 1 more formations"), "said badly: " + s);
+                }
+                check(report >= 0, "nobody reported it");
+                check(response < 0 || response > report, "the response came before the first report");
+                w.gov.raise(3);
+                check(w.news.log.get(w.news.log.size() - 1).text.startsWith("MARTIAL LAW declared. The National Guard"), "martial law: " + w.news.log.get(w.news.log.size() - 1).text);
+                // a player lowers it: the AI doesn't raise it straight back
+                w.gov.raiseTo(1);
+                play(w, 60, false);
+                check(w.gov.level <= 2, "raised straight back over the player: " + w.gov.level);
+                w.shutdown();
+            }
+        });
+        test("population: alive + killed + turned = everyone, always, and they come home", new T() {
+            public void run() {
+                World w = game(23, 1536, "sandbox", 2);
+                Region.Settlement t = w.r.settlements.get(Math.min(3, w.r.settlements.size() - 1));
+                Tools.paintZombies(w, t.cx * 16f, t.cy * 16f, 20000, 700, -1);
+                w.stats.startPeople = Audit.people(w);
+                camOver(w, t.cx * 16f, t.cy * 16f);
+                for (int k = 0; k < 6; k++) {
+                    play(w, 10, false);
+                    check(Audit.ledger(w) == 0, "1x: the ledger is out by " + Audit.ledger(w) + " at " + w.clock());
+                }
+                w.camDetail = false;
+                w.setStrategic(true);
+                for (int d = 0; d < 14 * 6; d++) {
+                    for (int k = 0; k < 24; k++) w.step();
+                    check(Audit.ledger(w) == 0, "the ledger is out by " + Audit.ledger(w) + " at " + w.clock());
+                }
+                // the counters agree: everyone who left is abroad or came back
+                check(w.strat.abroad() >= 0 && w.strat.backFromAbroad <= w.strat.evacuatedOut, "abroad " + w.strat.abroad() + " back " + w.strat.backFromAbroad);
+                int sumOut = 0;
+                for (int v : w.strat.outBy) sumOut += v;
+                check(sumOut == w.strat.abroad(), "out by town " + sumOut + " but abroad " + w.strat.abroad());
+                if (w.totalZombies() == 0 && w.strat.clearT > 2000) {
+                    for (Strategic.Column c : w.strat.columns) check(c.home || c.to >= 0, "a column still walking out of a safe country");
+                }
+                w.shutdown();
+            }
+        });
+        test("roles: contained only while it is, best fighters once each, the goal in words", new T() {
+            public void run() {
+                World w = game(24, 1024, "sandbox", 1);
+                Region.Settlement t = w.r.city();
+                Tools.paintZombies(w, t.cx * 16f, t.cy * 16f, 30, 100, -1);
+                play(w, 2, false);
+                Tools.erase(w, t.cx * 16f, t.cy * 16f, 3000);
+                for (int s = 0; s < w.sec.n; s++) w.sec.zIn[s] = 0;
+                play(w, 3, false);
+                check(w.roles.containedAt >= 0, "not contained after erasing every one of them");
+                Tools.paintZombies(w, t.cx * 16f, t.cy * 16f, 30, 100, -1);
+                play(w, 2, false);
+                check(w.roles.containedAt < 0, "still 'contained' with the dead back");
+                Tools.paintZombies(w, t.cx * 16f, t.cy * 16f, 400, 200, -1);
+                camOver(w, t.cx * 16f, t.cy * 16f);
+                play(w, 120, false);
+                java.util.Set<Integer> uids = new java.util.HashSet<Integer>();
+                java.util.Set<String> names = new java.util.HashSet<String>();
+                for (int j = 0; j < 10; j++) {
+                    if (w.stats.bestKills[j] <= 0) continue;
+                    check(uids.add(w.stats.bestUid[j]), "a fighter listed twice");
+                    names.add(w.stats.bestName[j]);
+                }
+                w.shutdown();
+                // personal goals for the small roles in a campaign
+                for (int r : new int[]{Roles.PRECINCT, Roles.SQUAD, Roles.OFFICER}) {
+                    World c = Setup.newGame(content, 1536, RegionGen.COAST, 5, content.scenario("protect"), 1, r, 60000);
+                    String g = c.roles.goal();
+                    check(!g.equals("protectcap"), Roles.NAMES[r] + " plays for the national goal");
+                    check(c.roles.goalText().length() > 10 && !c.roles.goalText().contains("0 hours"), "goal text: " + c.roles.goalText());
+                    if (r == Roles.OFFICER) {
+                        int me = c.playerEnt;
+                        check(me >= 0 && Setup.clearance(c, c.e.x[me], c.e.y[me]) > 1500, "the officer starts at the front");
+                    }
+                    c.shutdown();
+                }
+            }
+        });
+        test("campaigns: an idle player in the seat does worse than one who plays", new T() {
+            public void run() {
+                // the President who does nothing: no alert, no army; the one who plays raises it and hands the army over
+                int[] alive = new int[2];
+                for (int p = 0; p < 2; p++) {
+                    World w = Setup.newGame(content, 1536, RegionGen.COAST, 7, content.scenario("hold_city"), 1, Roles.PRESIDENT, 60000);
+                    w.setStrategic(true);
+                    for (int k = 0; k < 5 * 144 && !w.ended; k++) {
+                        if (p == 1 && k % 6 == 0) {
+                            float nat = w.command.nationalReported();
+                            if (!w.forces.generalCommands) Actions.generalCommands(w, true);
+                            int want = nat > 5000 ? 4 : nat > 1200 ? 3 : nat > 60 ? 2 : w.gov.level;
+                            if (want > w.gov.level) Actions.level(w, want);
+                        }
+                        w.step();
+                    }
+                    alive[p] = w.livingCivilians() + w.strat.abroad();
+                    if (p == 0) {
+                        check(w.gov.level <= 1, "the alert went up with nobody in the President's chair: " + w.gov.level);
+                        // the mayors still decide for their towns
+                        boolean local = false;
+                        for (Command.Official o : w.command.officials) if (o.role == Command.MAYOR && o.last.length() > 0) local = true;
+                        check(local, "no mayor did anything with the President idle");
+                        // the army waits for orders (formations stationed at the start are there)
+                        check(w.forces.formations.size() >= 3, "no formations at the start");
+                    }
+                    w.shutdown();
+                }
+                check(alive[0] < alive[1], "idle " + alive[0] + " vs playing " + alive[1]);
+                // the military commander who does nothing: the formations stay where they are
+                World m = Setup.newGame(content, 1536, RegionGen.COAST, 7, content.scenario("hold_city"), 1, Roles.MILITARY, 60000);
+                float[] hx = new float[m.forces.formations.size()], hy = new float[hx.length];
+                for (int i = 0; i < hx.length; i++) {
+                    hx[i] = m.forces.formations.get(i).hq.x;
+                    hy[i] = m.forces.formations.get(i).hq.y;
+                }
+                m.setStrategic(true);
+                for (int k = 0; k < 144; k++) m.step();
+                for (int i = 0; i < hx.length; i++) {
+                    Forces.Formation f = m.forces.formations.get(i);
+                    check(Math.abs(f.hq.x - hx[i]) + Math.abs(f.hq.y - hy[i]) < 50, f.name + " moved with nobody ordering it");
+                }
+                m.shutdown();
             }
         });
         test("perf: 20,000 of the dead", new T() {

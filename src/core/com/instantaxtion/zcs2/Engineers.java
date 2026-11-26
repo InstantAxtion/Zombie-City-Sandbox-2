@@ -86,7 +86,7 @@ public final class Engineers extends Module {
                 fob.med = 500;
                 w.strat.extendFacilities();
                 fobs++;
-                w.news.count("fob", f.name + ": engineers have set up a forward base (ammunition, fuel, a field hospital)|Engineers set up %d more forward bases", 1, x, y);
+                w.news.count("fob", f.name + ": engineers have set up a forward base (ammunition, fuel, a field hospital)|Engineers set up %d more forward base{s}", 1, x, y);
             }
             boolean care = fob != null || (f.home >= 0 && near(f, w.r.facilities.get(f.home), 2500));
             if (fob != null && f.hq.ammo < 20000 && fob.ammo > 0) {

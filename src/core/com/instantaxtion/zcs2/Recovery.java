@@ -42,15 +42,23 @@ public final class Recovery extends Module {
             clearT[st] += dt;
             if (clearT[st] >= 120) {
                 int lost = w.stats.lostBySettlement[st];
-                w.news.headline("The outbreak in " + s.name + " is over. At its worst " + WorldView.fmt(peak[st]) + " of the dead were in its streets"
-                        + (lost > 0 ? "; " + WorldView.fmt(lost) + " of its people were bitten or killed." : "."), s.cx * 16f, s.cy * 16f);
+                w.news.headline("The outbreak in " + s.name + " is over. At its worst " + News.num(peak[st]) + " of the dead were in its streets"
+                        + (lost > 0 ? "; " + News.num(lost) + " of its people were bitten or killed." : "."), s.cx * 16f, s.cy * 16f);
                 w.stats.containedTowns++;
                 w.gov.trust += 2;
+                // it's official: the authorities' picture is clear, and the units sent there are free
+                w.command.declaredClear(st);
+                w.forces.townCleared(st);
                 peak[st] = 0;
                 clearT[st] = 0;
             }
         }
         int total = w.totalZombies();
+        sweepT += dt;
+        if (sweepT >= 60) {
+            sweepT -= 60;
+            sweep(total);
+        }
         if (total > natPeak) natPeak = total;
         if (total > 0) natClearT = 0;
         else if (natPeak >= 50) {
@@ -72,6 +80,53 @@ public final class Recovery extends Module {
         }
     }
 
+    private float sweepT;
+
+    /**
+     * Once a game hour, when the war is all but won: police, Guard patrols and hunters find the last scattered
+     * dead (small nests in quiet streets and fields nobody is fighting over) and put them down, a share an hour,
+     * so a few dozen stragglers don't hold the country's alert up forever.
+     */
+    private void sweep(int total) {
+        if (total == 0 || total > 4000) return;
+        Sectors sec = w.sec;
+        int killed = 0, nests = 0;
+        float bx = -1, by = -1;
+        int bk = 0;
+        for (int s = 0; s < sec.n; s++) {
+            int z = sec.zIn[s];
+            if (z <= 0 || z > 400 || sec.hot[s] > 0 && !w.strategic) continue;
+            float share = sec.settlement[s] >= 0 ? 0.35f : 0.2f;
+            int k = Math.min(z, Math.max(Rng.unit(w.seed, w.tick, s * 31L + 5) < share ? 1 : 0, (int) (z * share)));
+            if (k <= 0) continue;
+            sec.zIn[s] -= k;
+            sec.bodies[s] += k;
+            killed += k;
+            if (sec.zIn[s] == 0) nests++;
+            if (k > bk) {
+                bk = k;
+                bx = sec.cx(s);
+                by = sec.cy(s);
+            }
+        }
+        // straggling packs on the roads too
+        for (Strategic.Horde h : w.strat.hordes) {
+            if (!h.alive || h.count > 150) continue;
+            int k = Math.max(1, (int) (h.count * 0.3f));
+            h.count -= k;
+            killed += k;
+            if (h.count <= 0) {
+                h.alive = false;
+                nests++;
+            }
+        }
+        if (killed == 0) return;
+        w.stats.killsBySide[2] += killed;
+        w.stats.zombieKills += killed;
+        if (nests > 0) w.news.tally("sweep", "Sweeps: patrols are hunting down the last of the dead in the streets and fields"
+                + "|Sweeps since the last report: {n} more nest{s} of the dead cleared, about {m} put down", nests, killed, bx, by, News.COMMAND);
+    }
+
     /** An outside formation goes back over the border: its people leave the map with it. */
     private void leave(Forces.Formation f) {
         for (Squads.Squad s : w.sq.list) if (s.alive && s.home == f.hq.id && !s.player) w.forces.standDown(s);
@@ -79,7 +134,7 @@ public final class Recovery extends Module {
         if (f.hq.vpool != null) java.util.Arrays.fill(f.hq.vpool, 0);
         f.alive = false;
         f.deployed = 0;
-        w.news.count("leave", "The " + f.name + " is going home: its job here is done|%d more outside units have gone home", 1, f.hq.x, f.hq.y);
+        w.news.count("leave", "The " + f.name + " is going home: its job here is done|%d more outside unit{s} {have} gone home", 1, f.hq.x, f.hq.y);
     }
 
     // ------------------------------------------------------------------ saves (this module's, and the state added to others)
@@ -143,6 +198,7 @@ public final class Recovery extends Module {
         for (Strategic.Horde h : sg.hordes) o.writeFloat(h.waitT);
         o.writeInt(sg.byDead.length);
         for (boolean b : sg.byDead) o.writeBoolean(b);
+        o.writeFloat(sweepT);
     }
 
     @Override
@@ -212,5 +268,6 @@ public final class Recovery extends Module {
             boolean b = in.readBoolean();
             if (i < sg.byDead.length) sg.byDead[i] = b;
         }
+        if (in.available() > 0) sweepT = in.readFloat();
     }
 }

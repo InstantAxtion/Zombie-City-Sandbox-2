@@ -51,21 +51,42 @@ public final class Gov {
         if (level < 1 && !playerDecides) raise(1);
     }
 
-    /** The player (as president) sets the alert level, up or down. */
+    /**
+     * A player lowered the alert by hand: until heldT runs out the AI president raises it again only if the
+     * reported picture gets much worse than it was then (heldNat), and never above heldLevel otherwise.
+     */
+    public float heldT, heldNat;
+    public int heldLevel = -1;
+
+    /** The player sets the alert level, up or down (lifting martial law, ending mobilisation). */
     public void raiseTo(int to) {
         to = Math.max(0, Math.min(LEVELS.length - 1, to));
-        if (to > level) raise(to);
-        else if (to < level) lower(to);
+        if (to > level) {
+            raise(to);
+            heldT = 0;
+            heldLevel = -1;
+        } else if (to < level) {
+            lower(to);
+            heldT = 1440;
+            heldNat = w.command.nationalReported();
+            heldLevel = to;
+        }
+    }
+
+    /** May the AI raise the alert to this level now (not straight back over a player's decision to lower it)? */
+    boolean mayRaise(int to, float nat) {
+        if (heldT <= 0 || to <= heldLevel) return true;
+        return nat > Math.max(heldNat * 2.5f, 200);
     }
 
     void raise(int to) {
         if (to <= level) return;
         level = to;
         String[] say = {"", "Officials urge calm and ask people to stay indoors after reports of attacks.",
-                "The governor declares a state of emergency. State police and Guard units are being called in.",
-                "Martial law. The National Guard takes command; air strikes authorised on masses of the dead.",
-                "National mobilisation: regular army divisions are moving into the region."};
-        w.news.headline(LEVELS[level].toUpperCase() + ": " + say[level], -1, -1);
+                "State police and Guard units are being called in.",
+                "The National Guard takes command; air strikes are authorised on masses of the dead.",
+                "Regular army divisions are moving into the region."};
+        w.news.headline(LEVELS[level].toUpperCase() + " declared. " + say[level], -1, -1);
         w.stats.event("Alert: " + LEVELS[level], -1, -1);
     }
 
@@ -120,6 +141,7 @@ public final class Gov {
     void update(float dt) {
         int z = w.totalZombies();
         if (curfew) curfewT += dt;
+        if (heldT > 0) heldT -= dt;
         hourT += dt;
         if (hourT >= 60) {
             hourT -= 60;

@@ -40,9 +40,10 @@ one person.
     Order tool) or release single formations to it (and take them back) from a formation's sheet.
   - *Military commander*: the formations, air strikes, artillery and bridges, with the same hand-over to the
     general; the civil government decides the rest.
-  - *Incident commander*: one city's police and the soldiers sent there, its evacuation, and asking for the army.
-  - *Precinct commander*: one police station; send its squads out and move them.
-  - *Squad leader*: one squad; tell it where to go.
+  - *Incident commander*: one city's police and the soldiers sent there, its evacuation, and asking for the army (the army comes when you ask; on the coast your goal is your own city).
+  - *Precinct commander*: one police station; send its squads out and move them. In a campaign your goal is your
+    own district: the other stations leave its calls to you.
+  - *Squad leader*: one squad; tell it where to go (in a campaign: keep it alive and its streets clear).
   - *Police officer*: one officer with a patrol following; move with the stick, you shoot by yourself.
   - *Survivor*: one person; move with the stick, survive.
 - **Scenarios and campaigns.** Sandbox starts: an open country, a lab leak, a crashed airliner, a prison riot, a
@@ -61,7 +62,7 @@ one person.
 - **Readable at every scale.** Everything on the map is sized for the phone's screen (people, vehicles, unit
   symbols, labels with outlines), crowds glow where they're thick, and labels don't pile on top of each other. Tap
   anyone or anything: names, ranks, ammunition, orders, a formation's strength
-  and losses, a town's people, the dead and its power. The radio log keeps every message (tap one to go there).
+  and losses, a town's people, the dead and its power. The radio log keeps the whole story, thousands of messages, each said once (tap one to go there).
   The after-action report has a timeline, the turning point, the numbers, where people were lost (in their homes,
   on the roads, to hordes, to our own guns, in fires), the best fighters, what happened, the fallen, and your best
   for the challenge.

@@ -25,6 +25,23 @@ public final class Stats {
     /** Seconds between timeline samples: doubles when the timeline is full, so a month still fits. */
     public float tEvery = 10;
     public int startPolice, startSoldiers, startCivilians;
+    /**
+     * The population's ledger: everyone alive at the start (Audit.people), and the civilians who have turned
+     * since (the bitten who rose, indoors or on the road). Alive + civDeaths + civTurned = startPeople, always.
+     */
+    public long startPeople, civTurned;
+    /** Firefighters lost (they're not counted among the people: they come from the fire stations' crews). */
+    public int crewDeaths;
+    private int crewUnit = -2;
+
+    /** Is entity i one of the people who live here (not a firefighter sent from a station)? */
+    public boolean resident(int i) {
+        if (crewUnit == -2) {
+            Content.Unit u = w.c.unit("firefighter");
+            crewUnit = u == null ? -1 : u.index;
+        }
+        return w.e.kind[i] == Ents.CIV && w.e.type[i] != crewUnit;
+    }
 
     // timeline: every 10 s
     public static final int MAXT = 4000;
@@ -75,7 +92,7 @@ public final class Stats {
             if (best < 0) break;
             used[best] = true;
             if (sb.length() > 0) sb.append(", ");
-            sb.append(WorldView.fmt(lossBy[best])).append(' ').append(LOSS_CAUSES[best]);
+            sb.append(News.num(lossBy[best])).append(' ').append(LOSS_CAUSES[best]);
         }
         return sb.toString();
     }
@@ -83,8 +100,12 @@ public final class Stats {
     void noteKiller(int i) {
         Ents e = w.e;
         int k = e.kills[i], uid = e.uid[i];
+        // one line per person: found by who they are (their uid), and named in full so two people who share a
+        // surname aren't taken for one fighter listed twice
+        String name = (e.armed(i) ? Ranks.title(e.kind[i], e.rank[i]) + " " + Names.person(w.seed, uid) : w.nameOf(i))
+                + (e.armed(i) ? ", " + w.unitOf(i).name : "");
         int slot = -1;
-        for (int j = 0; j < 10; j++) if (bestUid[j] == uid) slot = j;
+        for (int j = 0; j < 10; j++) if (bestKills[j] > 0 && bestUid[j] == uid) slot = j;
         if (slot < 0) {
             int low = 0;
             for (int j = 1; j < 10; j++) if (bestKills[j] < bestKills[low]) low = j;
@@ -93,7 +114,7 @@ public final class Stats {
         }
         bestUid[slot] = uid;
         bestKills[slot] = k;
-        bestName[slot] = w.nameOf(i) + (e.armed(i) ? ", " + w.unitOf(i).name : "");
+        bestName[slot] = name;
     }
 
     void noteFallen(int i, int cause) {

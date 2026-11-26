@@ -79,7 +79,7 @@ public final class Fires extends Module {
             if (w.r.bres[b] > 0 || w.r.bkind[b] >= Region.B_POLICE) {
                 if (w.time - news > 120) {
                     news = (float) w.time;
-                    w.news.radio("Fire reported: " + Region.BNAMES[w.r.bkind[b]].toLowerCase() + placeOf(b), w.doorX[b], w.doorY[b], News.CALL);
+                    w.news.radio("Fire reported: " + (vowel(building(w.r.bkind[b])) ? "an " : "a ") + building(w.r.bkind[b]) + " burning" + placeOf(b), w.doorX[b], w.doorY[b], News.CALL);
                 }
             }
         }
@@ -148,7 +148,7 @@ public final class Fires extends Module {
                     if (sec.zIn[s] + w.sp.secZ[s] > 25) {
                         int lost = Math.min(crews[b], 1 + crews[b] / 4);
                         crews[b] -= lost;
-                        w.stats.civDeaths += lost;
+                        w.stats.crewDeaths += lost;
                         sec.zIn[s] += lost / 2;
                         recall(b);
                     } else {
@@ -222,6 +222,18 @@ public final class Fires extends Module {
         }
     }
 
+    /** One building of a kind, as a sentence says it: "apartment block", "office block", "house". */
+    static String building(int kind) {
+        String n = Region.BNAMES[kind].toLowerCase();
+        if (n.equals("apartments")) return "apartment block";
+        if (n.equals("offices")) return "office block";
+        return n;
+    }
+
+    private static boolean vowel(String s) {
+        return s.length() > 0 && "aeiou".indexOf(s.charAt(0)) >= 0;
+    }
+
     /** It burned out: the building comes down, with the people still in it. */
     private void collapse(int b, int s) {
         Region r = w.r;
@@ -235,7 +247,7 @@ public final class Fires extends Module {
         collapsed++;
         w.stats.buildingsLost++;
         r.destroyBuilding(b);
-        if (lost > 50) w.news.radio("A burning " + Region.BNAMES[r.bkind[b]].toLowerCase() + " has collapsed" + placeOf(b) + " (" + lost + " dead)", w.doorX[b], w.doorY[b], News.LOSS);
+        if (lost > 50) w.news.radio("A burning " + building(r.bkind[b]) + " has collapsed" + placeOf(b) + " (" + News.num(lost) + " dead)", w.doorX[b], w.doorY[b], News.LOSS);
     }
 
     /** The nearest station with a crew sends one (and, near the camera, an engine you can watch). */

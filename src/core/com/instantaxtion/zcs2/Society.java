@@ -428,7 +428,7 @@ public final class Society extends Module {
             c.ammo = c.arms * 60f;
             c.tradeT = w.c.rule("tradeEvery", 720);
             colonies.add(c);
-            w.news.headline("Survivors from " + s.name + " have founded a settlement in the country: " + c.name + " (" + got + ").", c.x, c.y);
+            w.news.headline("Survivors from " + s.name + " have founded a settlement in the country: " + c.name + " (" + News.num(got) + " people).", c.x, c.y);
         }
         for (Colony c : colonies) {
             if (c.fallen) continue;

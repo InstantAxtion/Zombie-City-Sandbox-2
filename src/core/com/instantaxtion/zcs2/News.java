@@ -50,22 +50,86 @@ public final class News {
         this.w = w;
     }
 
-    private boolean recent(String text, float within) {
-        for (int i = log.size() - 1; i >= Math.max(0, log.size() - 60); i--) {
-            Item it = log.get(i);
-            if (w.time - it.time > within) break;
-            if (it.text.equals(text)) return true;
+    /** The most messages kept. When it's full the routine ones go first (units, then calls), the story stays. */
+    public static final int CAP = 6000;
+
+    /** A number as people write it: 1,234,567. Every number the game says goes through here. */
+    public static String num(long n) {
+        if (n < 0) return "-" + num(-n);
+        if (n < 1000) return Long.toString(n);
+        String s = Long.toString(n);
+        StringBuilder sb = new StringBuilder(s.length() + s.length() / 3);
+        int lead = s.length() % 3;
+        if (lead > 0) sb.append(s, 0, lead);
+        for (int i = lead; i < s.length(); i += 3) {
+            if (sb.length() > 0) sb.append(',');
+            sb.append(s, i, i + 3);
         }
+        return sb.toString();
+    }
+
+    /** "1 formation" / "3 formations". */
+    public static String count(long n, String one, String many) {
+        return num(n) + " " + (n == 1 ? one : many);
+    }
+
+    /**
+     * A message's key: its text with the counts taken out, so "(212 of the dead)" and "(260 of the dead)" are the
+     * same message. Names with numbers in them ("3rd Infantry", "Day 4") keep theirs.
+     */
+    static String keyOf(String text) {
+        StringBuilder sb = null;
+        int n = text.length();
+        for (int i = 0; i < n; i++) {
+            char c = text.charAt(i);
+            if (c >= '0' && c <= '9' && (i == 0 || !Character.isLetter(text.charAt(i - 1)))) {
+                int j = i;
+                while (j + 1 < n && (Character.isDigit(text.charAt(j + 1)) || text.charAt(j + 1) == ',' && j + 2 < n && Character.isDigit(text.charAt(j + 2)))) j++;
+                if (j + 1 < n && Character.isLetter(text.charAt(j + 1))) {
+                    // an ordinal or a name: kept
+                    if (sb != null) sb.append(text, i, j + 1);
+                } else {
+                    if (sb == null) sb = new StringBuilder(text.substring(0, i));
+                    sb.append('#');
+                }
+                i = j;
+            } else if (sb != null) sb.append(c);
+        }
+        return sb == null ? text : sb.toString();
+    }
+
+    /** Keys said recently, and when (the same message isn't said again within REPEAT). */
+    private final java.util.HashMap<String, Double> said = new java.util.HashMap<String, Double>();
+
+    private boolean recent(String key, float within) {
+        Double t = said.get(key);
+        if (t != null && w.time - t < within) return true;
+        if (said.size() > 4000) {
+            // forget the old ones
+            java.util.Iterator<java.util.Map.Entry<String, Double>> it = said.entrySet().iterator();
+            while (it.hasNext()) if (w.time - it.next().getValue() > HEADLINE_REPEAT) it.remove();
+        }
+        said.put(key, w.time);
         return false;
     }
 
     public void radio(String text, float x, float y, int kind) {
-        if (recent(text, REPEAT)) return;
+        radio(keyOf(text), text, x, y, kind);
+    }
+
+    /** A radio message said once for its key within REPEAT (the text may carry changing numbers). */
+    public void radio(String key, String text, float x, float y, int kind) {
+        radio(key, text, x, y, kind, REPEAT);
+    }
+
+    /** As above, not said again for its key within `within` game seconds. */
+    public void radio(String key, String text, float x, float y, int kind, float within) {
+        if (recent(key, within)) return;
         add(new Item(text, x, y, kind, w.time));
     }
 
     public void headline(String text, float x, float y) {
-        if (recent(text, HEADLINE_REPEAT)) return;
+        if (recent(keyOf(text), HEADLINE_REPEAT)) return;
         Item it = new Item(text, x, y, HEADLINE, w.time);
         headline = it;
         add(it);
@@ -116,9 +180,16 @@ public final class News {
     }
 
     private void say(String text, int n, int m, float x, float y, int kind) {
-        String s = text.replace("{n}", WorldView.fmt(n)).replace("{m}", WorldView.fmt(m));
+        String s = plural(text, n, m).replace("{n}", num(n)).replace("{m}", num(m));
         add(new Item(s, x, y, kind, w.time));
         if (kind == HEADLINE) w.stats.event(s, x, y);
+    }
+
+    /** "{n} more column{s}, {m} {mpeople}": the words agree with the numbers (one column, one person). */
+    static String plural(String text, int n, int m) {
+        if (text.indexOf('{') < 0) return text;
+        return text.replace("{s}", n == 1 ? "" : "s").replace("{have}", n == 1 ? "has" : "have").replace("{people}", n == 1 ? "person" : "people")
+                .replace("{ms}", m == 1 ? "" : "s").replace("{mpeople}", m == 1 ? "person" : "people");
     }
 
     /** Once a second: tallies whose window has closed are said, with their totals. */
@@ -144,14 +215,28 @@ public final class News {
 
     void add(Item it) {
         log.add(it);
-        if (log.size() > 400) log.remove(0);
+        if (log.size() > CAP) drop();
         version++;
+    }
+
+    /** Full: the oldest routine message goes (unit chatter first, then calls, losses, orders; headlines last). */
+    private void drop() {
+        int[] order = {UNIT, CALL, LOSS, COMMAND, HEADLINE};
+        int half = log.size() / 2;
+        for (int kind : order)
+            for (int i = 0; i < half; i++)
+                if (log.get(i).kind == kind) {
+                    log.remove(i);
+                    return;
+                }
+        log.remove(0);
     }
 
     /** Restores an item from a save. */
     void restore(String text, float x, float y, int kind, double time) {
         Item it = new Item(text, x, y, kind, time);
         log.add(it);
+        said.put(keyOf(text), time);
         if (kind == HEADLINE) headline = it;
         version++;
     }

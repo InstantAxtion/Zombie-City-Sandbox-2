@@ -290,7 +290,7 @@ public final class Navy extends Module {
             flights.add(fl);
             f.state = Forces.AIRLIFT;
             airlifts++;
-            w.news.count("airlift", "Airlift: the " + f.name + " is being flown to " + b.name + "|Airlift: %d more formations flown across the country", 1, b.x, b.y);
+            w.news.count("airlift", "Airlift: the " + f.name + " is being flown to " + b.name + "|Airlift: %d more formation{s} flown across the country", 1, b.x, b.y);
         }
         Content.VType pl = w.c.vtype("transport_plane");
         float speed = pl != null ? pl.speed : 420;

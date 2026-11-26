@@ -300,7 +300,8 @@ public final class Squads {
             if (s.path == null || s.replanT <= 0) {
                 s.path = w.nav.find(lx, ly, s.gx, s.gy, 6000);
                 s.pathI = 0;
-                s.replanT = 6;
+                // (squads sent together don't all plan again in the same step)
+                s.replanT = 5 + (s.id % 8) * 0.25f;
             }
             float wx = s.gx, wy = s.gy;
             if (s.path != null && s.pathI * 2 < s.path.length) {

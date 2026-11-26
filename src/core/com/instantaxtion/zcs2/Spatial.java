@@ -20,6 +20,11 @@ public final class Spatial {
     public int zCount, lCount, civCount;
     /** Per sector: zombies, civilians, police, soldiers on the map (rebuilt each step). */
     public final int[] secZ, secCiv, secCop, secSol;
+    /** 256 px blocks (4 x 4 cells): how many of the living and the dead are in each, so a search that would
+     *  only find empty cells stops at once (most of the dead are nowhere near anyone). */
+    static final int BLK = 4;
+    private final int bw;
+    private final int[] lBlk, zBlk;
 
     public Spatial(Region r) {
         cw = r.px() / CELL + 1;
@@ -33,7 +38,21 @@ public final class Spatial {
         secCiv = new int[ns];
         secCop = new int[ns];
         secSol = new int[ns];
+        bw = cw / BLK + 1;
+        lBlk = new int[bw * bw];
+        zBlk = new int[bw * bw];
         this.r = r;
+    }
+
+    /** Is anyone (lBlk) or any of the dead (zBlk) in the blocks covering the square of radius rad round (x, y)? */
+    private boolean anyIn(int[] blk, float x, float y, float rad) {
+        float bs = CELL * BLK;
+        int x0 = Math.max(0, (int) ((x - rad) / bs)), x1 = Math.min(bw - 1, (int) ((x + rad) / bs));
+        int y0 = Math.max(0, (int) ((y - rad) / bs)), y1 = Math.min(bw - 1, (int) ((y + rad) / bs));
+        for (int by = y0; by <= y1; by++)
+            for (int bx = x0; bx <= x1; bx++)
+                if (blk[by * bw + bx] > 0) return true;
+        return false;
     }
 
     private final Region r;
@@ -58,6 +77,8 @@ public final class Spatial {
         Arrays.fill(secCiv, 0);
         Arrays.fill(secCop, 0);
         Arrays.fill(secSol, 0);
+        Arrays.fill(lBlk, 0);
+        Arrays.fill(zBlk, 0);
         // count (in zEnd / lEnd), noting each cell the first time it's used
         int nz = 0, nl = 0, nc = 0;
         for (int i = 0; i < e.top; i++) {
@@ -68,11 +89,12 @@ public final class Spatial {
                 touched[touchedN++] = c;
             }
             int s = r.sectorOfPx(e.x[i], e.y[i]);
+            int b = (c / cw / BLK) * bw + (c % cw) / BLK;
             switch (e.kind[i]) {
-                case Ents.ZOMBIE: zEnd[c]++; nz++; secZ[s]++; break;
-                case Ents.CIV: lEnd[c]++; nl++; secCiv[s]++; nc++; break;
-                case Ents.COP: lEnd[c]++; nl++; secCop[s]++; break;
-                default: lEnd[c]++; nl++; secSol[s]++;
+                case Ents.ZOMBIE: zEnd[c]++; nz++; secZ[s]++; zBlk[b]++; break;
+                case Ents.CIV: lEnd[c]++; nl++; secCiv[s]++; nc++; lBlk[b]++; break;
+                case Ents.COP: lEnd[c]++; nl++; secCop[s]++; lBlk[b]++; break;
+                default: lEnd[c]++; nl++; secSol[s]++; lBlk[b]++;
             }
         }
         if (zList.length < nz) zList = new int[nz * 2];
@@ -106,11 +128,13 @@ public final class Spatial {
 
     /** The nearest zombie within maxR of (x, y), or -1. */
     public int nearestZombie(Ents e, float x, float y, float maxR) {
+        if (!anyIn(zBlk, x, y, maxR)) return -1;
         return nearest(e, x, y, maxR, zStart, zEnd, zList, -1, 0);
     }
 
     /** The nearest living person within maxR (not 'self'); kindMask bit k set = skip kind k. */
     public int nearestLiving(Ents e, float x, float y, float maxR, int self, int skipMask) {
+        if (!anyIn(lBlk, x, y, maxR)) return -1;
         return nearest(e, x, y, maxR, lStart, lEnd, lList, self, skipMask);
     }
 
@@ -149,10 +173,12 @@ public final class Spatial {
 
     /** How many zombies are within rad of (x, y) (stops counting at cap). */
     public int zombiesNear(Ents e, float x, float y, float rad, int cap) {
+        if (!anyIn(zBlk, x, y, rad)) return 0;
         return countNear(e, x, y, rad, cap, zStart, zEnd, zList);
     }
 
     public int livingNear(Ents e, float x, float y, float rad, int cap) {
+        if (!anyIn(lBlk, x, y, rad)) return 0;
         return countNear(e, x, y, rad, cap, lStart, lEnd, lList);
     }
 

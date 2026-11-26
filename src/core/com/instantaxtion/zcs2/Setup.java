@@ -61,6 +61,7 @@ public final class Setup {
         w.stats.startPolice = w.sq.count(Ents.COP);
         w.stats.startSoldiers = w.sq.count(Ents.SOLDIER);
         w.stats.startCivilians = w.sec.totalPop();
+        w.stats.startPeople = Audit.people(w);
         w.stats.event("The day begins in " + r.name, -1, -1);
         return w;
     }
@@ -196,24 +197,47 @@ public final class Setup {
         int n = sc.zombies;
         Region.Facility at = null;
         if (o.equals("random")) {
-            // a city or town picked by the seed, and somewhere in it
+            // a city or town picked by the seed, a street in it: a few of the dead out, more indoors round about,
+            // and people bitten who don't know what's coming
             List<Region.Settlement> places = new ArrayList<Region.Settlement>();
             for (Region.Settlement s : r.settlements) if (s.kind == Region.S_CITY || s.kind == Region.S_TOWN) places.add(s);
             Region.Settlement s = places.get(Rng.hashInt(w.seed, 5, 17, places.size()));
             float[] p = landNear(w, s.cx * 16f, s.cy * 16f, s.radius * 10f, 7);
-            o = "xy:" + p[0] / r.px() + "," + p[1] / r.px();
+            originX = p[0];
+            originY = p[1];
+            int ind = Math.min(n, 40);
+            pack(w, p[0], p[1], ind, 8, 7);
+            spreadIndoors(w, r.sectorOfPx(p[0], p[1]), n - ind, 1);
+            hiddenBitten(w, s.id, r.sectorOfPx(p[0], p[1]), 8, 6, 18, 41);
+            latent(w, s.id, 28, 9, 30, 120, 1690, 51);
+            Region.Settlement next = nearestTown(w, s, s);
+            if (next != null) latent(w, next.id, 8, 7, 21, 300, 1820, 52);
+            return;
         }
         if (o.equals("port")) {
-            // a ship came in: the dead come down the gangway at the docks (or the most coastal city)
-            Region.Facility port = facility(w, Region.F_PORT);
-            float[] p;
-            if (port != null) p = new float[]{port.x, port.y};
-            else {
-                Region.Settlement best = r.city();
-                for (Region.Settlement s : r.settlements) if (s.kind == Region.S_CITY && w.roles.coastal(s)) best = s;
-                p = shore(w, best);
+            // a ship came in to the docks of the biggest town on the coast: the dead come down onto the waterfront
+            // and into the streets behind it (not the naval station, where the marines are)
+            Region.Settlement best = null;
+            Region.Facility navy = facility(w, Region.F_PORT);
+            for (Region.Settlement s : r.settlements) {
+                if (s.kind != Region.S_CITY && s.kind != Region.S_TOWN || !w.roles.coastal(s)) continue;
+                if (navy != null && navy.settlement == s.id) continue;
+                if (best == null || s.residents > best.residents) best = s;
             }
-            o = "xy:" + p[0] / r.px() + "," + p[1] / r.px();
+            if (best == null) best = r.city();
+            float[] p = shore(w, best);
+            originX = p[0];
+            originY = p[1];
+            // (the first few down the gangway at dawn; the rest still in the hold and the dock sheds)
+            int ind = Math.min(n, 60);
+            pack(w, p[0], p[1], ind, 9, 11);
+            spreadIndoors(w, r.sectorOfPx(p[0], p[1]), n - ind, 1);
+            // some of the crew got ashore in the night
+            hiddenBitten(w, best.id, r.sectorOfPx(p[0], p[1]), 6, 6, 16, 43);
+            latent(w, best.id, 32, 9, 27, 60, 1690, 53);
+            Region.Settlement next = nearestTown(w, best, best);
+            if (next != null) latent(w, next.id, 8, 7, 21, 300, 1820, 54);
+            o = "done";
         }
         if (o.equals("state")) {
             // a whole state has fallen: the dead in its towns and countryside, its people mostly gone
@@ -222,11 +246,13 @@ public final class Setup {
             w.roles.campaignState = st;
             List<Integer> secs = new ArrayList<Integer>();
             for (int s = 0; s < w.sec.n; s++) if (w.roles.stateOfSector(s) == st && w.sec.connect[s] != 0) secs.add(s);
+            int placedHordes = 0;
             for (int k = 0; k < 6 && !secs.isEmpty(); k++) {
                 int s = secs.get(Rng.hashInt(w.seed, k, 33, secs.size()));
                 w.strat.addHorde(w.sec.cx(s), w.sec.cy(s), n / 12);
+                placedHordes += n / 12;
             }
-            int left = n - 6 * (n / 12);
+            int left = n - placedHordes;
             // the rest are in its towns (nests where people lived) and its fields; exactly as many as asked
             List<Integer> towns = new ArrayList<Integer>();
             long townHomes = 0;
@@ -244,7 +270,8 @@ public final class Setup {
                 placed += m;
             }
             left -= placed;
-            for (int k = 0; k < left && !secs.isEmpty(); k += 50) w.sec.zIn[secs.get(Rng.hashInt(w.seed, k, 34, secs.size()))] += Math.min(50, left - k);
+            if (secs.isEmpty()) w.sec.zIn[r.sectorOfPx(r.city().cx * 16f, r.city().cy * 16f)] += left;
+            else for (int k = 0; k < left; k += 50) w.sec.zIn[secs.get(Rng.hashInt(w.seed, k, 34, secs.size()))] += Math.min(50, left - k);
             // its people mostly got away before it fell: they're refugees in the capital now
             Region.Settlement cap = r.city();
             List<Integer> capSecs = new ArrayList<Integer>();
@@ -267,18 +294,14 @@ public final class Setup {
             o = "done";
         }
         if (o.startsWith("xy:")) {
-            // a place on the map (custom scenarios): a pack of the dead there
+            // a place on the map (custom scenarios): a pack of the dead there, exactly as many as asked
             String[] p = o.substring(3).split(",");
             float x = Float.parseFloat(p[0].trim()) * r.px(), y = Float.parseFloat(p[1].trim()) * r.px();
             float[] q = landNear(w, x, y, 400, 9);
             originX = q[0];
             originY = q[1];
             int ind = Math.min(n, 400);
-            for (int k = 0; k < ind; k++) {
-                float ang = k * 2.39f, rad = 8 + (float) Math.sqrt(k) * 8;
-                float zx = q[0] + (float) Math.cos(ang) * rad, zy = q[1] + (float) Math.sin(ang) * rad;
-                if (r.walkablePx(zx, zy)) w.spawnZombie(zx, zy, w.pickZType(-1, k));
-            }
+            pack(w, q[0], q[1], ind, 8, 9);
             if (n > ind) w.sec.zIn[r.sectorOfPx(q[0], q[1])] += n - ind;
             o = "done";
         }
@@ -288,10 +311,19 @@ public final class Setup {
         if (at != null && o.equals("prison")) {
             originX = at.x;
             originY = at.y;
-            // it started inside: the cell blocks, among the inmates
+            // it started inside, in the cell blocks; a few are already through the gates, and some who got out
+            // before the lockdown are bitten and on their way to the nearest town
             int s = r.sectorOfPx(at.x, at.y);
-            w.sec.zIn[s] += n;
+            int out = Math.min(n, Math.max(1, n / 3));
+            float[] gate = landNear(w, at.x, at.y + 120, 60, 13);
+            pack(w, gate[0], gate[1], out, 8, 13);
+            w.sec.zIn[s] += n - out;
             w.sec.hot[s] = 30;
+            Region.Settlement town = nearestTown(w, r.settlements.get(Math.max(0, at.settlement)));
+            if (town != null) {
+                hiddenBitten(w, town.id, r.sectorOfPx(town.cx * 16f, town.cy * 16f), 5, 6, 14, 47);
+                latent(w, town.id, 24, 7, 21, 120, 1690, 57);
+            }
             at = null;
             o = "done";
         }
@@ -299,13 +331,16 @@ public final class Setup {
             originX = at.x;
             originY = at.y;
             if (o.equals("festival")) {
-                // the crowd
+                // the crowd (come out of the streets round the park: everyone is counted once)
                 Content.Unit civ = w.c.unit("civilian");
                 int s = r.sectorOfPx(at.x, at.y);
                 for (int k = 0; k < 700; k++) {
                     float x = at.x + (Rng.unit(w.seed, k, 1) - 0.5f) * (at.bx1 - at.bx0) * 14;
                     float y = at.y + (Rng.unit(w.seed, k, 2) - 0.5f) * (at.by1 - at.by0) * 14;
                     if (!r.walkablePx(x, y)) continue;
+                    int from = fullest(w, s);
+                    if (from < 0) break;
+                    w.sec.popIn[from]--;
                     int i = w.spawnCiv(x, y, civ);
                     w.e.flags[i] |= Ents.F_AMBIENT;
                     w.e.timer[i] = 400 + Rng.unit(w.seed, k, 3) * 400;
@@ -313,48 +348,38 @@ public final class Setup {
                     w.e.gx[i] = x;
                     w.e.gy[i] = y;
                 }
+                // people bitten in the crush went home before anyone understood
+                hiddenBitten(w, at.settlement, s, 10, 5, 16, 45);
+                latent(w, at.settlement, 48, 7, 24, 60, 1690, 55);
+                Region.Settlement home = at.settlement >= 0 ? r.settlements.get(at.settlement) : r.city();
+                Region.Settlement next = nearestTown(w, home, home);
+                if (next != null) latent(w, next.id, 12, 7, 21, 200, 1820, 56);
             }
             if (o.equals("lab")) {
-                // the staff who were bitten went home before anyone knew: hidden outbreaks round the city
+                // the staff who were bitten went home before anyone knew: hidden outbreaks round the city, and in
+                // the towns some of them commute from
                 int c = r.city().id;
-                java.util.List<Integer> homes = new java.util.ArrayList<Integer>();
-                for (int s = 0; s < w.sec.n; s++) if (w.sec.settlement[s] == c && w.sec.popIn[s] > 200) homes.add(s);
-                for (int k = 0; k < 6 && !homes.isEmpty(); k++) {
-                    int s = homes.get(Rng.hashInt(w.seed, k, 91, homes.size()));
-                    w.sec.inf[s] += 10 + Rng.hashInt(w.seed, k, 92, 14);
-                }
+                hiddenBitten(w, c, r.sectorOfPx(at.x, at.y), 12, 8, 26, 91);
+                Region.Settlement town = nearestTown(w, r.city(), r.city());
+                if (town != null) hiddenBitten(w, town.id, r.sectorOfPx(town.cx * 16f, town.cy * 16f), 2, 5, 12, 93);
+                latent(w, c, 40, 9, 30, 60, 1690, 95);
+                if (town != null) latent(w, town.id, 12, 7, 21, 200, 1820, 96);
             }
-            // the first few hundred on the street, as people; any more are already inside the buildings round about
-            int ind = Math.min(n, 300);
-            for (int k = 0; k < ind; k++) {
-                float ang = k * 2.39f, rad = 6 + (float) Math.sqrt(k) * 7;
-                float x = at.x + (float) Math.cos(ang) * rad, y = at.y + (float) Math.sin(ang) * rad;
-                if (!r.walkablePx(x, y)) {
-                    x = at.x;
-                    y = at.y;
-                }
-                w.spawnZombie(x, y, w.c.ztype("walker"));
-            }
-            if (n > ind) {
-                int s0 = r.sectorOfPx(at.x, at.y);
-                List<Integer> near = new ArrayList<Integer>();
-                for (int dy = -2; dy <= 2; dy++)
-                    for (int dx = -2; dx <= 2; dx++) {
-                        int x = s0 % w.sec.sw + dx, y = s0 / w.sec.sw + dy;
-                        if (x >= 0 && y >= 0 && x < w.sec.sw && y < w.sec.sh && w.sec.home[y * w.sec.sw + x] > 0) near.add(y * w.sec.sw + x);
-                    }
-                if (near.isEmpty()) near.add(s0);
-                int left = n - ind;
-                for (int k = 0; k < near.size(); k++) w.sec.zIn[near.get(k)] += left / near.size() + (k < left % near.size() ? 1 : 0);
-            }
+            // the first on the street, as people (the first 1,500 of a big start); the rest are already inside
+            // the buildings of the streets round about
+            int ind = Math.min(n, o.equals("lab") && n > 300 ? 1500 : 300);
+            pack(w, at.x, at.y, ind, 7, 5);
+            if (n > ind) spreadIndoors(w, r.sectorOfPx(at.x, at.y), n - ind, n > 2000 ? 4 : 2);
         } else if (o.equals("crash") || o.equals("countryside")) {
             Region.Settlement c = r.city();
             float[] p = null;
-            for (int a = 0; a < 200 && p == null; a++) {
-                float ang = Rng.unit(w.seed, a, 5) * 6.283f, d = (c.radius + 40 + Rng.unit(w.seed, a, 6) * 80) * 16;
+            // in the fields on the edge of town (the countryside far out, for a fallen countryside), near a road
+            boolean crash = o.equals("crash");
+            for (int a = 0; a < 400 && p == null; a++) {
+                float ang = Rng.unit(w.seed, a, 5) * 6.283f, d = (c.radius + (crash ? 8 + Rng.unit(w.seed, a, 6) * 16 : 22 + Rng.unit(w.seed, a, 6) * 40)) * 16;
                 float x = c.cx * 16 + (float) Math.cos(ang) * d, y = c.cy * 16 + (float) Math.sin(ang) * d;
                 int t = r.tileAtPx(x, y);
-                if ((t == Tile.GRASS || t == Tile.FARM) && r.settlementAt(x, y) == null) p = new float[]{x, y};
+                if ((t == Tile.GRASS || t == Tile.FARM) && r.settlementAt(x, y) == null && (o.equals("countryside") || r.roads.nearestNode(x, y, 900) >= 0)) p = new float[]{x, y};
             }
             if (p == null) p = new float[]{c.cx * 16f, c.cy * 16f};
             originX = p[0];
@@ -362,14 +387,26 @@ public final class Setup {
             if (o.equals("crash")) {
                 w.strat.crashX = p[0];
                 w.strat.crashY = p[1];
-                int s = r.sectorOfPx(p[0], p[1]);
-                int ind = Math.min(n, 150);
-                for (int k = 0; k < ind; k++) {
-                    float ang = k * 2.39f, rad = 10 + (float) Math.sqrt(k) * 9;
-                    float x = p[0] + (float) Math.cos(ang) * rad, y = p[1] + (float) Math.sin(ang) * rad;
-                    if (r.walkablePx(x, y)) w.spawnZombie(x, y, w.c.ztype("walker"));
+                // the passengers round the wreck; the rest already walking away from it, towards the lights of
+                // the nearest town
+                int ind = Math.min(n, 100);
+                pack(w, p[0], p[1], ind, 10, 15);
+                Region.Settlement town = nearestTo(w, p[0], p[1]);
+                if (town != null) {
+                    // people from the town pulled survivors out of the wreck and took them to hospital: bitten
+                    int hs = w.strat.hospitalSector(town.id);
+                    if (hs >= 0) w.strat.latent.add(new float[]{hs, 25 + Rng.hashInt(w.seed, 7, 59, 30), (float) w.time + 90});
+                    latent(w, town.id, 20, 7, 21, 120, 1560, 58);
                 }
-                w.sec.zIn[s] += n - ind;
+                if (n > ind) {
+                    Strategic.Horde h = w.strat.addHorde(p[0], p[1], n - ind);
+                    if (town != null) {
+                        h.target = r.sectorOfPx(town.cx * 16f, town.cy * 16f);
+                        h.tx = w.sec.cx(h.target);
+                        h.ty = w.sec.cy(h.target);
+                        h.keepT = 1440;
+                    }
+                }
                 w.fx.add(Effects.SMOKE, p[0], p[1], 80, 0, 600);
             } else {
                 // the countryside has fallen: the dead everywhere outside the towns, and hordes
@@ -383,7 +420,8 @@ public final class Setup {
                     w.strat.addHorde(w.sec.cx(s), w.sec.cy(s), n / 8);
                     left -= n / 8;
                 }
-                for (int k = 0; k < left && !open.isEmpty(); k += 10) w.sec.zIn[open.get(Rng.hashInt(w.seed, k, 78, open.size()))] += Math.min(10, left - k);
+                if (open.isEmpty()) w.sec.zIn[r.sectorOfPx(p[0], p[1])] += left;
+                else for (int k = 0; k < left; k += 10) w.sec.zIn[open.get(Rng.hashInt(w.seed, k, 78, open.size()))] += Math.min(10, left - k);
                 // the villages' people have mostly fled to the towns (counted as refugees there)
                 for (int s = 0; s < w.sec.n; s++) {
                     int st = w.sec.settlement[s];
@@ -402,22 +440,24 @@ public final class Setup {
             // hordes marching in from every side
             float m = r.px();
             float[][] pts = {{0.08f, 0.5f}, {0.92f, 0.5f}, {0.5f, 0.08f}, {0.5f, 0.92f}, {0.1f, 0.1f}, {0.9f, 0.9f}};
-            int wave = 0;
+            int wave = 0, placed = 0;
             for (float[] pt : pts) {
                 float x = pt[0] * m, y = pt[1] * m;
                 for (int a = 0; a < 40 && !r.walkablePx(x, y); a++) {
                     x += (m / 2 - x) * 0.05f;
                     y += (m / 2 - y) * 0.05f;
                 }
-                Strategic.Horde h = w.strat.addHorde(x, y, n / pts.length);
+                int size = wave == pts.length - 1 ? n - placed : n / pts.length;
+                placed += size;
+                Strategic.Horde h = w.strat.addHorde(x, y, size);
                 // marching on the capital
                 Region.Settlement cap = r.city();
                 h.target = r.sectorOfPx(cap.cx * 16f, cap.cy * 16f);
                 h.tx = w.sec.cx(h.target);
                 h.ty = w.sec.cy(h.target);
                 h.keepT = 1440 * 30;
-                // in waves, a couple of days apart
-                h.waitT = (0.5f + 2.2f * wave++) * 1440;
+                // in waves a couple of days apart, the first a day or so off (time to get ready)
+                h.waitT = (1.25f + 2.2f * wave++) * 1440;
             }
             w.gov.level = 2;
             originX = r.city().cx * 16f;
@@ -436,6 +476,124 @@ public final class Setup {
         }
     }
 
+    /** n of the dead as people round (x, y), in a spiral; any that can't stand there wait in that street's buildings. */
+    private static void pack(World w, float x, float y, int n, float spacing, long salt) {
+        Region r = w.r;
+        for (int k = 0; k < n; k++) {
+            float ang = k * 2.39f, rad = 6 + (float) Math.sqrt(k) * spacing;
+            float zx = x + (float) Math.cos(ang) * rad, zy = y + (float) Math.sin(ang) * rad;
+            if (r.walkablePx(zx, zy) && r.tileAtPx(zx, zy) != Tile.BRIDGE) w.spawnZombie(zx, zy, w.pickZType(-1, k + salt * 1000));
+            else w.sec.zIn[r.sectorOfPx(x, y)]++;
+        }
+    }
+
+    /** n of the dead inside the buildings of the streets within `ring` sectors of s (where people live), as evenly as the homes. */
+    private static void spreadIndoors(World w, int s0, int n, int ring) {
+        if (n <= 0) return;
+        List<Integer> near = new ArrayList<Integer>();
+        long homes = 0;
+        for (int dy = -ring; dy <= ring; dy++)
+            for (int dx = -ring; dx <= ring; dx++) {
+                int x = s0 % w.sec.sw + dx, y = s0 / w.sec.sw + dy;
+                if (x < 0 || y < 0 || x >= w.sec.sw || y >= w.sec.sh) continue;
+                int s = y * w.sec.sw + x;
+                if (w.sec.home[s] > 0) {
+                    near.add(s);
+                    // dense where it began, thinning outwards (a quarter as many a street further on)
+                    int ring2 = Math.max(Math.abs(dx), Math.abs(dy));
+                    homes += weight(w, s, ring2);
+                }
+            }
+        if (near.isEmpty()) {
+            w.sec.zIn[s0] += n;
+            return;
+        }
+        int put = 0;
+        for (int s : near) {
+            int ring2 = Math.max(Math.abs(s % w.sec.sw - s0 % w.sec.sw), Math.abs(s / w.sec.sw - s0 / w.sec.sw));
+            int m = (int) ((long) n * weight(w, s, ring2) / Math.max(1, homes));
+            w.sec.zIn[s] += m;
+            put += m;
+        }
+        w.sec.zIn[near.get(0)] += n - put;
+    }
+
+    private static long weight(World w, int s, int ring) {
+        return Math.max(1, w.sec.home[s] >> (2 * ring));
+    }
+
+    /**
+     * People bitten before anyone knew, gone home: `homes` streets of the settlement (not the one at `not`), each
+     * with lo..hi of its people infected. They turn over the next hours, indoors, where nobody sees.
+     */
+    private static void hiddenBitten(World w, int st, int not, int homes, int lo, int hi, long salt) {
+        List<Integer> cand = new ArrayList<Integer>();
+        for (int s = 0; s < w.sec.n; s++) if (w.sec.settlement[s] == st && w.sec.popIn[s] > 200 && s != not) cand.add(s);
+        for (int k = 0; k < homes && !cand.isEmpty(); k++) {
+            int s = cand.remove(Rng.hashInt(w.seed, k, salt, cand.size()));
+            int m = Math.min(w.sec.popIn[s], lo + Rng.hashInt(w.seed, k, salt + 1, hi - lo + 1));
+            w.sec.popIn[s] -= m;
+            w.sec.inf[s] += m;
+        }
+    }
+
+    /**
+     * People bitten at the start who don't know it yet: `homes` streets of the settlement, lo..hi people each, who
+     * fall ill at a time between `from` and `to` game seconds in (and turn a few hours after that), so the
+     * outbreak shows up in new places through the first day.
+     */
+    private static void latent(World w, int st, int homes, int lo, int hi, float from, float to, long salt) {
+        List<Integer> cand = new ArrayList<Integer>();
+        for (int s = 0; s < w.sec.n; s++) if (w.sec.settlement[s] == st && w.sec.popIn[s] > 300) cand.add(s);
+        for (int k = 0; k < homes && !cand.isEmpty(); k++) {
+            int s = cand.remove(Rng.hashInt(w.seed, k, salt, cand.size()));
+            int m = lo + Rng.hashInt(w.seed, k, salt + 1, hi - lo + 1);
+            float t = (float) w.time + from + Rng.unit(w.seed, k, salt + 2) * (to - from);
+            w.strat.latent.add(new float[]{s, m, t});
+        }
+    }
+
+    /** The sector with the most people sheltering within two of s (to take a person out into the street from), or -1. */
+    private static int fullest(World w, int s0) {
+        int best = -1;
+        for (int dy = -2; dy <= 2; dy++)
+            for (int dx = -2; dx <= 2; dx++) {
+                int x = s0 % w.sec.sw + dx, y = s0 / w.sec.sw + dy;
+                if (x < 0 || y < 0 || x >= w.sec.sw || y >= w.sec.sh) continue;
+                int s = y * w.sec.sw + x;
+                if (w.sec.popIn[s] > 0 && (best < 0 || w.sec.popIn[s] > w.sec.popIn[best])) best = s;
+            }
+        return best;
+    }
+
+    /** The city or town nearest a point. */
+    private static Region.Settlement nearestTo(World w, float x, float y) {
+        Region.Settlement best = null;
+        float bd = Float.MAX_VALUE;
+        for (Region.Settlement s : w.r.settlements) {
+            if (s.kind != Region.S_TOWN && s.kind != Region.S_CITY) continue;
+            float dx = s.cx * 16f - x, dy = s.cy * 16f - y, d = dx * dx + dy * dy;
+            if (d < bd) {
+                bd = d;
+                best = s;
+            }
+        }
+        return best;
+    }
+
+    private static Region.Settlement nearestTown(World w, Region.Settlement from, Region.Settlement not) {
+        Region.Settlement best = null;
+        float bd = Float.MAX_VALUE;
+        for (Region.Settlement s : w.r.settlements) {
+            if (s.kind != Region.S_TOWN && s.kind != Region.S_CITY || s == not) continue;
+            float dx = s.cx - from.cx, dy = s.cy - from.cy, d = dx * dx + dy * dy;
+            if (d < bd) {
+                bd = d;
+                best = s;
+            }
+        }
+        return best;
+    }
     private static Region.Settlement nearestTown(World w, Region.Settlement from) {
         Region.Settlement best = null;
         float bd = Float.MAX_VALUE;
@@ -450,14 +608,75 @@ public final class Setup {
         return best;
     }
 
+    /** How far (px) the nearest of the dead is from (x, y): walking, in the buildings, the bitten, or a horde (worth more). */
+    static float clearance(World w, float x, float y) {
+        float best = Float.MAX_VALUE;
+        for (int s = 0; s < w.sec.n; s++) {
+            if (w.sec.zIn[s] <= 0 && w.sec.inf[s] < 1) continue;
+            float dx = w.sec.cx(s) - x, dy = w.sec.cy(s) - y;
+            best = Math.min(best, (float) Math.sqrt(dx * dx + dy * dy) - 256);
+        }
+        for (int i = 0; i < w.e.top; i++) {
+            if (w.e.loc[i] != Ents.FREE || w.e.kind[i] != Ents.ZOMBIE) continue;
+            float dx = w.e.x[i] - x, dy = w.e.y[i] - y;
+            best = Math.min(best, (float) Math.sqrt(dx * dx + dy * dy));
+        }
+        for (Strategic.Horde h : w.strat.hordes) {
+            if (!h.alive) continue;
+            float dx = h.x - x, dy = h.y - y;
+            best = Math.min(best, (float) Math.sqrt(dx * dx + dy * dy) - 5000);
+        }
+        return best;
+    }
+
+    /**
+     * A police station to start from near (x, y) but away from the front: the nearest with no dead within
+     * `clear` px (a city's station a few kilometres from where it began, not the one next door), or the
+     * clearest there is.
+     */
+    static int safeStation(World w, float x, float y, float clear) {
+        return safeStation(w, x, y, clear, 0);
+    }
+
+    /** As above, and at least minDist px from (x, y). */
+    static int safeStation(World w, float x, float y, float clear, float minDist) {
+        int best = -1, clearest = -1;
+        float bd = Float.MAX_VALUE, bc = -Float.MAX_VALUE;
+        for (Region.Facility f : w.r.facilities) {
+            if (f.kind != Region.F_POLICE || f.pool == null) continue;
+            float c = clearance(w, f.x, f.y);
+            float dx = f.x - x, dy = f.y - y, d = dx * dx + dy * dy;
+            if (d < minDist * minDist) continue;
+            if (c >= clear && d < bd) {
+                bd = d;
+                best = f.id;
+            }
+            if (c > bc) {
+                bc = c;
+                clearest = f.id;
+            }
+        }
+        return best >= 0 ? best : clearest;
+    }
+
     /** You, as a survivor: somewhere near the start, not in it. */
     static void survivor(World w) {
         Region r = w.r;
         {
             Content.Unit u = w.c.unit("survivor");
-            // somewhere a few kilometres from the outbreak, on a street, in a sector with none of the dead in it
-            // or round it: a person dropped next to the outbreak lives for seconds
+            // a street by a police station a few kilometres from the outbreak, with none of the dead near: a
+            // person dropped next to the outbreak lives for seconds
             float[] p = null;
+            int st = safeStation(w, originX, originY, 3000, 1900);
+            if (st >= 0) {
+                Region.Facility f = r.facilities.get(st);
+                for (int a = 0; a < 200 && p == null; a++) {
+                    float ang = a * 0.9f, d = 60 + a * 3;
+                    float x = f.x + (float) Math.cos(ang) * d, y = f.y + (float) Math.sin(ang) * d;
+                    int t = r.tileAtPx(x, y);
+                    if (t == Tile.PAVEMENT || t == Tile.PLAZA || t == Tile.YARD) p = new float[]{x, y};
+                }
+            }
             for (int a = 0; a < 400 && p == null; a++) {
                 float ang = a * 0.7f, d = 1800 + a * 12;
                 float x = originX + (float) Math.cos(ang) * d, y = originY + (float) Math.sin(ang) * d;

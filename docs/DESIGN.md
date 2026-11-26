@@ -125,8 +125,12 @@ one save version and no behaviour gating. A save made with different rules (`con
 `Roles` (a module, saved) holds who the player is and their piece of the world: a city for the incident
 commander, a police station for the precinct commander, a squad for the squad leader, an entity for the officer
 and the survivor. A role decides the tools the interface shows, which squads can be ordered (`canOrder`), whether
-the governor AI (`Gov.playerDecides`) and the military command (`Forces.command`) step aside, and which station
-the dispatcher leaves to the player. Everything else stays with the AI. The officer is an armed police entity the
+the national decisions (`Gov.playerDecides`: the alert, martial law, mobilisation, the curfew) and the military
+command (`Forces.command`) step aside, and which station the dispatcher leaves to the player. Mayors, police chiefs
+and governors keep deciding for their own towns and states whoever is President; an incident commander's city
+gets its evacuation and the army only when the player asks. Everything else stays with the AI. In a campaign the
+small roles play for goals of their own (`Roles.goal`): a precinct's district kept alive, a squad kept alive with
+its streets clear, an officer or survivor alive for two days. The officer is an armed police entity the
 stick moves (`ArmedAI` hands it to `Combat.playerThink`), with its patrol kept close each second. A person can't
 be fast-forwarded (that would fold them into the counts); instead, while none of the dead are near, "Skip ahead"
 steps the world in person as fast as the device can and stops when the dead come close. Speed is not an input, so
@@ -189,6 +193,10 @@ phones down slow the calls and the officials' picture, rumours move people onto 
   for `lowerAfter`; curfews, shelter orders, evacuations and quarantines are lifted after quiet spells; outside
   units go home over the border (`Recovery`); a town clear for two hours is declared safe with what it cost; and
   people come home from wherever they sheltered (`Strategic.homecoming`), counted once in `Strategic.refuge`.
+  Once the country is out of danger nobody more leaves it, columns on their way out turn round, and those who went
+  abroad come back (`Strategic.fromAbroad`). Everyone is accounted for: alive (at home, on the road, abroad) plus
+  killed plus turned is the starting population, always (`Audit.ledger`, checked by a test). Patrols hunt the last
+  few dozen dead in quiet streets and fields once the war is all but won (`Recovery.sweep`).
 - *The general.* Every half minute `Forces.command` makes a plan: towns by the reported dead, hordes and nests in
   open country by reconnaissance, formations in proportion to each, each to its own part of the line
   (`frontFor`); free formations join the biggest fights; idle ones go home. The player as President or Military
@@ -196,11 +204,13 @@ phones down slow the calls and the officials' picture, rumours move people onto 
   Order tool) or release single formations (`Actions.releaseFormation`); ordering a formation takes it back.
 - *Evacuation.* The roads out of a town carry `evacPerHourTown`/`evacPerHourCity` an hour; a destination takes
   refugees up to `hostShare` of its people; the bitten among each town's leavers are counted per town.
-- *The news.* A line is said once; things that happen again and again are said the first time and then added
-  up in one line every few hours (`News.tally`). Rumours start where people are frightened, one town at a time.
+- *The news.* A line is said once (its key is the text without its counts, so a changing number doesn't make it
+  new); things that happen again and again are said the first time and then added up in one line every few hours
+  (`News.tally`); every number goes through `News.num` (1,234). A town asks for the army once at each step its
+  outbreak gets worse, and nothing is ordered before it was reported. Rumours start where people are frightened, one town at a time.
 - *Campaign goals* are judged from the first full count, over time (`Roles.goals`): the capital's own people alive
   at home or safe elsewhere; the coast's people safe inland; the dead in the fallen state down to one in a
-  hundred for two hours; the capital lost only if the dead hold a fifth of its streets for half a day.
+  hundred for two hours; the capital lost only if the dead hold a fifth of its streets for a whole day.
 
 ## Balance over many runs
 

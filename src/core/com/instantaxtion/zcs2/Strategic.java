@@ -43,7 +43,32 @@ public final class Strategic {
     /** Where the airliner came down (scenario), or -1. */
     public float crashX = -1, crashY = -1;
     float strainClock;
-    public int evacuatedOut, evacuatedArrived;
+    /**
+     * People who left the country (all told), people who reached a refuge town in it (all told), and people who
+     * came back from abroad. Out of the country now: evacuatedOut - backFromAbroad (outBy, per home town).
+     */
+    public int evacuatedOut, evacuatedArrived, backFromAbroad;
+    /** Game seconds since the country was last under threat (nothing reported, no big hordes). */
+    public float clearT;
+    /**
+     * People bitten at the start who don't know it yet (a scenario's hidden spread): {sector, people, game second}.
+     * At that time that many of the sector's people fall ill (become the infected, who turn hours later).
+     */
+    public final List<float[]> latent = new ArrayList<float[]>();
+
+    /** The bitten who didn't know it fall ill, where they are, when their time comes. */
+    private void latent() {
+        for (int k = latent.size() - 1; k >= 0; k--) {
+            float[] l = latent.get(k);
+            if (w.time < l[2]) continue;
+            latent.remove(k);
+            int s = (int) l[0];
+            int m = Math.min(w.sec.popIn[s], (int) l[1]);
+            w.sec.popIn[s] -= m;
+            w.sec.inf[s] += m;
+            w.stats.infectedTotal += m;
+        }
+    }
     final int[] pending;
     /** The bitten among each settlement's people waiting to leave. */
     final int[] infPending;
@@ -188,7 +213,7 @@ public final class Strategic {
                             gridOn[f.grid] = true;
                             w.news.headline("Power restored to " + gridName(f.grid), f.x, f.y);
                             w.gov.trust += 3;
-                        } else w.news.count("retaken", f.name + " is back in our hands|%d more places retaken and working again", 1, f.x, f.y);
+                        } else w.news.count("retaken", f.name + " is back in our hands|%d more place{s} retaken and working again", 1, f.x, f.y);
                     }
                 } else overrunT[f.id] = 0;
             }
@@ -269,7 +294,7 @@ public final class Strategic {
         h.target = -1;
         hordes.add(h);
         w.ecology.hordeFormed(h, s);
-        if (count >= 500) w.news.tally("horde", "Recon: a horde of about " + round(count) + " is on the move|Recon: {n} more hordes on the move, about {m} of the dead", 1, count, h.x, h.y, News.COMMAND);
+        if (count >= 500) w.news.tally("horde", "Recon: a horde of about " + News.num(round(count)) + " is on the move|Recon: {n} more horde{s} on the move, about {m} of the dead", 1, count, h.x, h.y, News.COMMAND);
         return h;
     }
 
@@ -420,10 +445,27 @@ public final class Strategic {
         return t;
     }
 
-    /** People of a settlement who left the country altogether. */
+    /** People of a settlement who left the country altogether (-1: nobody knows where from; they come back to the capital). */
     void leftCountry(int st, int k) {
         evacuatedOut += k;
-        if (st >= 0 && st < outBy.length) outBy[st] += k;
+        if (st < 0 || st >= outBy.length) st = w.r.city().id;
+        outBy[st] += k;
+    }
+
+    /** People out of the country now (they come home as it recovers). */
+    public int abroad() {
+        return evacuatedOut - backFromAbroad;
+    }
+
+    /** Is the country still under threat? While it is, people leave it; once it's over they stop, and come back. */
+    public boolean threatened() {
+        return clearT < 360;
+    }
+
+    /** Once a second: how long the country has been out of danger. */
+    private void threat(float dt) {
+        boolean danger = w.command.nationalReported() >= 30 || hordeTotal() >= 300 || w.gov.level >= 3;
+        clearT = danger ? 0 : clearT + dt;
     }
 
     /** People of settlement a, sheltering elsewhere, out of the country, or on the road: safe from a's fate. */
@@ -584,6 +626,19 @@ public final class Strategic {
                 pending[st] = 0;
                 continue;
             }
+            int dest = safest(st);
+            if (dest < 0 && !threatened() && !w.infra.waterOut(st) && w.infra.shortage[st] < 2) {
+                // nowhere in the country to go, and nothing to run from any more: they stay (go back indoors)
+                int inf = Math.min(pending[st], infPending[st]);
+                infPending[st] -= inf;
+                int hs = home(st);
+                if (hs >= 0) {
+                    sec.popIn[hs] += pending[st] - inf;
+                    sec.inf[hs] += inf;
+                    pending[st] = 0;
+                    continue;
+                }
+            }
             Column c = new Column();
             c.count = pending[st];
             c.infected = Math.min(c.count, infPending[st]);
@@ -592,7 +647,6 @@ public final class Strategic {
             pending[st] = 0;
             float[] p = evacPoint(st);
             int a = w.r.roads.nearestNode(p[0], p[1], 600);
-            int dest = safest(st);
             int b;
             if (dest >= 0) {
                 c.to = dest;
@@ -614,6 +668,7 @@ public final class Strategic {
             columns.add(c);
         }
         homecoming();
+        fromAbroad();
     }
 
     /**
@@ -665,8 +720,66 @@ public final class Strategic {
                 c.x = w.r.roads.nx[rt[0]];
                 c.y = w.r.roads.ny[rt[0]];
                 columns.add(c);
-                if (got >= 100) w.news.tally("home:" + a, "People are going home to " + home.name + "|Going home to " + home.name + ": {n} more columns, {m} people", 1, got, home.cx * 16f, home.cy * 16f, News.CALL);
+                if (got >= 100) w.news.tally("home:" + a, "People are going home to " + home.name + "|Going home to " + home.name + ": {n} more column{s}, {m} {mpeople}", 1, got, home.cx * 16f, home.cy * 16f, News.CALL);
             }
+        }
+    }
+
+    /** A sector of the settlement where people live (its hub's, or any), or -1. */
+    private int home(int st) {
+        Region.Settlement s = w.r.settlements.get(st);
+        int best = -1;
+        for (int k = 0; k < w.sec.n; k++)
+            if (w.sec.settlement[k] == st && w.sec.zIn[k] == 0 && (best < 0 || w.sec.home[k] > w.sec.home[best])) best = k;
+        if (best < 0) best = s.hubNode >= 0 ? w.r.sectorOfPx(w.r.roads.nx[s.hubNode], w.r.roads.ny[s.hubNode]) : w.r.sectorOfPx(s.cx * 16f, s.cy * 16f);
+        return best;
+    }
+
+    /**
+     * Once the danger is over, people who left the country come back: columns from the border to their home
+     * towns, as fast as the roads can take them.
+     */
+    private void fromAbroad() {
+        if (threatened() || clearT < 720 || w.r.entryNodes.isEmpty()) return;
+        int ns = outBy.length;
+        for (int a = 0; a < ns; a++) {
+            if (outBy[a] <= 0 || w.gov.evacuating(a) || w.command.quarantined(a) || w.stats.zBySettlement[a] > 0) continue;
+            if (w.infra.waterOut(a) || w.infra.shortage[a] >= 2) continue;
+            Region.Settlement home = w.r.settlements.get(a);
+            if (home.hubNode < 0) {
+                backFromAbroad += outBy[a];
+                settleHome(a, outBy[a]);
+                outBy[a] = 0;
+                continue;
+            }
+            int n = Math.min(outBy[a], Math.max(100, (int) (roadsOut(home) * 0.25f)));
+            // over the border nearest home
+            int entry = -1;
+            float bd = Float.MAX_VALUE;
+            for (int en : w.r.entryNodes) {
+                float d = dist(w.r.roads.nx[en], w.r.roads.ny[en], home.cx * 16f, home.cy * 16f);
+                if (d < bd) {
+                    bd = d;
+                    entry = en;
+                }
+            }
+            int[] rt = w.r.roads.route(entry, home.hubNode);
+            outBy[a] -= n;
+            backFromAbroad += n;
+            if (rt == null) {
+                settleHome(a, n);
+                continue;
+            }
+            Column c = new Column();
+            c.count = n;
+            c.from = -1;
+            c.to = a;
+            c.home = true;
+            c.route = rt;
+            c.x = w.r.roads.nx[rt[0]];
+            c.y = w.r.roads.ny[rt[0]];
+            columns.add(c);
+            if (n >= 100) w.news.tally("abroad:" + a, "People who fled abroad are coming home to " + home.name + "|Back from abroad to " + home.name + ": {n} more column{s}, {m} {mpeople}", 1, n, home.cx * 16f, home.cy * 16f, News.CALL);
         }
     }
 
@@ -703,6 +816,22 @@ public final class Strategic {
         for (int k = 0; k < columns.size(); k++) {
             Column c = columns.get(k);
             if (!c.alive) continue;
+            if (!c.home && !threatened() && c.from >= 0 && c.route != null && c.ri < c.route.length - 1 && (c.to < 0 || w.command.calm(c.from, 720))
+                    && !w.infra.waterOut(c.from) && w.infra.shortage[c.from] < 2) {
+                // the danger is over: the column turns round and goes home
+                int at = c.route[c.ri + 1 < c.route.length ? c.ri : c.route.length - 1];
+                Region.Settlement home = w.r.settlements.get(c.from);
+                int[] back = home.hubNode >= 0 ? w.r.roads.route(at, home.hubNode) : null;
+                if (back != null) {
+                    c.route = back;
+                    c.ri = 0;
+                    c.x = w.r.roads.nx[back[0]];
+                    c.y = w.r.roads.ny[back[0]];
+                    c.to = c.from;
+                    c.home = true;
+                    w.news.count("turnHome:" + c.from, "A refugee column turns round and heads home to " + home.name + "|%d more refugee column{s} turned round for home", 1, c.x, c.y);
+                }
+            }
             float budget = 28 * dt; // px per second: people on foot, cars, buses
             while (budget > 0 && c.ri < c.route.length - 1) {
                 int nn = c.route[c.ri + 1];
@@ -738,7 +867,7 @@ public final class Strategic {
                 w.stats.infectedTotal += lost - hadInf;
                 if (c.from >= 0) w.stats.lostBySettlement[c.from] += lost;
                 w.stats.lossBy[1] += lost;
-                if (lost > 20) w.news.tally("roadAttack", "Refugee column attacked on the road|Refugee columns attacked on the roads: {n} attacks, about {m} people caught", 1, lost, c.x, c.y, News.LOSS);
+                if (lost > 20) w.news.tally("roadAttack", "Refugee column attacked on the road|Refugee columns attacked on the roads: {n} attack{s}, about {m} {mpeople} caught", 1, lost, c.x, c.y, News.LOSS);
             }
             // the infected among them turn on the way
             if (c.infected > 0) {
@@ -747,6 +876,8 @@ public final class Strategic {
                 c.count -= turned;
                 c.infected -= turned;
                 w.sec.zIn[s] += turned;
+                w.stats.zombiesMade += turned;
+                w.stats.civTurned += turned;
             }
             if (c.count <= 0) {
                 c.alive = false;
@@ -755,15 +886,16 @@ public final class Strategic {
             if (c.route == null || c.ri >= c.route.length - 1) {
                 c.alive = false;
                 if (c.home && c.route != null) {
-                    settleHome(c.to, c.count);
+                    settleHome(c.to, c.count - c.infected);
+                    if (c.infected > 0) w.sec.inf[s] += c.infected;
                 } else if (c.to >= 0 && c.route != null) {
-                    settle(c.to, c.count, c.infected);
+                    settle(c.to, c.count, c.infected, c.from);
                     arrivedFrom(c.from, c.to, c.count - c.infected, c.infected);
-                    if (c.count >= 100) w.news.tally("arrive:" + c.to, WorldView.fmt(c.count) + " refugees from " + w.r.settlements.get(c.from).name + " reach " + w.r.settlements.get(c.to).name
-                            + "|Refugees reached " + w.r.settlements.get(c.to).name + ": {n} more columns, {m} people", 1, c.count, c.x, c.y, News.CALL);
+                    if (c.count >= 100) w.news.tally("arrive:" + c.to, News.num(c.count) + " refugees from " + w.r.settlements.get(c.from).name + " reach " + w.r.settlements.get(c.to).name
+                            + "|Refugees reached " + w.r.settlements.get(c.to).name + ": {n} more column{s}, {m} {mpeople}", 1, c.count, c.x, c.y, News.CALL);
                 } else if (c.route != null) {
                     leftCountry(c.from, c.count);
-                    if (c.count >= 100) w.news.tally("border", WorldView.fmt(c.count) + " refugees from " + w.r.settlements.get(c.from).name + " cross the border|Refugees over the border: {n} more columns, {m} people", 1, c.count, c.x, c.y, News.CALL);
+                    if (c.count >= 100) w.news.tally("border", News.num(c.count) + " refugees from " + w.r.settlements.get(c.from).name + " cross the border|Refugees over the border: {n} more column{s}, {m} {mpeople}", 1, c.count, c.x, c.y, News.CALL);
                 } else {
                     w.sec.popIn[s] += c.count - c.infected;
                     w.sec.inf[s] += c.infected;
@@ -773,13 +905,13 @@ public final class Strategic {
         for (int k = columns.size() - 1; k >= 0; k--) if (!columns.get(k).alive) columns.remove(k);
     }
 
-    private void settle(int st, int count, int infected) {
+    private void settle(int st, int count, int infected, int from) {
         Sectors sec = w.sec;
         List<Integer> homes = new ArrayList<Integer>();
         for (int s = 0; s < sec.n; s++) if (sec.settlement[s] == st && sec.home[s] > 0 && sec.zIn[s] == 0) homes.add(s);
         int healthy = count - infected;
         if (homes.isEmpty()) {
-            leftCountry(-1, count);
+            leftCountry(from, count);
             return;
         }
         int per = healthy / homes.size(), extra = healthy % homes.size();
@@ -938,6 +1070,8 @@ public final class Strategic {
     void update(float dt) {
         this.dt = dt;
         extendFacilities();
+        threat(dt);
+        if (!latent.isEmpty()) latent();
         facilities();
         hordes();
         evacuation();

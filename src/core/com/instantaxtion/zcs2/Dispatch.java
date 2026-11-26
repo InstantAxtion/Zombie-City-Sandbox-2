@@ -59,7 +59,7 @@ public final class Dispatch {
             if (!witnesses) continue;
             float delay = sp.secCop[s] + sp.secSol[s] > 0 ? 2 : w.strat.lit(s) ? 18 : 35;
             // the dead only indoors: people hide and hope before anyone calls
-            if (sp.secZ[s] == 0) delay += 100;
+            if (sp.secZ[s] == 0) delay += 160;
             delay *= w.infra.callDelay(s); // the phones are down: calls take far longer
             if (sec.firstZ[s] < 0 || now - sec.firstZ[s] < delay) continue;
             int id = secIncident[s];
@@ -95,6 +95,7 @@ public final class Dispatch {
         perimeters();
         assign();
         if (cordonT <= 0) {
+            sendBudget = SEND_PER_SECOND;
             cordons();
             cordonT = 12;
         }
@@ -158,16 +159,18 @@ public final class Dispatch {
         }
         for (int st = 0; st < z.length && st < perimeter.length; st++) {
             boolean was = perimeter[st];
-            if (!was && z[st] > 150) {
+            // (only once the town has called it in: the police can't hold a line round what nobody has reported)
+            if (!was && z[st] > 150 && w.command.alerted[st] && w.gov.reported) {
                 perimeter[st] = true;
                 Region.Settlement S = w.r.settlements.get(st);
                 w.news.radio("Command: " + S.name + " police to hold a perimeter. The army takes the inside.", S.cx * 16f, S.cy * 16f, News.COMMAND);
-                w.mil.requestArmy(st, z[st]);
+                w.mil.requestArmy(st, (int) Math.max(150, w.command.repZ[st]));
             } else if (was && z[st] < 40) perimeter[st] = false;
         }
     }
 
     private void assign() {
+        sendBudget = SEND_PER_SECOND;
         for (Incident in : incidents) {
             if (!in.open) continue;
             // drop squads that are gone or went home
@@ -290,7 +293,23 @@ public final class Dispatch {
         w.sq.order(s, Squads.O_RESPOND, hx, hy);
     }
 
+    /**
+     * Squads sent out per second at most: a first wave of calls is answered over a few seconds, not all in one
+     * step (each one sent is a route to plan and people to put on the street).
+     */
+    private static final int SEND_PER_SECOND = 14;
+    private int sendBudget;
+
     Squads.Squad nearestFree(Incident in, int faction, float maxDist) {
+        Squads.Squad s = findFree(in, faction, maxDist);
+        if (s != null) sendBudget--;
+        return s;
+    }
+
+    private Squads.Squad findFree(Incident in, int faction, float maxDist) {
+        if (sendBudget <= 0) return null;
+        // calls in the player's own precinct are the player's to answer (the army still comes to a perimeter)
+        if (faction == Ents.COP && w.roles.playerDistrict(in.x, in.y)) return null;
         Squads.Squad best = null;
         float bd = maxDist * maxDist;
         for (Squads.Squad s : w.sq.list) {
@@ -312,7 +331,11 @@ public final class Dispatch {
             if (w.roles.holds(Roles.PRECINCT, f.id)) continue; // the player sends that station's squads
             if (f.kind == Region.F_HQ) {
                 Forces.Formation fm = w.forces.formationOf(f);
-                if (fm == null || !fm.alive || Forces.travelling(fm) || fm.player) continue;
+                if (fm == null || !fm.alive || Forces.travelling(fm)) continue;
+                float fx = f.x - in.x, fy = f.y - in.y;
+                // a formation the player commands fights only where the player sent it (round its position);
+                // one waiting for orders stays put
+                if (!w.forces.aiMay(fm) && (!fm.player || fm.state != Forces.HOLDING || fx * fx + fy * fy > 3000f * 3000f)) continue;
             }
             float dx = f.x - in.x, dy = f.y - in.y, d = dx * dx + dy * dy;
             if (faction == Ents.COP && in.settlement >= 0 && f.settlement != in.settlement && f.kind != Region.F_HQ) d *= 4;

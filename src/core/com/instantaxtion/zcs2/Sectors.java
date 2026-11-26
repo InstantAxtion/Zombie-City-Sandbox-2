@@ -221,6 +221,7 @@ public final class Sectors {
                 if (inf[s] < 0) inf[s] = 0;
                 zIn[s] += t;
                 w.stats.zombiesMade += t;
+                w.stats.civTurned += t;
             }
             // the infected go looking for help: the settlement's hospital fills with them
             if (inf[s] >= 4 && settlement[s] >= 0) {
@@ -431,9 +432,44 @@ public final class Sectors {
                 }
             }
             float len = (float) Math.sqrt(bx * bx + by * by);
+            if (len == 0 && settlement[s] < 0) {
+                // out in the fields with nothing near: towards the nearest town's streets and lights
+                float[] d = townDir();
+                bx = d[s * 2];
+                by = d[s * 2 + 1];
+                len = (float) Math.sqrt(bx * bx + by * by) * 1.6f;
+            }
             driftX[s] = len > 0 ? bx / len : 0;
             driftY[s] = len > 0 ? by / len : 0;
         }
+    }
+
+    private float[] townDir;
+
+    /** For each sector outside a town: the direction to the nearest street where people live (within 6 km), or 0. */
+    private float[] townDir() {
+        if (townDir != null) return townDir;
+        townDir = new float[n * 2];
+        int R = 12;
+        for (int s = 0; s < n; s++) {
+            if (settlement[s] >= 0) continue;
+            int sx = s % sw, sy = s / sw, best = -1, bd = Integer.MAX_VALUE;
+            for (int dy = -R; dy <= R; dy++)
+                for (int dx = -R; dx <= R; dx++) {
+                    int x = sx + dx, y = sy + dy;
+                    if (x < 0 || y < 0 || x >= sw || y >= sh) continue;
+                    int t = y * sw + x, d = dx * dx + dy * dy;
+                    if (home[t] > 0 && settlement[t] >= 0 && d < bd) {
+                        bd = d;
+                        best = t;
+                    }
+                }
+            if (best < 0) continue;
+            float dx = (best % sw) - sx, dy = (best / sw) - sy, l = (float) Math.sqrt(dx * dx + dy * dy);
+            townDir[s * 2] = dx / l;
+            townDir[s * 2 + 1] = dy / l;
+        }
+        return townDir;
     }
 
     /** Quiet sectors fold their individuals back into counts. Police and soldiers always stay individual. */

@@ -14,7 +14,7 @@ import java.util.zip.InflaterInputStream;
  * rebuilt from its seed, then the saved tiles (rubble, blown bridges) are laid over it.
  */
 public final class SaveIO {
-    public static final int VERSION = 3;
+    public static final int VERSION = 4;
     private static final int MAGIC = 0x5A435332; // "ZCS2"
 
     public static void save(World w, OutputStream os) throws IOException {
@@ -60,6 +60,7 @@ public final class SaveIO {
         effects(o, w.fx);
         flow(o, w.flow);
         modules(o, w);
+        extras(o, w);
         o.writeInt(MAGIC);
         o.flush();
         z.finish();
@@ -118,6 +119,7 @@ public final class SaveIO {
         readEffects(in, w.fx);
         readFlow(in, w.flow);
         readModules(in, w);
+        if (ver >= 4) readExtras(in, w);
         w.r.closeBarricadedRoads();
         if (in.readInt() != MAGIC) throw new IOException("save is damaged");
         w.veh.rebuildGrid();
@@ -184,6 +186,52 @@ public final class SaveIO {
             o.writeInt(bo.size());
             o.write(bo.toByteArray());
         }
+    }
+
+    /** State added in version 4: the army asked for, the alert a player lowered, the population's ledger. */
+    private static void extras(DataOutputStream o, World w) throws IOException {
+        Military m = w.mil;
+        floats(o, m.armyAsked, m.armyAsked.length);
+        floats(o, m.armyAskedT, m.armyAskedT.length);
+        floats(o, m.playerAskedT, m.playerAskedT.length);
+        Gov g = w.gov;
+        o.writeFloat(g.heldT);
+        o.writeFloat(g.heldNat);
+        o.writeInt(g.heldLevel);
+        Stats s = w.stats;
+        o.writeLong(s.civTurned);
+        o.writeLong(s.startPeople);
+        o.writeInt(s.crewDeaths);
+        Strategic st = w.strat;
+        o.writeInt(st.backFromAbroad);
+        o.writeFloat(st.clearT);
+        o.writeInt(st.latent.size());
+        for (float[] l : st.latent) {
+            o.writeFloat(l[0]);
+            o.writeFloat(l[1]);
+            o.writeFloat(l[2]);
+        }
+    }
+
+    private static void readExtras(DataInputStream in, World w) throws IOException {
+        Military m = w.mil;
+        readFloats(in, m.armyAsked);
+        readFloats(in, m.armyAskedT);
+        readFloats(in, m.playerAskedT);
+        Gov g = w.gov;
+        g.heldT = in.readFloat();
+        g.heldNat = in.readFloat();
+        g.heldLevel = in.readInt();
+        Stats s = w.stats;
+        s.civTurned = in.readLong();
+        s.startPeople = in.readLong();
+        s.crewDeaths = in.readInt();
+        Strategic st = w.strat;
+        st.backFromAbroad = in.readInt();
+        st.clearT = in.readFloat();
+        int nl = in.readInt();
+        st.latent.clear();
+        for (int k = 0; k < nl; k++) st.latent.add(new float[]{in.readFloat(), in.readFloat(), in.readFloat()});
     }
 
     private static void readModules(DataInputStream in, World w) throws IOException {

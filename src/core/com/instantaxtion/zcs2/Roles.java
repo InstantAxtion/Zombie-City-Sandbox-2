@@ -31,6 +31,8 @@ public final class Roles extends Module {
     public final int[] pRole = new int[MAX_PLAYERS], pTarget = new int[MAX_PLAYERS];
     /** The role's piece of the world: a city (incident), a police station (precinct), a squad (squad leader). */
     public int target = -1;
+    /** The officer's second patrol, keeping close (-1 if none). */
+    public int backup = -1;
     public boolean[] quarantine;
     /** The state a "retake the state" campaign is about. */
     public int campaignState = -1;
@@ -74,6 +76,22 @@ public final class Roles extends Module {
         return false;
     }
 
+    /** A command campaign (not a sandbox, not a survival story). */
+    public boolean campaign() {
+        return w.scenario != null && "commander".equals(w.scenario.mode) && w.scenario.goal != null && w.scenario.goal.length() > 0;
+    }
+
+    /**
+     * Does a player make the nation's decisions (the alert level, martial law, mobilisation, the national curfew)?
+     * The President does, and God in a campaign. Mayors, police chiefs and governors still decide for their own
+     * towns and states.
+     */
+    public boolean decidesNation() {
+        sync();
+        for (int k = 0; k < players; k++) if (pRole[k] == PRESIDENT || pRole[k] == GOD && k == 0 && campaign()) return true;
+        return false;
+    }
+
     private void sync() {
         pRole[current] = role;
         pTarget[current] = target;
@@ -98,7 +116,7 @@ public final class Roles extends Module {
         w.mode = savedMode;
         if (r == PRESIDENT || r == MILITARY) w.mil.strikesLeft = Math.max(savedStrikes, 6);
         else w.mil.strikesLeft = savedStrikes;
-        w.gov.playerDecides = holds(PRESIDENT, -1);
+        w.gov.playerDecides = decidesNation();
         if (r == PRESIDENT || r == MILITARY) w.forces.generalCommands = false;
         w.news.radio("Player " + players + " joins as " + labelOf(players - 1), ox, oy, News.COMMAND);
         return true;
@@ -188,9 +206,11 @@ public final class Roles extends Module {
         role = r;
         target = -1;
         w.mode = modeFor(r);
-        w.gov.playerDecides = r == PRESIDENT;
+        // God in a campaign sits in the President's chair: the campaign is theirs to win, not the AI's
+        boolean nation = r == PRESIDENT || r == GOD && campaign();
+        w.gov.playerDecides = nation;
         // the player commands the army until they hand it to the general (Actions.generalCommands)
-        w.forces.generalCommands = !(r == PRESIDENT || r == MILITARY);
+        w.forces.generalCommands = !(nation || r == MILITARY);
         if (w.mode == World.MODE_COMMANDER && (r == PRESIDENT || r == MILITARY)) w.mil.strikesLeft = 6;
         Region.Settlement near = w.r.settlementAt(ox, oy);
         switch (r) {
@@ -200,7 +220,9 @@ public final class Roles extends Module {
                 break;
             }
             case PRECINCT:
-                target = nearestFacility(ox, oy, Region.F_POLICE);
+                // in a campaign, a station near the front but not swallowed by it: there is a district to hold
+                target = campaign() ? Setup.safeStation(w, ox, oy, 1500) : nearestFacility(ox, oy, Region.F_POLICE);
+                if (target < 0) target = nearestFacility(ox, oy, Region.F_POLICE);
                 break;
             case SQUAD: {
                 int f = nearestFacility(ox, oy, Region.F_BASE);
@@ -218,6 +240,17 @@ public final class Roles extends Module {
                 target = s.id;
                 float dx = ox - fac.x, dy = oy - fac.y, d = (float) Math.sqrt(dx * dx + dy * dy) + 0.01f;
                 float hx = ox - dx / d * 400, hy = oy - dy / d * 400;
+                if (campaign()) {
+                    // a line to hold between the base and the outbreak, where the dead aren't yet
+                    for (int k = 2; k <= 20; k++) {
+                        float px = ox - dx * k / 20f, py = oy - dy * k / 20f;
+                        if (w.r.walkablePx(px, py) && Setup.clearance(w, px, py) >= 1200) {
+                            hx = px;
+                            hy = py;
+                            break;
+                        }
+                    }
+                }
                 if (!w.r.walkablePx(hx, hy)) {
                     hx = fac.x;
                     hy = fac.y;
@@ -228,11 +261,19 @@ public final class Roles extends Module {
                 break;
             }
             case OFFICER: {
-                int f = nearestFacility(ox, oy, Region.F_POLICE);
+                // a station a few kilometres from where it began, not in it: you hear the calls before you meet it
+                int f = Setup.safeStation(w, ox, oy, 2500);
+                if (f < 0) f = nearestFacility(ox, oy, Region.F_POLICE);
                 if (f < 0) break;
                 Region.Facility fac = w.r.facilities.get(f);
                 Squads.Squad s = w.forces.deploy(fac, w.c.squadT("patrol"));
                 if (s == null) break;
+                // and another patrol from your station holding with you
+                Squads.Squad b = w.forces.deploy(fac, w.c.squadT("patrol"));
+                if (b != null) {
+                    b.player = true;
+                    backup = b.id;
+                }
                 s.player = true;
                 target = s.id;
                 int me = s.mem[0];
@@ -265,7 +306,10 @@ public final class Roles extends Module {
     public void update(float dt) {
         int z = w.totalZombies();
         if (z > 0) hadDead = true;
-        if (hadDead && z == 0 && containedAt < 0) containedAt = (float) w.time;
+        // contained: none of the dead, and none of the bitten left to turn (seen or not)
+        if (hadDead && z == 0 && containedAt < 0 && w.strat.latent.isEmpty() && noInfected()) containedAt = (float) w.time;
+        // the dead are back (painted, or a nest found): it isn't contained any more
+        if (z > 0 && containedAt >= 0) containedAt = -1;
         for (int st = 0; st < quarantine.length; st++) if (quarantine[st] && w.gov.evac[st]) w.gov.evac[st] = false;
         // your patrol keeps up with you
         if (role == OFFICER && target >= 0 && target < w.sq.list.size() && w.playerEnt >= 0 && w.e.loc[w.playerEnt] == Ents.FREE) {
@@ -275,6 +319,18 @@ public final class Roles extends Module {
                 s.player = true;
                 w.sq.order(s, Squads.O_HOLD, px, py);
             }
+            if (backup >= 0 && backup < w.sq.list.size()) {
+                Squads.Squad b = w.sq.get(backup);
+                float bx = px + 40, by = py + 30;
+                if (!w.r.walkablePx(bx, by)) {
+                    bx = px;
+                    by = py;
+                }
+                if (b.alive && (Math.abs(b.gx - bx) + Math.abs(b.gy - by) > 120 || b.order != Squads.O_HOLD)) {
+                    b.player = true;
+                    w.sq.order(b, Squads.O_HOLD, bx, by);
+                }
+            }
         }
         if (role == SQUAD && target >= 0 && !w.ended && w.mode != World.MODE_SANDBOX) {
             if (target >= w.sq.list.size() || !w.sq.get(target).alive) end(false, "Your squad is gone", "Every one of them fell.");
@@ -282,44 +338,174 @@ public final class Roles extends Module {
         goals(dt);
     }
 
+    private boolean noInfected() {
+        for (int s = 0; s < w.sec.n; s++) if (w.sec.inf[s] >= 1) return false;
+        return true;
+    }
+
+    /**
+     * The goal this player is playing for. A national campaign is the President's, the military commander's, an
+     * incident commander's (and God's); roles too small to decide it (a precinct, a squad, one officer, one
+     * person) play for a goal of their own in it: "precinct", "squad" or "survive".
+     */
+    public String goal() {
+        Content.Scenario sc = w.scenario;
+        if (sc == null || sc.goal == null) return null;
+        if (campaign()) {
+            if (role == PRECINCT) return "precinct";
+            if (role == SQUAD) return "squad";
+            if (role == OFFICER || role == SURVIVOR) return "survive";
+            // the coast's evacuation city by city: an incident commander's part is getting their own city out
+            if (role == INCIDENT && "evaccoast".equals(sc.goal) && target >= 0) return "evaccity";
+        }
+        return sc.goal;
+    }
+
+    /** Days a personal goal runs for (shorter than the national campaign's). */
+    public int goalDays() {
+        Content.Scenario sc = w.scenario;
+        int d = sc == null ? 0 : sc.days;
+        String g = goal();
+        if (g == null || g.equals(sc.goal) || g.equals("evaccity")) return d;
+        return Math.max(1, Math.min(d, g.equals("precinct") ? 3 : 2));
+    }
+
+    /** Game seconds the dead may hold a fifth of the capital's streets before it's lost (protect the capital). */
+    public static final float PROTECT_HOLD = 1440;
+
+    /** The share of its district's people a precinct must keep alive. */
+    public static final float PRECINCT_KEEP = 0.85f;
+
+    /** What the player is playing for, in a sentence (the HUD and the start of the game show it). */
+    public String goalText() {
+        String g = goal();
+        if (g == null) return "";
+        int d = goalDays();
+        String days = d + (d == 1 ? " day" : " days");
+        if (g.equals("precinct") && target >= 0)
+            return "Keep " + (int) (PRECINCT_KEEP * 100) + "% of the people in " + w.r.facilities.get(target).name + "'s district alive for " + days + ". Other stations won't answer calls there: it's yours.";
+        if (g.equals("evaccity") && target >= 0)
+            return "Get " + (int) (w.c.rule("evacNeed", 0.5f) * 100) + "% of " + w.r.settlements.get(target).name + "'s people inland within " + days + ", before the dead reach them. Ordering the evacuation is yours.";
+        if (g.equals("squad")) return "Keep your squad alive for " + days + " and its sector clear: at least half of you, and the dead in your streets kept down.";
+        if (g.equals("survive")) return role == OFFICER ? "Stay alive with your patrol for " + days + "." : "Stay alive for " + days + ".";
+        return w.scenario.desc;
+    }
+
+    /** Sectors of the player's precinct: the station's own town, nearer this station than any other there. */
+    private boolean[] district;
+    private int districtPop = -1;
+
+    public boolean inDistrict(int s) {
+        if (role != PRECINCT || target < 0 || !campaign()) return false;
+        if (district == null) {
+            district = new boolean[w.sec.n];
+            Region.Facility me = w.r.facilities.get(target);
+            for (int k = 0; k < w.sec.n; k++) {
+                if (w.sec.settlement[k] != me.settlement || w.sec.home[k] == 0) continue;
+                float x = w.sec.cx(k), y = w.sec.cy(k);
+                float dm = (me.x - x) * (me.x - x) + (me.y - y) * (me.y - y);
+                boolean mine = dm < 1600f * 1600f;
+                for (Region.Facility f : w.r.facilities)
+                    if (mine && f != me && f.kind == Region.F_POLICE && f.settlement == me.settlement && (f.x - x) * (f.x - x) + (f.y - y) * (f.y - y) < dm) mine = false;
+                district[k] = mine;
+            }
+        }
+        return s >= 0 && s < district.length && district[s];
+    }
+
+    private int districtAlive() {
+        int n = 0;
+        for (int s = 0; s < w.sec.n; s++) if (inDistrict(s)) n += w.sec.popIn[s] + w.sp.secCiv[s] + (int) w.sec.inf[s];
+        return n;
+    }
+
     private void goals(float dt) {
         Content.Scenario sc = w.scenario;
         if (sc == null || w.ended || w.watching || sc.goal == null || w.mode == World.MODE_SANDBOX && w.watching) return;
         // nothing is judged before the first count of everyone is in
         if (w.time < 60) return;
-        float deadline = sc.days * 1440f;
-        boolean late = sc.days > 0 && w.time >= deadline;
-        String g = sc.goal;
+        String g = goal();
+        int gd = goalDays();
+        float deadline = gd * 1440f;
+        boolean late = gd > 0 && w.time >= deadline;
+        if (g.equals("survive")) {
+            // (the survival stories judge this in Strategic; in a campaign it's the player's own goal)
+            if (!campaign()) return;
+            progress = (float) (w.time / Math.max(1, deadline));
+            progressText = "Alive " + days() + " of " + gd + (gd == 1 ? " day" : " days");
+            if (w.playerEnt >= 0 && w.e.loc[w.playerEnt] == Ents.FREE && late) end(true, "You survived", "You lived through " + gd + " days of it.");
+            return;
+        }
+        if (g.equals("precinct")) {
+            int alive = districtAlive();
+            if (baseline < 0) baseline = Math.max(1, alive);
+            int need = (int) (baseline * PRECINCT_KEEP);
+            String name = target >= 0 ? w.r.facilities.get(target).name : "your precinct";
+            progress = Math.min(1, (float) (w.time / Math.max(1, deadline)));
+            progressText = News.num(alive) + " alive in " + name + "'s district (" + News.num(baseline) + " at the start; keep " + News.num(need) + ")";
+            lowT = alive < need ? lowT + dt : 0;
+            if (lowT >= 120) end(false, "Your district has fallen", "Only " + News.num(alive) + " of the " + News.num(baseline) + " people in " + name + "'s district are left, " + days() + " in.");
+            else if (late) end(true, "Your district held", News.num(alive) + " people are alive there after " + gd + (gd == 1 ? " day" : " days") + " (" + News.num(baseline) + " at the start).");
+            return;
+        }
+        if (g.equals("evaccity")) {
+            if (baseline < 0) baseline = Math.max(1, w.stats.popBySettlement[target]);
+            int safe = w.strat.outBy[target];
+            for (Region.Settlement b : w.r.settlements) if (!coastal(b)) safe += w.strat.refuge[target][b.id];
+            int need = (int) (baseline * w.c.rule("evacNeed", 0.5f)), lost = w.stats.lostBySettlement[target];
+            String name = w.r.settlements.get(target).name;
+            progress = safe / (float) Math.max(1, need);
+            progressText = News.num(safe) + " of the " + News.num(need) + " of " + name + "'s people needed are safe inland";
+            if (safe >= need) end(true, name + " is evacuated", News.num(safe) + " of its people reached safety inland, " + days() + " in.");
+            else if (lost > baseline * 0.4f) end(false, name + " is lost", News.num(lost) + " of its people were caught before they could get away.");
+            else if (late) end(false, "Too many were left behind", News.num(safe) + " of the " + News.num(need) + " needed got out of " + name + " in time.");
+            return;
+        }
+        if (g.equals("squad")) {
+            if (target < 0 || target >= w.sq.list.size()) return;
+            Squads.Squad s = w.sq.get(target);
+            if (baseline < 0) baseline = Math.max(1, s.n);
+            float[] p = w.sq.where(s);
+            int sec = w.r.sectorOfPx(p[0], p[1]);
+            int zHere = w.sec.zIn[sec] + w.sp.secZ[sec];
+            progress = Math.min(1, (float) (w.time / Math.max(1, deadline)));
+            progressText = s.n + " of " + baseline + " of your squad standing; " + News.num(zHere) + " of the dead in your streets";
+            lowT = zHere > 150 ? lowT + dt : Math.max(0, lowT - dt);
+            if (s.alive && s.n * 2 < baseline) end(false, "Your squad is broken", "Only " + s.n + " of the " + baseline + " are left, " + days() + " in.");
+            else if (lowT >= 240) end(false, "Your sector is overrun", "The dead held your streets for four hours, " + days() + " in.");
+            else if (late && s.alive) end(true, "Your squad held", s.n + " of the " + baseline + " made it through " + gd + (gd == 1 ? " day" : " days") + ", and the streets are yours.");
+            return;
+        }
         Region.Settlement cap = w.r.city();
         if (g.equals("holdcity")) {
             // the capital's own people alive: at home, or safe somewhere else (evacuated, sheltering in another town)
             int alive = Math.max(0, w.strat.cityAlive() - w.strat.hosted(cap.id)) + w.strat.awayFrom(cap.id);
             if (baseline < 0) baseline = Math.max(1, alive);
             progress = alive / (float) baseline;
-            progressText = WorldView.fmt(alive) + " of " + WorldView.fmt(baseline) + " of the capital's people alive (half must live)";
+            progressText = News.num(alive) + " of " + News.num(baseline) + " of the capital's people alive (half must live)";
             lowT = alive < baseline * 0.5f ? lowT + dt : 0;
             if (lowT >= 360) end(false, "The capital has fallen", "Fewer than half its people are left, " + days() + " in.");
-            else if (late) end(true, "The capital held", WorldView.fmt(alive) + " of " + WorldView.fmt(baseline) + " of its people lived through " + sc.days + " days.");
+            else if (late) end(true, "The capital held", News.num(alive) + " of " + News.num(baseline) + " of its people lived through " + sc.days + " days.");
         } else if (g.equals("evaccoast")) {
             if (baseline < 0) baseline = Math.max(1, coastalNow());
             int safe = coastalSafe(), need = (int) (baseline * w.c.rule("evacNeed", 0.5f));
             int lost = 0;
             for (Region.Settlement s : w.r.settlements) if (coastal(s)) lost += w.stats.lostBySettlement[s.id];
             progress = safe / (float) Math.max(1, need);
-            progressText = WorldView.fmt(safe) + " of the " + WorldView.fmt(need) + " needed are safe inland";
-            if (safe >= need) end(true, "The coast is evacuated", WorldView.fmt(safe) + " people from the coast reached safety inland, " + days() + " in.");
-            else if (lost > baseline * 0.4f) end(false, "The coast is lost", WorldView.fmt(lost) + " of the coast's people were caught before they could get away.");
-            else if (late) end(false, "Too many were left behind", WorldView.fmt(safe) + " of the " + WorldView.fmt(need) + " needed got out in time.");
+            progressText = News.num(safe) + " of the " + News.num(need) + " needed are safe inland";
+            if (safe >= need) end(true, "The coast is evacuated", News.num(safe) + " people from the coast reached safety inland, " + days() + " in.");
+            else if (lost > baseline * 0.4f) end(false, "The coast is lost", News.num(lost) + " of the coast's people were caught before they could get away.");
+            else if (late) end(false, "Too many were left behind", News.num(safe) + " of the " + News.num(need) + " needed got out in time.");
         } else if (g.equals("retakestate")) {
             int zs = deadInState(campaignState);
             if (baseline < 0) baseline = Math.max(1, zs);
             int goal = Math.max(300, baseline / 100);
             String name = campaignState >= 0 && campaignState < w.r.states.size() ? w.r.states.get(campaignState).name : "the state";
             progress = 1 - Math.min(1, zs / (float) baseline);
-            progressText = WorldView.fmt(zs) + " of the dead left in " + name + " (bring them below " + WorldView.fmt(goal) + ")";
+            progressText = News.num(zs) + " of the dead left in " + name + " (bring them below " + News.num(goal) + ")";
             lowT = zs < goal ? lowT + dt : 0;
-            if (lowT >= 120) end(true, name + " is retaken", "The dead there are down to " + WorldView.fmt(zs) + ", " + days() + " in.");
-            else if (late) end(false, "Out of time", WorldView.fmt(zs) + " of the dead still walk " + name + ".");
+            if (lowT >= 120) end(true, name + " is retaken", "The dead there are down to " + News.num(zs) + ", " + days() + " in.");
+            else if (late) end(false, "Out of time", News.num(zs) + " of the dead still walk " + name + ".");
         } else if (g.equals("protectcap")) {
             float share = infestedShare(cap.id);
             int zc = w.stats.zBySettlement[cap.id];
@@ -327,10 +513,17 @@ public final class Roles extends Module {
             boolean bad = share > 0.2f || zc > baseline * 0.03f;
             lowT = bad ? lowT + dt : Math.max(0, lowT - dt * 0.5f);
             progress = late ? 1 : (float) (w.time / Math.max(1, deadline));
-            progressText = (int) (share * 100) + "% of the capital's streets have the dead in them" + (bad ? " (too many: clear them within " + (int) Math.max(0, (720 - lowT) / 60) + " hours)" : "");
-            if (lowT >= 720) end(false, cap.name + " is overrun", "The dead held a fifth of the capital's streets for half a day, " + days() + " in.");
+            int left = (int) Math.ceil(Math.max(0, PROTECT_HOLD - lowT) / 60f);
+            progressText = (int) (share * 100) + "% of the capital's streets have the dead in them"
+                    + (bad ? " (too many: clear them " + (left <= 1 ? "within the hour" : "within " + left + " hours") + " or the capital is lost)" : "");
+            if (lowT >= PROTECT_HOLD) end(false, cap.name + " is overrun", "The dead held a fifth of the capital's streets for a whole day, " + days() + " in.");
             else if (late) end(true, cap.name + " stands", "The capital held for " + sc.days + " days.");
         }
+    }
+
+    /** The reported dead in a settlement are in the player's precinct district (calls there are the player's). */
+    public boolean playerDistrict(float x, float y) {
+        return role == PRECINCT && campaign() && inDistrict(w.r.sectorOfPx(x, y));
     }
 
     /** The share of a settlement's streets (sectors) with a real number of the dead in them. */
@@ -466,6 +659,7 @@ public final class Roles extends Module {
         }
         o.writeInt(baseline);
         o.writeFloat(lowT);
+        o.writeInt(backup);
     }
 
     @Override
@@ -493,6 +687,7 @@ public final class Roles extends Module {
                 baseline = in.readInt();
                 lowT = in.readFloat();
             }
+            if (in.available() > 0) backup = in.readInt();
         } else {
             players = 1;
             current = 0;
