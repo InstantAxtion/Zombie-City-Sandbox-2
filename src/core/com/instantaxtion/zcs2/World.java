@@ -115,11 +115,20 @@ public final class World {
         this.r = r;
         r.recordEdits(); // from here on, changes to the map go into its overlay (saves hold that, not the tiles)
         national = r.sect != Region.SECT;
+        // a map made from a nation is sparse by construction: its chunks come from the cache as they become active
+        if (r.nation != null) sparse = true;
         this.seed = seed;
         rng = new Rng(seed ^ 0x5EEDL);
         e = new Ents(8192);
         act = new ActiveSet(this, sparse);
         if (sparse) e.act = act;
+        if (r.nation != null) {
+            if (r.cache == null) r.cache = new ChunkCache(r.nation, cacheFor(Runtime.getRuntime().maxMemory()));
+            r.cache.setOverlay(r.overlay);
+            Pages pg = new Pages();
+            act.source = pg;
+            r.pager = pg;
+        }
         sp = new Spatial(r, act);
         flow = new Flow(r, act);
         nav = new NavPath(r, act);
@@ -184,8 +193,7 @@ public final class World {
         doorY = new float[r.bCount];
         r.setDoors(doorX, doorY);
         int ns = r.secW * r.secH;
-        List<List<Integer>> per = new ArrayList<List<Integer>>(ns);
-        for (int s = 0; s < ns; s++) per.add(new ArrayList<Integer>());
+        int[] cnt = new int[ns];
         for (int b = 0; b < r.bCount; b++) {
             int x0 = r.bx(b), y0 = r.by(b), x1 = x0 + r.bw(b) - 1, y1 = y0 + r.bh(b) - 1;
             float best = -1;
@@ -213,15 +221,95 @@ public final class World {
                             break;
                         }
             }
-            if (doorX[b] >= 0) per.get(r.sectorOfPx(doorX[b], doorY[b])).add(b);
+            if (doorX[b] >= 0) cnt[r.sectorOfPx(doorX[b], doorY[b])]++;
         }
+        // (by counting: a list per sector would be 200,000 objects on a national map)
         secBuildings = new int[ns][];
-        for (int s = 0; s < ns; s++) {
-            List<Integer> l = per.get(s);
-            secBuildings[s] = new int[l.size()];
-            for (int i = 0; i < l.size(); i++) secBuildings[s][i] = l.get(i);
+        int[] none = new int[0];
+        for (int s = 0; s < ns; s++) secBuildings[s] = cnt[s] == 0 ? none : new int[cnt[s]];
+        java.util.Arrays.fill(cnt, 0);
+        for (int b = 0; b < r.bCount; b++)
+            if (doorX[b] >= 0) {
+                int s = r.sectorOfPx(doorX[b], doorY[b]);
+                secBuildings[s][cnt[s]++] = b;
+            }
+        if (r.nation != null) natBuildings = secBuildings.clone();
+    }
+
+    /** National maps: each sector's national buildings (secBuildings while its chunk isn't attached). */
+    private int[][] natBuildings;
+
+    /** The chunk cache's size for a heap: three chunks a MB, at most 1,024 (about 20 MB of chunks). */
+    static int cacheFor(long maxMemory) {
+        return Math.min(1024, ChunkCache.capacityFor(maxMemory));
+    }
+
+    /**
+     * A national map's pages: the active set takes chunks from the cache (pinned while active, the very chunk the
+     * cache holds, never a copy), and reads of pages that aren't resident go to the cache without attaching.
+     */
+    private final class Pages implements ActiveSet.Source, Region.Pager {
+        @Override
+        public void fetch(int p) {
+            int pw = r.store.pw, cx = p % pw, cy = p / pw;
+            Chunk c = r.cache.get(cx, cy);
+            r.cache.pin(cx, cy);
+            r.store.attach(c);
+            attached(p, c);
+        }
+
+        @Override
+        public void release(int p) {
+            int pw = r.store.pw;
+            r.store.detach(p);
+            r.cache.unpin(p % pw, p / pw);
+            secBuildings[p] = natBuildings[p];
+        }
+
+        @Override
+        public Chunk read(int p) {
+            int pw = r.store.pw;
+            return r.cache.get(p % pw, p / pw);
+        }
+
+        @Override
+        public void need(int p) {
+            if (inParallel) throw new IllegalStateException("page " + p + " taken in during a parallel phase");
+            act.touchPage(p);
         }
     }
+
+    /** A chunk now stands as page p (a sector): its buildings join the sector's list (doors are inside the chunk). */
+    private void attached(int p, Chunk c) {
+        int[] nat = natBuildings[p];
+        int k = 0;
+        for (int i = 0; i < c.bCount; i++) if (c.doorX[i] >= 0) k++;
+        int[] l = new int[nat.length + k];
+        System.arraycopy(nat, 0, l, 0, nat.length);
+        k = nat.length;
+        for (int i = 0; i < c.bCount; i++) if (c.doorX[i] >= 0) l[k++] = c.id(i);
+        secBuildings[p] = l;
+    }
+
+    /**
+     * Saves loaded on a national map: the pages taken in before the overlay was read are swapped for the cache's
+     * chunks with the edits on (the cache makes them again from scratch when their version changed).
+     */
+    void refreshPages() {
+        r.cache.setOverlay(r.overlay);
+        int pw = r.store.pw;
+        for (int p = 0; p < r.store.pages(); p++) {
+            if (!r.store.resident(p)) continue;
+            Chunk c = r.cache.get(p % pw, p / pw);
+            if (c != r.store.chunk(p)) {
+                r.store.attach(c);
+                attached(p, c);
+            }
+        }
+    }
+
+    /** True while the parallel phases run (nothing may take a page in then). */
+    volatile boolean inParallel;
 
     // ------------------------------------------------------------------ time
 
@@ -277,13 +365,32 @@ public final class World {
         sq.update();
         aai.prepare();
         undead.prepare();
-        par.run(thinkJob, e.top);
+        parallel(thinkJob);
         applyIntents();
-        par.run(moveJob, e.top);
+        parallel(moveJob);
         veh.update();
         combat.bodies();
         for (int i = 0; i < modules.size(); i++) modules.get(i).step();
         fx.update(DT);
+    }
+
+    /** Tests: the parallel phases of national maps read only resident pages, or Region throws (Region.strictPages). */
+    public static boolean strictParallel;
+
+    private void parallel(Parallel.Job job) {
+        if (r.pager == null) {
+            par.run(job, e.top);
+            return;
+        }
+        inParallel = true;
+        boolean strict = Region.strictPages;
+        if (strictParallel) Region.strictPages = true;
+        try {
+            par.run(job, e.top);
+        } finally {
+            inParallel = false;
+            Region.strictPages = strict;
+        }
     }
 
     /** Ten game seconds at once, all as numbers (only in strategic fast-forward). */

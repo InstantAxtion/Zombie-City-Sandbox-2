@@ -78,7 +78,7 @@ public final class Region {
 
     public final List<State> states = new ArrayList<State>();
     /** The railways, as a graph like the roads. */
-    public final RoadGraph rails = new RoadGraph();
+    public final RoadGraph rails;
     public int waterCount, phoneCount;
     /** Railway junctions on the border: where trains from abroad come in. */
     public final List<Integer> railEntries = new ArrayList<Integer>();
@@ -108,6 +108,11 @@ public final class Region {
      * a chunk's own building (an encoded id, Chunk.isChunkBuilding); the accessors bx(id), bkind(id)... take either.
      */
     public int building(int tx, int ty) {
+        int p = store.pageOf(tx, ty);
+        if (!store.resident(p)) {
+            if (pager == null) throw new IllegalStateException("page " + p + " isn't resident");
+            return missPage(p).building(tx & 63, ty & 63);
+        }
         int v = store.bldRaw(tx, ty);
         if (v == 0) return -1;
         if (v < 0) return -v - 1;
@@ -119,7 +124,7 @@ public final class Region {
     }
     public final List<Settlement> settlements = new ArrayList<Settlement>();
     public final List<Facility> facilities = new ArrayList<Facility>();
-    public final RoadGraph roads = new RoadGraph();
+    public final RoadGraph roads;
 
     // buildings (structure of arrays)
     public int bCount;
@@ -144,6 +149,96 @@ public final class Region {
 
     /** A map with sectors of sect tiles; allPages makes every page resident at once (today's maps). */
     Region(int w, int h, long seed, int preset, int sect, boolean allPages) {
+        this(w, h, seed, preset, sect, allPages, new RoadGraph(), new RoadGraph(), null);
+    }
+
+    /**
+     * A real-scale map over a nation (P7): no page resident (the World's active set attaches chunks from the cache),
+     * sectors the chunk size, the nation's road and rail graphs, settlements, facilities and states, and its national
+     * buildings copied into Region's building arrays (ids 0..bCount-1, as the chunks store them).
+     */
+    public static Region national(Nation n, ChunkCache cache) {
+        Region r = new Region(n.size, n.size, n.seed, n.preset, Chunk.SIZE, false, n.roads, n.rails, n);
+        r.cache = cache;
+        r.name = n.name;
+        r.settlements.addAll(n.settlements);
+        r.facilities.addAll(n.facilities);
+        r.states.addAll(n.states);
+        r.entryNodes.addAll(n.entryNodes);
+        r.railEntries.addAll(n.railEntries);
+        r.gridCount = n.gridCount;
+        r.waterCount = n.waterCount;
+        r.phoneCount = n.phoneCount;
+        int nb = n.bCount;
+        if (nb > 32768) throw new IllegalStateException("too many national buildings");
+        int cap = Math.max(16, nb);
+        r.bx = Arrays.copyOf(n.bx, cap);
+        r.by = Arrays.copyOf(n.by, cap);
+        r.bw = Arrays.copyOf(n.bw, cap);
+        r.bh = Arrays.copyOf(n.bh, cap);
+        r.bkind = Arrays.copyOf(n.bkind, cap);
+        r.bfloors = Arrays.copyOf(n.bfloors, cap);
+        r.bset = Arrays.copyOf(n.bset, cap);
+        r.bres = Arrays.copyOf(n.bres, cap);
+        r.broof = Arrays.copyOf(n.broof, cap);
+        r.bCount = nb;
+        return r;
+    }
+
+    /** The nation a real-scale map was made from (null on today's maps), and the cache its chunks come from. */
+    public final Nation nation;
+    public ChunkCache cache;
+
+    /**
+     * Where the pages that aren't resident come from (a national map's World): read() gives a chunk to read (from
+     * the cache, generated if need be, overlay applied, never attached); need() makes the page resident now (the
+     * active set takes it in) before it is changed.
+     */
+    interface Pager {
+        Chunk read(int page);
+
+        void need(int page);
+    }
+
+    Pager pager;
+    /**
+     * Debug: a read of a page that isn't resident throws instead of going to the cache (tests turn it on round the
+     * parallel phases, where every read should be inside the active chunks).
+     */
+    public static volatile boolean strictPages;
+    /** Reads of pages that weren't resident (served from the cache), for probes and tests. */
+    public long misses;
+
+    /** The tile of a page that isn't resident (the hot path's slow side). */
+    private int miss(int tx, int ty) {
+        return page(tx, ty).tile[(ty & 63) << 6 | (tx & 63)];
+    }
+
+    /** The chunk covering tile (tx, ty) on the map, resident or read through the pager. */
+    private Chunk page(int tx, int ty) {
+        int p = (ty >> 6) * pw + (tx >> 6);
+        Chunk c = store.chunk(p);
+        if (c != null) return c;
+        return missPage(p);
+    }
+
+    private Chunk missPage(int p) {
+        if (pager == null) throw new IllegalStateException("page " + p + " isn't resident and nothing can read it");
+        if (strictPages) throw new IllegalStateException("page " + p + " (" + p % pw + ", " + p / pw + ") read while not resident");
+        misses++;
+        return pager.read(p);
+    }
+
+    /** The chunk of page p: the one standing as the page, or (not resident) one read through the pager. National maps only. */
+    public Chunk chunkAt(int p) {
+        Chunk c = store.chunk(p);
+        return c != null ? c : missPage(p);
+    }
+
+    private Region(int w, int h, long seed, int preset, int sect, boolean allPages, RoadGraph roads, RoadGraph rails, Nation nation) {
+        this.roads = roads;
+        this.rails = rails;
+        this.nation = nation;
         W = w;
         H = h;
         this.seed = seed;
@@ -171,7 +266,9 @@ public final class Region {
     /** The tile at (tx, ty); off the map is deep water. Hot: the page lookup is written out here on purpose. */
     public int t(int tx, int ty) {
         if (tx < 0 || ty < 0 || tx >= W || ty >= H) return Tile.DEEP;
-        return tp[(ty >> 6) * pw + (tx >> 6)][(ty & 63) << 6 | (tx & 63)];
+        byte[] pg = tp[(ty >> 6) * pw + (tx >> 6)];
+        if (pg == null) return miss(tx, ty);
+        return pg[(ty & 63) << 6 | (tx & 63)];
     }
 
     /** Every tile the game has turned into 'kind' since the map was made: (x, y, the tile it replaced) triples. */
@@ -183,6 +280,11 @@ public final class Region {
     public void set(int tx, int ty, byte k) {
         if (tx < 0 || ty < 0 || tx >= W || ty >= H) return;
         int p = (ty >> 6) * pw + (tx >> 6), i = (ty & 63) << 6 | (tx & 63);
+        if (tp[p] == null) {
+            // a page that isn't resident is taken in first (an edit lives on a resident page and in the overlay)
+            if (pager == null) throw new IllegalStateException("page " + p + " isn't resident");
+            pager.need(p);
+        }
         byte[] pg = tp[p];
         byte was = pg[i];
         if (was == k) return;
@@ -336,9 +438,11 @@ public final class Region {
 
     /** The chunk holding a chunk building (its page must be resident). */
     public Chunk chunkOf(int id) {
-        Chunk c = store.chunk(Chunk.chunkOf(id));
-        if (c == null) throw new IllegalStateException("building " + Integer.toHexString(id) + ": its chunk isn't loaded");
-        return c;
+        int p = Chunk.chunkOf(id);
+        Chunk c = store.chunk(p);
+        if (c != null) return c;
+        if (pager == null) throw new IllegalStateException("building " + Integer.toHexString(id) + ": its chunk isn't loaded");
+        return missPage(p);
     }
 
     public int bx(int id) {
@@ -435,6 +539,8 @@ public final class Region {
     }
 
     private void destroyChunkBuilding(int id) {
+        int cp = Chunk.chunkOf(id);
+        if (!store.resident(cp) && pager != null) pager.need(cp); // changed on a resident page only
         Chunk c = chunkOf(id);
         int b = Chunk.localOf(id), x0 = c.cx * Chunk.SIZE + c.bx[b], y0 = c.cy * Chunk.SIZE + c.by[b];
         int p = c.cy * pw + c.cx;
@@ -572,9 +678,43 @@ public final class Region {
     public void closeBarricadedRoads(int x0, int y0, int x1, int y1) {
         RoadGraph g = roads;
         float px0 = x0 * Tile.SIZE - 48, py0 = y0 * Tile.SIZE - 48, px1 = (x1 + 1) * Tile.SIZE + 48, py1 = (y1 + 1) * Tile.SIZE + 48;
-        for (int e = 0; e < g.edgeCount; e++) {
+        if (nation != null) {
+            // a national map: barricades are edits, so only the pages with edits can hold one; and within a box, only
+            // the roads bucketed in its chunks are looked at
+            if (x1 < 0) {
+                if (overlay == null) return;
+                for (int p = 0; p < store.pages(); p++)
+                    if (overlay.edited(p)) {
+                        int cx = p % pw, cy = p / pw;
+                        closeBarricadedRoads(cx * 64, cy * 64, cx * 64 + 63, cy * 64 + 63);
+                    }
+                return;
+            }
+            int cs = g.chunkPx;
+            int cx0 = Math.max(0, (int) (px0 / cs)), cy0 = Math.max(0, (int) (py0 / cs));
+            int cx1 = Math.min(g.chunkW - 1, (int) (px1 / cs)), cy1 = Math.min(g.chunkW - 1, (int) (py1 / cs));
+            for (int cy = cy0; cy <= cy1; cy++)
+                for (int cx = cx0; cx <= cx1; cx++) {
+                    int c = cy * g.chunkW + cx;
+                    for (int k = g.chunkEdgeStart[c]; k < g.chunkEdgeStart[c + 1]; k++) checkBarricade(g, g.chunkEdge[k], x1, px0, py0, px1, py1);
+                }
+            return;
+        }
+        for (int e = 0; e < g.edgeCount; e++) checkBarricade(g, e, x1, px0, py0, px1, py1);
+    }
+
+    /** A point on a page that is resident or has edits in the overlay (anything else is as generated). */
+    private boolean mayHoldEdit(float x, float y) {
+        int tx = (int) Math.floor(x / Tile.SIZE), ty = (int) Math.floor(y / Tile.SIZE);
+        if (!in(tx, ty)) return false;
+        int p = store.pageOf(tx, ty);
+        return store.resident(p) || overlay != null && overlay.edited(p);
+    }
+
+    private void checkBarricade(RoadGraph g, int e, int x1, float px0, float py0, float px1, float py1) {
+        {
             float ax = g.nx[g.ea[e]], ay = g.ny[g.ea[e]], bx = g.nx[g.eb[e]], by = g.ny[g.eb[e]];
-            if (x1 >= 0 && (Math.max(ax, bx) < px0 || Math.min(ax, bx) > px1 || Math.max(ay, by) < py0 || Math.min(ay, by) > py1)) continue;
+            if (x1 >= 0 && (Math.max(ax, bx) < px0 || Math.min(ax, bx) > px1 || Math.max(ay, by) < py0 || Math.min(ay, by) > py1)) return;
             float dx = bx - ax, dy = by - ay, len = (float) Math.sqrt(dx * dx + dy * dy);
             int steps = (int) (len / 8) + 1;
             boolean blocked = false;
@@ -584,8 +724,11 @@ public final class Region {
             for (int k = -1; k <= steps + 1 && !blocked; k++) {
                 float along = k < 0 ? -h * 0.5f : k > steps ? len + h * 0.5f : len * k / steps;
                 float x = ax + ux * along, y = ay + uy * along;
-                for (int j = -2; j <= 2 && !blocked; j++)
-                    if (tileAtPx(x - uy * h * j * 0.5f, y + ux * h * j * 0.5f) == Tile.BARRICADE) blocked = true;
+                for (int j = -2; j <= 2 && !blocked; j++) {
+                    float sx = x - uy * h * j * 0.5f, sy = y + ux * h * j * 0.5f;
+                    if (nation != null && !mayHoldEdit(sx, sy)) continue; // generated ground has no barricades
+                    if (tileAtPx(sx, sy) == Tile.BARRICADE) blocked = true;
+                }
             }
             if (blocked) g.epen[e] = Math.max(g.epen[e], 1e6f);
             else if (g.epen[e] >= 1e6f) g.epen[e] = 0;

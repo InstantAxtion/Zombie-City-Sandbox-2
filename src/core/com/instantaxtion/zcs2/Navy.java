@@ -34,6 +34,34 @@ public final class Navy extends Module {
     /** Sectors at or by the water (rivers and lakes too): a coastal town's waterfront. */
     private boolean[] wet;
 
+    /** National maps: which sectors are coastal and wet, from the nation's sector summaries (not tiles). */
+    private void coastNational(boolean[] deepHere) {
+        Nation na = w.r.nation;
+        int n = w.sec.n;
+        wet = new boolean[n];
+        for (int s = 0; s < n; s++) {
+            int water = na.sum(Nation.SUM_WATER, s), deep = na.sum(Nation.SUM_DEEP, s);
+            coastal[s] = deep > 0 && water > 255 / 25 && water < 255 * 9 / 10;
+            deepHere[s] = deep > 0;
+        }
+        for (int s = 0; s < n; s++) {
+            if (na.sum(Nation.SUM_WATER, s) > 0) wet[s] = true;
+            else for (int d = 0; d < 8 && !wet[s]; d++) {
+                // (the old scan looked 8 tiles past the sector's edge: a neighbour's water near the border)
+                int t = w.sec.neighbour(s, d);
+                if (t >= 0 && na.sum(Nation.SUM_WATER, t) > 255 / 4) wet[s] = true;
+            }
+        }
+        for (int s = 0; s < n; s++) {
+            int water = na.sum(Nation.SUM_WATER, s);
+            if (coastal[s] || water == 0 || water > 255 * 9 / 10) continue;
+            for (int d = 0; d < 8; d++) {
+                int t = w.sec.neighbour(s, d);
+                if (t >= 0 && deepHere[t]) coastal[s] = true;
+            }
+        }
+    }
+
     public Navy(World w) {
         super(w);
         coastal = new boolean[w.sec.n];
@@ -41,7 +69,8 @@ public final class Navy extends Module {
         coastNews = new boolean[w.r.settlements.size()];
         // which sectors touch open water (boats can come in)
         Region r = w.r;
-        for (int s = 0; s < w.sec.n; s++) {
+        if (r.nation != null) coastNational(deepHere);
+        else for (int s = 0; s < w.sec.n; s++) {
             int x0 = (s % w.sec.sw) * w.r.sect, y0 = (s / w.sec.sw) * w.r.sect;
             int water = 0, deep = 0, all = 0;
             for (int y = y0; y < y0 + w.r.sect; y += 4)
@@ -55,8 +84,8 @@ public final class Navy extends Module {
             if (deep == 0) coastal[s] = false;
             deepHere[s] = deep > 0;
         }
-        wet = new boolean[w.sec.n];
-        for (int s = 0; s < w.sec.n; s++) {
+        if (wet == null) wet = new boolean[w.sec.n];
+        for (int s = 0; s < w.sec.n && r.nation == null; s++) {
             int x0 = (s % w.sec.sw) * w.r.sect, y0 = (s / w.sec.sw) * w.r.sect;
             for (int y = y0 - 8; y < y0 + w.r.sect + 8 && !wet[s]; y += 4)
                 for (int x = x0 - 8; x < x0 + w.r.sect + 8; x += 4)
@@ -66,7 +95,7 @@ public final class Navy extends Module {
                     }
         }
         // a shore with deep water off it (in the next sector out) is reachable by boat too
-        for (int s = 0; s < w.sec.n; s++) {
+        for (int s = 0; s < w.sec.n && r.nation == null; s++) {
             if (coastal[s]) continue;
             int x0 = (s % w.sec.sw) * w.r.sect, y0 = (s / w.sec.sw) * w.r.sect, water = 0, all = 0;
             for (int y = y0; y < y0 + w.r.sect; y += 8)

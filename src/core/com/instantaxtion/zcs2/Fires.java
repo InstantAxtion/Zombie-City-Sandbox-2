@@ -14,10 +14,40 @@ import java.util.List;
  * near the camera you see the engine drive there.
  */
 public final class Fires extends Module {
-    /** Heat of each building's fire, 0 (none) to 1. */
-    public final float[] heat;
-    private final float[] burnT, eta;
-    private final int[] crews, crewFrom, engine;
+    /** A building's fire: heat 0 (none) to 1, how long it has burned, and the crew sent to it. */
+    private static final class Fire {
+        float heat, burnT, eta;
+        int crews, crewFrom = -1, engine = -1;
+    }
+
+    /**
+     * The fires by building id (Region's or a chunk's encoded ids). Only looked up by key: everything that walks
+     * the fires walks the burning list, in the order they caught, so a map's iteration order never matters.
+     */
+    private final java.util.HashMap<Integer, Fire> fires = new java.util.HashMap<Integer, Fire>();
+
+    /** Heat of a building's fire, 0 (none) to 1. */
+    public float heat(int b) {
+        Fire f = fires.get(b);
+        return f == null ? 0 : f.heat;
+    }
+
+    private Fire fire(int b) {
+        Fire f = fires.get(b);
+        if (f == null) {
+            f = new Fire();
+            fires.put(b, f);
+        }
+        return f;
+    }
+
+    /**
+     * National maps, the second tier: fires counted per sector where the chunk isn't active (nobody sees which
+     * building; when the chunk becomes active they catch real buildings). In the order the sectors first caught.
+     */
+    private int[] cSec = new int[8], cN = new int[8];
+    private float[] cBurn = new float[8];
+    private int cCount;
     private final int[] secFires;
     /** The sectors with a count in secFires. */
     private int[] fireSecs = new int[16];
@@ -30,15 +60,6 @@ public final class Fires extends Module {
 
     public Fires(World w) {
         super(w);
-        int n = w.r.bCount;
-        heat = new float[n];
-        burnT = new float[n];
-        eta = new float[n];
-        crews = new int[n];
-        crewFrom = new int[n];
-        engine = new int[n];
-        java.util.Arrays.fill(crewFrom, -1);
-        java.util.Arrays.fill(engine, -1);
         secFires = new int[w.sec.n];
         Content.Unit ff = w.c.unit("firefighter");
         Content.VType fe = w.c.vtype("fire_engine");
@@ -80,8 +101,20 @@ public final class Fires extends Module {
 
     /** Sets a building alight (looting, the society systems...). */
     public void ignite(int b, float h) {
-        if (b < 0 || b >= heat.length || w.r.bfloors(b) <= 0) return;
-        if (heat[b] <= 0) {
+        if (b < 0 || !Chunk.isChunkBuilding(b) && b >= w.r.bCount || w.r.bfloors(b) <= 0) return;
+        if (w.r.nation != null && heat(b) <= 0) {
+            // a building in a chunk that isn't active: a fire counted in its sector until the chunk comes in
+            float dx = w.r.doorX(b), dy = w.r.doorY(b);
+            if (dx < 0) {
+                dx = (w.r.bx(b) + w.r.bw(b) / 2f) * Tile.SIZE;
+                dy = (w.r.by(b) + w.r.bh(b) / 2f) * Tile.SIZE;
+            }
+            if (!w.act.activePx(dx, dy)) {
+                countFire(w.r.sectorOfPx(dx, dy), 1);
+                return;
+            }
+        }
+        if (heat(b) <= 0) {
             burning.add(b);
             started++;
             if (w.r.bres(b) > 0 || w.r.bkind(b) >= Region.B_POLICE) {
@@ -91,7 +124,7 @@ public final class Fires extends Module {
                 }
             }
         }
-        heat[b] = Math.max(heat[b], Math.min(1, h));
+        fire(b).heat = Math.max(fire(b).heat, Math.min(1, h));
     }
 
     private String placeOf(int b) {
@@ -124,7 +157,7 @@ public final class Fires extends Module {
             for (int dx = -r0; dx <= r0; dx += 2) {
                 if (!w.r.in(tx + dx, ty + dy)) continue;
                 int b = w.r.building(tx + dx, ty + dy);
-                if (b < 0 || b == last || heat[b] > 0) continue;
+                if (b < 0 || b == last || heat(b) > 0) continue;
                 last = b;
                 if (Rng.unit(w.seed, w.tick, b * 7L + 2) < chance) ignite(b, 0.4f);
             }
@@ -145,19 +178,19 @@ public final class Fires extends Module {
         int n = burning.size();
         for (int k = 0; k < n; k++) {
             int b = burning.get(k);
-            if (heat[b] <= 0) continue;
+            if (fire(b).heat <= 0) continue;
             float dx0 = w.r.doorX(b) >= 0 ? w.r.doorX(b) : (r.bx(b) + r.bw(b) / 2f) * 16, dy0 = w.r.doorY(b) >= 0 ? w.r.doorY(b) : (r.by(b) + r.bh(b) / 2f) * 16;
             int s = r.sectorOfPx(dx0, dy0);
             // the crew on its way, or at work
-            if (crews[b] == 0) dispatch(b, dx0, dy0);
-            float h = heat[b] + grow * dt;
-            if (crews[b] > 0) {
-                eta[b] -= dt;
-                if (eta[b] <= 0) {
+            if (fire(b).crews == 0) dispatch(b, dx0, dy0);
+            float h = fire(b).heat + grow * dt;
+            if (fire(b).crews > 0) {
+                fire(b).eta -= dt;
+                if (fire(b).eta <= 0) {
                     // the dead about: the crew can't work, and some don't come back
                     if (sec.zIn[s] + w.sp.secZ[s] > 25) {
-                        int lost = Math.min(crews[b], 1 + crews[b] / 4);
-                        crews[b] -= lost;
+                        int lost = Math.min(fire(b).crews, 1 + fire(b).crews / 4);
+                        fire(b).crews -= lost;
                         w.stats.crewDeaths += lost;
                         sec.zIn[sec.touch(s)] += lost / 2;
                         recall(b);
@@ -165,31 +198,33 @@ public final class Fires extends Module {
                         // no water in the mains: the crews have only what the engines carry
                         int bs = r.bset(b);
                         float water = bs >= 0 && w.infra.waterOut(bs) ? 0.3f : 1f;
-                        h -= crews[b] / 4f * crewRate * water * dt + grow * dt;
+                        h -= fire(b).crews / 4f * crewRate * water * dt + grow * dt;
                     }
                 }
             }
             if (w.weather.wet()) h -= rain * dt * (w.weather.state == Weather.STORM ? 2 : 1);
-            heat[b] = Math.max(0, Math.min(1, h));
-            if (heat[b] <= 0) {
+            fire(b).heat = Math.max(0, Math.min(1, h));
+            if (fire(b).heat <= 0) {
                 putOut++;
                 recall(b);
-                burnT[b] = 0;
+                fire(b).burnT = 0;
                 continue;
             }
             if (secFires[s]++ == 0) {
                 if (fireSecN == fireSecs.length) fireSecs = java.util.Arrays.copyOf(fireSecs, fireSecN * 2);
                 fireSecs[fireSecN++] = s;
             }
-            burnT[b] += dt * heat[b];
+            fire(b).burnT += dt * fire(b).heat;
             // into the neighbours, with the wind
-            if (heat[b] > 0.5f && Rng.unit(w.seed, w.tick, b * 13L) < spread * heat[b] * dt) spreadFrom(b, wx, wy);
+            if (fire(b).heat > 0.5f && Rng.unit(w.seed, w.tick, b * 13L) < spread * fire(b).heat * dt) spreadFrom(b, wx, wy);
             // at night a fire is a light; near people it's noise as well
             if (!w.strategic && w.night() && (sec.hot[s] > 0 || sec.cam[s]) && Rng.unit(w.seed, w.tick, b * 5L) < 0.1f * dt)
                 w.fx.noise(dx0, dy0, 16, 4);
-            if (burnT[b] > burnout) collapse(b, s);
+            if (fire(b).burnT > burnout) collapse(b, s);
         }
-        for (int k = burning.size() - 1; k >= 0; k--) if (heat[burning.get(k)] <= 0) burning.remove(k);
+        for (int k = burning.size() - 1; k >= 0; k--)
+            if (heat(burning.get(k)) <= 0) fires.remove(burning.remove(k)); // (out: its record is all defaults again)
+        if (cCount > 0) counted(dt, grow, burnout, spread, rain);
         // engines home again go back in the station
         for (int v = 0; v < w.veh.top; v++) {
             if (w.veh.state[v] == Vehicles.V_PARKED && w.veh.type[v] == vEngine && w.veh.role[v] == Vehicles.R_SQUAD && w.veh.squad[v] < 0) {
@@ -198,6 +233,100 @@ public final class Fires extends Module {
                 w.veh.state[v] = Vehicles.V_NONE;
             }
         }
+    }
+
+    /** n more fires counted in sector s (national maps, a chunk that isn't active). */
+    private void countFire(int s, int n) {
+        for (int k = 0; k < cCount; k++)
+            if (cSec[k] == s) {
+                cN[k] = Math.min(40, cN[k] + n);
+                return;
+            }
+        if (cCount == cSec.length) {
+            cSec = java.util.Arrays.copyOf(cSec, cCount * 2);
+            cN = java.util.Arrays.copyOf(cN, cCount * 2);
+            cBurn = java.util.Arrays.copyOf(cBurn, cCount * 2);
+        }
+        cSec[cCount] = s;
+        cN[cCount] = n;
+        cBurn[cCount] = 0;
+        cCount++;
+        started += n;
+    }
+
+    /** Counted fires in sector s (national maps). */
+    public int counted(int s) {
+        for (int k = 0; k < cCount; k++) if (cSec[k] == s) return cN[k];
+        return 0;
+    }
+
+    /**
+     * The counted fires: those whose chunk has become active catch real buildings there; the rest burn as numbers
+     * (spreading, put out by rain or a crew from a station in reach, or burning out and bringing a building down
+     * with some of the people in it).
+     */
+    private void counted(float dt, float grow, float burnout, float spread, float rain) {
+        Sectors sec = w.sec;
+        int out = 0;
+        for (int k = 0; k < cCount; k++) {
+            int s = cSec[k], n = cN[k];
+            if (w.act.active(s)) {
+                int[] bl = w.secBuildings[s];
+                for (int i = 0; i < n && bl.length > 0; i++) {
+                    int b = bl[Rng.hashInt(w.seed, w.tick + i, s * 7L + 3, bl.length)];
+                    if (heat(b) <= 0 && w.r.bfloors(b) > 0) {
+                        burning.add(b);
+                        fire(b).heat = 0.3f;
+                    }
+                }
+                continue;
+            }
+            cBurn[k] += dt;
+            // spread (a fire grows to a block), rain and crews
+            if (Rng.unit(w.seed, w.tick, s * 43L + 1) < spread * 0.5f * n * dt) n = Math.min(40, n + 1);
+            if (w.weather.wet() && Rng.unit(w.seed, w.tick, s * 43L + 2) < rain * 20 * dt) n--;
+            if (n > 0 && unitFF >= 0 && Rng.unit(w.seed, w.tick, s * 43L + 3) < dt / 300f && crewNear(sec.cx(s), sec.cy(s))) n--;
+            if (n > 0 && cBurn[k] > burnout * 1.5f) {
+                // burned out: the buildings come down, a few of the people sheltering in them with them
+                int lost = Math.min(sec.popIn[s], sec.home[s] / 400 * n);
+                if (lost > 0) {
+                    sec.popIn[sec.touch(s)] -= lost;
+                    w.stats.civDeaths += lost;
+                    w.stats.lossBy[4] += lost;
+                }
+                collapsed += n;
+                w.stats.buildingsLost += n;
+                n = 0;
+            }
+            cN[k] = n;
+            if (n > 0) {
+                if (secFires[s] == 0) {
+                    if (fireSecN == fireSecs.length) fireSecs = java.util.Arrays.copyOf(fireSecs, fireSecN * 2);
+                    fireSecs[fireSecN++] = s;
+                }
+                secFires[s] += n;
+            }
+        }
+        // drop the ones out or taken in (keeping the order)
+        for (int k = 0; k < cCount; k++) {
+            if (cN[k] > 0 && !w.act.active(cSec[k])) {
+                cSec[out] = cSec[k];
+                cN[out] = cN[k];
+                cBurn[out] = cBurn[k];
+                out++;
+            }
+        }
+        cCount = out;
+    }
+
+    /** A fire station in reach of (x, y) with a crew to spare. */
+    private boolean crewNear(float x, float y) {
+        for (Region.Facility f : w.r.facilities) {
+            if (f.kind != Region.F_FIRE || f.pool == null || f.pool[unitFF] < 4 || !w.strat.online(f.id)) continue;
+            float dx = f.x - x, dy = f.y - y;
+            if (dx * dx + dy * dy < 4500f * 4500f) return true;
+        }
+        return false;
     }
 
     /** Fires nobody is minding: where the power and water are gone and people are frightened. */
@@ -229,6 +358,10 @@ public final class Fires extends Module {
             if (!dark && sec.panic[s] < 0.5f) continue;
             float chance = p * rate * dt * (dark ? 1 : 0.3f) * (w.weather.wet() ? 0.3f : 1);
             if (Rng.unit(w.seed, w.tick, s * 41L + 9) >= chance) continue;
+            if (w.r.nation != null && !w.act.active(s)) {
+                countFire(s, 1); // (a sector is its chunk on a national map)
+                continue;
+            }
             int[] bl = w.secBuildings[s];
             if (bl.length == 0) continue;
             ignite(bl[Rng.hashInt(w.seed, w.tick, s, bl.length)], 0.15f);
@@ -246,7 +379,7 @@ public final class Fires extends Module {
             int tx = (int) cx, ty = (int) cy;
             if (!r.in(tx, ty)) continue;
             int o = r.building(tx, ty);
-            if (o >= 0 && o != b && heat[o] <= 0) {
+            if (o >= 0 && o != b && heat(o) <= 0) {
                 ignite(o, 0.15f);
                 return;
             }
@@ -272,8 +405,8 @@ public final class Fires extends Module {
         w.sec.popIn[w.sec.touch(s)] -= lost;
         w.stats.civDeaths += lost;
         w.stats.lossBy[4] += lost;
-        heat[b] = 0;
-        burnT[b] = 0;
+        fire(b).heat = 0;
+        fire(b).burnT = 0;
         recall(b);
         collapsed++;
         w.stats.buildingsLost++;
@@ -295,31 +428,31 @@ public final class Fires extends Module {
             }
         }
         if (best == null) return;
-        int n = heat[b] > 0.7f && best.pool[unitFF] >= 8 ? 8 : 4;
+        int n = fire(b).heat > 0.7f && best.pool[unitFF] >= 8 ? 8 : 4;
         best.pool[unitFF] -= n;
-        crews[b] = n;
-        crewFrom[b] = best.id;
-        eta[b] = (float) Math.sqrt(bd) / 150f + 30;
+        fire(b).crews = n;
+        fire(b).crewFrom = best.id;
+        fire(b).eta = (float) Math.sqrt(bd) / 150f + 30;
         int s = w.r.sectorOfPx(x, y);
         if (!w.strategic && vEngine >= 0 && best.vpool[vEngine] > 0 && (w.sec.cam[s] || w.sec.hot[s] > 0)) {
             best.vpool[vEngine]--;
             int v = w.veh.add(w.c.vtypes.get(vEngine), best.x, best.y, 0, best.id);
             w.veh.driveTo(v, x, y, 0);
             w.veh.siren[v] = true;
-            engine[b] = v;
+            fire(b).engine = v;
         }
     }
 
     /** The crew goes home (back in the station's pool); its engine drives back. */
     private void recall(int b) {
-        if (crewFrom[b] >= 0 && crews[b] > 0) {
-            Region.Facility f = w.r.facilities.get(crewFrom[b]);
-            if (f.pool != null) f.pool[unitFF] += crews[b];
+        if (fire(b).crewFrom >= 0 && fire(b).crews > 0) {
+            Region.Facility f = w.r.facilities.get(fire(b).crewFrom);
+            if (f.pool != null) f.pool[unitFF] += fire(b).crews;
         }
-        crews[b] = 0;
-        crewFrom[b] = -1;
-        int v = engine[b];
-        engine[b] = -1;
+        fire(b).crews = 0;
+        fire(b).crewFrom = -1;
+        int v = fire(b).engine;
+        fire(b).engine = -1;
         if (v >= 0 && v < w.veh.top && w.veh.usable(v) && w.veh.type[v] == vEngine) w.veh.goHome(v);
     }
 
@@ -333,12 +466,21 @@ public final class Fires extends Module {
         o.writeInt(burning.size());
         for (int b : burning) {
             o.writeInt(b);
-            o.writeFloat(heat[b]);
-            o.writeFloat(burnT[b]);
-            o.writeFloat(eta[b]);
-            o.writeInt(crews[b]);
-            o.writeInt(crewFrom[b]);
-            o.writeInt(engine[b]);
+            o.writeFloat(fire(b).heat);
+            o.writeFloat(fire(b).burnT);
+            o.writeFloat(fire(b).eta);
+            o.writeInt(fire(b).crews);
+            o.writeInt(fire(b).crewFrom);
+            o.writeInt(fire(b).engine);
+        }
+        if (w.r.nation != null) {
+            o.writeInt(cCount);
+            for (int k = 0; k < cCount; k++) {
+                o.writeInt(cSec[k]);
+                o.writeInt(cN[k]);
+                o.writeFloat(cBurn[k]);
+            }
+            o.writeInt(started);
         }
     }
 
@@ -354,12 +496,23 @@ public final class Fires extends Module {
         for (int k = 0; k < n; k++) {
             int b = in.readInt();
             burning.add(b);
-            heat[b] = in.readFloat();
-            burnT[b] = in.readFloat();
-            eta[b] = in.readFloat();
-            crews[b] = in.readInt();
-            crewFrom[b] = in.readInt();
-            engine[b] = in.readInt();
+            fire(b).heat = in.readFloat();
+            fire(b).burnT = in.readFloat();
+            fire(b).eta = in.readFloat();
+            fire(b).crews = in.readInt();
+            fire(b).crewFrom = in.readInt();
+            fire(b).engine = in.readInt();
+        }
+        if (w.r.nation != null) {
+            cCount = 0;
+            int m = in.readInt();
+            for (int k = 0; k < m; k++) {
+                int s = in.readInt(), c = in.readInt();
+                float t = in.readFloat();
+                countFire(s, c);
+                cBurn[cCount - 1] = t;
+            }
+            started = in.readInt();
         }
     }
 
@@ -372,7 +525,7 @@ public final class Fires extends Module {
         float wxv = (float) Math.cos(wind), wyv = (float) Math.sin(wind);
         for (int k0 = 0; k0 < burning.size(); k0++) {
             int b = burning.get(k0);
-            float h = heat[b];
+            float h = heat(b);
             if (h <= 0) continue;
             float wx = (r.bx(b) + r.bw(b) / 2f) * 16, wy = (r.by(b) + r.bh(b) / 2f) * 16;
             if (wx < x0 || wx > x1 || wy < y0 || wy > y1) continue;

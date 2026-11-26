@@ -252,15 +252,19 @@ final class Combat {
         w.fires.blast(x, y, rad);
         // big bombs bring buildings down, and the people sheltering in them
         if (rad > 90) {
+            // (a national map: the chunks it falls on are taken in now, before anything on them changes)
+            if (w.r.nation != null)
+                for (int k = 0; k < 4; k++) w.act.touchPx(x + (k % 2 == 0 ? -rad : rad) * 0.45f, y + (k < 2 ? -rad : rad) * 0.45f);
             int tx0 = (int) ((x - rad * 0.45f) / Tile.SIZE), tx1 = (int) ((x + rad * 0.45f) / Tile.SIZE);
             int ty0 = (int) ((y - rad * 0.45f) / Tile.SIZE), ty1 = (int) ((y + rad * 0.45f) / Tile.SIZE);
             for (int ty = ty0; ty <= ty1; ty++)
                 for (int tx = tx0; tx <= tx1; tx++) {
                     if (!w.r.in(tx, ty)) continue;
-                    int b = w.r.building(ty * w.r.W + tx);
+                    int b = w.r.building(tx, ty);
                     if (b >= 0) {
-                        int s = w.r.sectorOfPx(w.doorX[b] >= 0 ? w.doorX[b] : x, w.doorY[b] >= 0 ? w.doorY[b] : y);
-                        int lost = Math.min(w.sec.popIn[s], w.r.bres[b]);
+                        float ddx = w.r.doorX(b), ddy = w.r.doorY(b);
+                        int s = w.r.sectorOfPx(ddx >= 0 ? ddx : x, ddy >= 0 ? ddy : y);
+                        int lost = Math.min(w.sec.popIn[s], w.r.bres(b));
                         w.sec.popIn[w.sec.touch(s)] -= lost;
                         w.stats.civDeaths += lost;
                         int zl = Math.min(w.sec.zIn[s], Math.max(1, w.sec.zIn[s] / 8));

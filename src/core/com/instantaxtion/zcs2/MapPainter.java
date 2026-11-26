@@ -232,7 +232,34 @@ public final class MapPainter {
     }
 
     /** Redraws what changed on the map since last time (rubble, blown bridges): only the changed rectangles. */
+    /** A national World's region whose changes (rubble, blown bridges) redraw the street pictures they touch. */
+    private Region watched;
+
+    /** Drawing a national World: its map edits drop the street pictures they touch (refresh()). */
+    public void watch(Region region) {
+        watched = region;
+        seenChanges = region.changes;
+    }
+
     public void refresh() {
+        if (r == null && watched != null) {
+            // a national map: no picture of the whole map to patch, only the street pictures to drop
+            Region q = watched;
+            if (q.changes == seenChanges) return;
+            seenChanges = q.changes;
+            for (int[] d : q.dirty)
+                for (int cy = Math.max(0, d[1] - M) / CHUNK; cy <= Math.min(q.H - 1, Math.max(0, d[3] + M)) / CHUNK; cy++)
+                    for (int cx = Math.max(0, d[0] - M) / CHUNK; cx <= Math.min(q.W - 1, Math.max(0, d[2] + M)) / CHUNK; cx++)
+                        for (int lvl = 0; lvl < PPT.length; lvl++) {
+                            GImage img = cache.remove(key(cx, cy, lvl));
+                            if (img != null) {
+                                cacheBytes -= bytes(lvl);
+                                img.recycle();
+                            }
+                        }
+            q.dirty.clear();
+            return;
+        }
         if (r == null || r.changes == seenChanges) return;
         seenChanges = r.changes;
         int st = step(), iw = r.W / st, ih = r.H / st;

@@ -224,6 +224,19 @@ public final class Overlay implements ChunkCache.Overlay {
         }
     }
 
+    /**
+     * National maps, a save just read: works out each edit's replaced tile (not saved) by laying the page's edits
+     * over a freshly generated copy of its chunk, as applyTo does for today's maps.
+     */
+    synchronized void takeOriginals(Nation n) {
+        for (int p = 0; p < page.length; p++) {
+            Page pg = page[p];
+            if (pg == null || pg.n == 0) continue;
+            Chunk c = ChunkGen.generate(n, p % n.sw, p / n.sw);
+            applyPage(pg, c.tile, c.bld, c, true);
+        }
+    }
+
     private static void applyPage(Page pg, byte[] tile, short[] bld, Chunk c, boolean takeOrig) {
         for (int k = 0; k < pg.nn; k++) {
             short v = (short) -(pg.national[k] + 1);

@@ -48,6 +48,7 @@ public final class Vehicles implements ActiveSet.Paged {
 
     Vehicles(World w) {
         this.w = w;
+        if (w.r.W != w.r.H) throw new IllegalStateException("the vehicle grid assumes a square map");
         gw = w.r.px() / GC + 1;
         secCars = new int[w.r.secW * w.r.secH];
         ActiveSet act = w.act;
@@ -195,7 +196,7 @@ public final class Vehicles implements ActiveSet.Paged {
     public int near(float px, float py, float rad) {
         if (gTouchedN == 0) return -1;
         // any car in the sectors this search could reach? (cells are 128 px, the search covers one cell round)
-        float cs = Region.SECT * Tile.SIZE;
+        float cs = w.r.sect * Tile.SIZE;
         int sw = w.r.secW, sh = w.r.secH;
         int sx0 = Math.max(0, (int) (((int) (px / GC) - 1) * GC / cs)), sx1 = Math.min(sw - 1, (int) (((int) (px / GC) + 2) * GC / cs));
         int sy0 = Math.max(0, (int) (((int) (py / GC) - 1) * GC / cs)), sy1 = Math.min(sh - 1, (int) (((int) (py / GC) + 2) * GC / cs));
@@ -389,8 +390,10 @@ public final class Vehicles implements ActiveSet.Paged {
     public void patrolOn(int v) {
         RoadGraph g = w.r.roads;
         int homeSet = home[v] >= 0 ? w.r.facilities.get(home[v]).settlement : -1;
+        // (a national map: picked from the town's own junctions, not a whole country's)
+        int own = w.r.nation != null ? g.nodesOfCount(homeSet) : 0;
         for (int a = 0; a < 12; a++) {
-            int n = Rng.hashInt(w.seed, uid[v] * 977L + w.tick, a, g.nodeCount);
+            int n = own > 0 ? g.nodeOf(homeSet, Rng.hashInt(w.seed, uid[v] * 977L + w.tick, a, own)) : Rng.hashInt(w.seed, uid[v] * 977L + w.tick, a, g.nodeCount);
             if (g.nset[n] == homeSet && g.nodeLive(n)) {
                 if (driveTo(v, g.nx[n], g.ny[n], 0)) {
                     siren[v] = false;

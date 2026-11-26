@@ -32,7 +32,7 @@ public final class Setup {
     /** As above, on a region already generated from the same size, preset and seed (the New Game preview's), or null. */
     public static World newGame(Content c, int size, int preset, long seed, Content.Scenario sc, int threads, int role, int maxInd, Region pre) {
         if (role < 0) role = defaultRole(sc);
-        Region r = pre != null && pre.W == size && pre.preset == preset && pre.seed == seed ? pre : RegionGen.generate(size, preset, seed);
+        Region r = pre != null && pre.W == size && pre.preset == preset && pre.seed == seed ? pre : region(size, preset, seed, threads);
         World w = new World(c, r, seed, threads);
         w.maxIndividuals = maxInd;
         w.scenario = sc;
@@ -64,6 +64,20 @@ public final class Setup {
         w.stats.startPeople = Audit.people(w);
         w.stats.event("The day begins in " + r.name, -1, -1);
         return w;
+    }
+
+    /** Map sides from this up are real-scale (national) maps, made by NationGen; today's sizes by RegionGen. */
+    public static final int NATIONAL_FROM = 4096;
+
+    public static boolean national(int size) {
+        return size >= NATIONAL_FROM;
+    }
+
+    /** The map for a game: a nation (real scale) for the national sizes, else today's RegionGen map. */
+    public static Region region(int size, int preset, long seed, int threads) {
+        if (!national(size)) return RegionGen.generate(size, preset, seed);
+        Nation n = NationGen.generate(size, preset, seed, Math.max(1, Math.min(4, threads)));
+        return Region.national(n, null);
     }
 
     /** Parking places in a facility's lot (or round its yard). */
@@ -419,7 +433,7 @@ public final class Setup {
                 // the countryside has fallen: the dead everywhere outside the towns, and hordes
                 List<Integer> open = new ArrayList<Integer>();
                 for (int s = 0; s < w.sec.n; s++)
-                    if (w.sec.settlement[s] < 0 && w.sec.connect[s] != 0 && Tile.walkable(r.tileAtPx(w.sec.cx(s), w.sec.cy(s)))) open.add(s);
+                    if (w.sec.settlement[s] < 0 && w.sec.connect[s] != 0 && dryMiddle(w, s)) open.add(s);
                 int hordes = 4;
                 int left = n;
                 for (int k = 0; k < hordes && !open.isEmpty(); k++) {
@@ -726,6 +740,13 @@ public final class Setup {
             if (ddx * ddx + ddy * ddy < 1200f * 1200f) return false;
         }
         return true;
+    }
+
+    /** The middle of sector s is dry ground (a national map: its coarse cover, so no chunk is made for every sector). */
+    private static boolean dryMiddle(World w, int s) {
+        float x = w.sec.cx(s), y = w.sec.cy(s);
+        if (w.r.nation != null) return !Nation.wet(w.r.nation.coverAt((int) (x / Tile.SIZE), (int) (y / Tile.SIZE)));
+        return Tile.walkable(w.r.tileAtPx(x, y));
     }
 
     /** A walkable point near (x, y). */

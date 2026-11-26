@@ -167,8 +167,17 @@ public final class RoadGraph {
     /** Junctions searched, for the performance probe. */
     public long searched;
 
-    /** The junctions from a to b (both included), or null if b can't be reached. */
+    /**
+     * The junctions from a to b (both included), or null if b can't be reached. A national graph (with levels built)
+     * takes long trips through the two-level search (route2); today's maps always use plain A*.
+     */
     public int[] route(int a, int b) {
+        if (l1Of != null && a >= 0 && b >= 0 && a != b && h(a, b) >= shortTrip) return route2(a, b);
+        return astar(a, b);
+    }
+
+    /** Plain A* over every road. */
+    public int[] astar(int a, int b) {
         if (a < 0 || b < 0) return null;
         if (a == b) return new int[]{a};
         cur++;
@@ -379,6 +388,69 @@ public final class RoadGraph {
         return chunkEdgeStart[c + 1] - chunkEdgeStart[c];
     }
 
+    // ---- junctions by chunk and by settlement (national maps: bounded searches instead of every junction) ----
+    private int[] nodeChunkStart, nodeChunk, nodeSetStart, nodeSet;
+    private int nodeChunkPx, nodeChunkW;
+
+    /** The junctions in chunk (cx, cy) of side chunkPx, ascending: nodesInChunk()[from..to). Built on first use. */
+    public synchronized int[] nodeChunks(int chunkPx) {
+        if (nodeChunk == null || nodeChunkPx != chunkPx) {
+            float maxX = 0;
+            for (int i = 0; i < nodeCount; i++) maxX = Math.max(maxX, Math.max(nx[i], ny[i]));
+            nodeChunkPx = chunkPx;
+            nodeChunkW = (int) (maxX / chunkPx) + 2;
+            int nc = nodeChunkW * nodeChunkW;
+            int[] cnt = new int[nc + 1];
+            for (int i = 0; i < nodeCount; i++) cnt[nodeChunkOf(nx[i], ny[i]) + 1]++;
+            for (int c = 0; c < nc; c++) cnt[c + 1] += cnt[c];
+            nodeChunkStart = cnt.clone();
+            nodeChunk = new int[nodeCount];
+            for (int i = 0; i < nodeCount; i++) nodeChunk[cnt[nodeChunkOf(nx[i], ny[i])]++] = i;
+        }
+        return nodeChunk;
+    }
+
+    private int nodeChunkOf(float x, float y) {
+        int cx = Math.max(0, Math.min(nodeChunkW - 1, (int) (x / nodeChunkPx))), cy = Math.max(0, Math.min(nodeChunkW - 1, (int) (y / nodeChunkPx)));
+        return cy * nodeChunkW + cx;
+    }
+
+    /** Where chunk (cx, cy)'s junctions start in nodeChunks(chunkPx) (call that first); end is the next chunk's start. */
+    public int nodeChunkFrom(int cx, int cy) {
+        if (cx < 0 || cy < 0 || cx >= nodeChunkW || cy >= nodeChunkW) return 0;
+        return nodeChunkStart[cy * nodeChunkW + cx];
+    }
+
+    public int nodeChunkTo(int cx, int cy) {
+        if (cx < 0 || cy < 0 || cx >= nodeChunkW || cy >= nodeChunkW) return 0;
+        return nodeChunkStart[cy * nodeChunkW + cx + 1];
+    }
+
+    /** How many junctions settlement st has (nset). */
+    public int nodesOfCount(int st) {
+        nodesOfIndex();
+        if (st < 0 || st + 1 >= nodeSetStart.length) return 0;
+        return nodeSetStart[st + 1] - nodeSetStart[st];
+    }
+
+    /** Settlement st's k-th junction (ascending). */
+    public int nodeOf(int st, int k) {
+        return nodeSet[nodeSetStart[st] + k];
+    }
+
+    private synchronized void nodesOfIndex() {
+        if (nodeSet == null) {
+            int max = 0;
+            for (int i = 0; i < nodeCount; i++) max = Math.max(max, nset[i]);
+            int[] cnt = new int[max + 2];
+            for (int i = 0; i < nodeCount; i++) if (nset[i] >= 0) cnt[nset[i] + 1]++;
+            for (int k = 0; k <= max; k++) cnt[k + 1] += cnt[k];
+            nodeSetStart = cnt.clone();
+            nodeSet = new int[nodeCount];
+            for (int i = 0; i < nodeCount; i++) if (nset[i] >= 0) nodeSet[cnt[nset[i]]++] = i;
+        }
+    }
+
     // ---- level 1: highways, arterials and avenues, with their own adjacency ----
     /** Level-1 index of each junction (-1 if it has no level-1 road), and back. */
     public int[] l1Of, l1Node, l1AdjStart, l1AdjEdge;
@@ -433,7 +505,7 @@ public final class RoadGraph {
     public int[] route2(int a, int b) {
         if (a < 0 || b < 0) return null;
         if (a == b) return new int[]{a};
-        if (l1Of == null || h(a, b) < shortTrip) return route(a, b);
+        if (l1Of == null || h(a, b) < shortTrip) return astar(a, b);
         if (bg == null) {
             bg = new float[nodeCount];
             bprev = new int[nodeCount];
@@ -463,7 +535,7 @@ public final class RoadGraph {
         }
         int[] bwd = new int[entryPoints];
         int nb = gather(b, -1, bwd, bg, bprev, bstamp, bclosed, bcur);
-        if (nf == 0 || nb <= 0) return route(a, b);
+        if (nf == 0 || nb <= 0) return astar(a, b);
         if (++l1cur == Integer.MAX_VALUE) {
             Arrays.fill(l1stamp, 0);
             Arrays.fill(l1closed, 0);
@@ -510,7 +582,7 @@ public final class RoadGraph {
                 }
             }
         }
-        if (bestT < 0) return route(a, b);
+        if (bestT < 0) return astar(a, b);
         // stitch: a .. s (forward tree), s .. t (level 1), t .. b (backward tree)
         int len1 = 0;
         for (int i = bestT; i >= 0; i = l1prev[i]) len1++;

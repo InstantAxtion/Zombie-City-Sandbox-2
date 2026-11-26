@@ -19,6 +19,13 @@ public final class ScaleProbe {
             int[] sizes = a.length > 1 && what.equals("world") ? parse(a) : new int[]{1536, 2304, 3072};
             for (int size : sizes) world(c, size);
         }
+        if (what.equals("game")) {
+            Content c = Content.load(new FileInputStream("assets/content.ini"));
+            int size = a.length > 1 ? Integer.parseInt(a[1]) : 28672;
+            int days = a.length > 2 ? Integer.parseInt(a[2]) : 5;
+            String[] scen = a.length > 3 ? java.util.Arrays.copyOfRange(a, 3, a.length) : new String[]{"lab_leak", "hold_city"};
+            for (String s : scen) game(c, size, days, s);
+        }
         if (what.equals("save")) {
             Content c = Content.load(new FileInputStream("assets/content.ini"));
             int[] sizes = a.length > 1 ? parse(a) : new int[]{1024, 2304, 3072};
@@ -36,6 +43,145 @@ public final class ScaleProbe {
             int size = a.length > 1 && what.equals("sectors") ? Integer.parseInt(a[1]) : 28672;
             for (int k = 0; k < 4; k++) sectors(c, size, k);
         }
+    }
+
+    /**
+     * A real game on a national map (P7): each scenario for two game hours at 1x with the camera over the start, then
+     * days of fast-forward. Prints memory, step times, the active set and cache, and the outbreak's story: police
+     * sent from which stations, formations and where they went, refugee columns, hordes and their speed in km/h.
+     *   ScaleProbe game [size] [days] [scenario...]
+     */
+    static void game(Content c, int size, int days, String scen) throws Exception {
+        System.out.printf("%n=== %s on %d tiles (%.0f km) ===%n", scen, size, size * 4 / 1000f);
+        long base = Mem.used();
+        long t0 = System.nanoTime();
+        World w = Setup.newGame(c, size, RegionGen.COAST, 7, c.scenario(scen), 2);
+        long ms = (System.nanoTime() - t0) / 1000000;
+        Region r = w.r;
+        Region.Settlement at = r.settlementAt(Setup.outbreakX, Setup.outbreakY);
+        System.out.printf("built in %d ms: %s, %d people in %d settlements, %d facilities, %d junctions; starts at %s (%.1f, %.1f km)%n", ms, r.name,
+                w.sec.totalPop(), r.settlements.size(), r.facilities.size(), r.roads.nodeCount, at != null ? at.name : "open country",
+                Setup.outbreakX / 4000f, Setup.outbreakY / 4000f);
+        System.out.printf("memory after the build: %d MB (heap in use)%n", (Mem.used() - base) >> 20);
+        w.camX0 = Setup.originX - 1000; w.camX1 = Setup.originX + 1000; w.camY0 = Setup.originY - 1800; w.camY1 = Setup.originY + 1800;
+        w.camDetail = true;
+        int police0 = 0;
+        for (Region.Facility f : r.facilities) if (f.kind == Region.F_POLICE) police0 += w.forces.armedAt(f, Ents.COP);
+        System.out.printf("police waiting in %d stations: %d officers%n", count(r, Region.F_POLICE), police0);
+        int newsSeen = 0;
+        long stepNs = 0, worst = 0, peakMem = 0;
+        int stepN = 0;
+        java.util.Map<Integer, Integer> squadSeen = new java.util.HashMap<Integer, Integer>();
+        for (int k = 1; k <= 2 * 60 * 20; k++) {
+            long s0 = System.nanoTime();
+            w.step();
+            long d = System.nanoTime() - s0;
+            if (k > 40) {
+                stepNs += d;
+                stepN++;
+                worst = Math.max(worst, d);
+            }
+            // squads leaving stations: from where, how far from the start
+            for (Squads.Squad s : w.sq.list)
+                if (s.alive && s.home >= 0 && !squadSeen.containsKey(s.id)) {
+                    Region.Facility f = r.facilities.get(s.home);
+                    float km = (float) Math.hypot(f.x - Setup.outbreakX, f.y - Setup.outbreakY) / 4000f;
+                    squadSeen.put(s.id, f.id);
+                    if (squadSeen.size() <= 12) System.out.printf("  %s  %s sent from %s, %.1f km from the start%n", w.clock(), s.name, f.name, km);
+                }
+            if (k % 1200 == 0) {
+                long mem = Mem.used() - base;
+                peakMem = Math.max(peakMem, mem);
+                System.out.printf("%s  dead %d (%d walking)  people %d  police out %d  active chunks %d  cache %d (%d made, %d misses)  %d MB  step %.2f ms (worst %.1f)  %s%n",
+                        w.clock(), w.totalZombies(), w.sp.zCount, w.livingCivilians(), w.sq.count(Ents.COP), w.act.activeCount(), r.cache.size(), r.cache.generated,
+                        r.misses, mem >> 20, stepNs / 1e6 / Math.max(1, stepN), worst / 1e6, Audit.check(w).isEmpty() ? "audit ok" : "AUDIT " + Audit.check(w));
+                stepNs = worst = 0;
+                stepN = 0;
+                newsSeen = story(w, newsSeen, 14);
+            }
+        }
+        java.util.Map<Integer, Integer> byStation = new java.util.TreeMap<Integer, Integer>();
+        for (int f : squadSeen.values()) byStation.put(f, (byStation.containsKey(f) ? byStation.get(f) : 0) + 1);
+        StringBuilder sb = new StringBuilder();
+        for (java.util.Map.Entry<Integer, Integer> en : byStation.entrySet()) {
+            Region.Facility f = r.facilities.get(en.getKey());
+            float km = (float) Math.hypot(f.x - Setup.outbreakX, f.y - Setup.outbreakY) / 4000f;
+            sb.append(String.format("%n    %3d from %s #%d (%.1f km from the start)", en.getValue(), f.name, f.id, km));
+        }
+        System.out.printf("squads sent in two hours: %d, by station:%s%n", squadSeen.size(), sb);
+        // fast-forward
+        w.camDetail = false;
+        w.setStrategic(true);
+        java.util.Map<Integer, float[]> hordeAt = new java.util.HashMap<Integer, float[]>();
+        float hordeKmh = 0, hordeMax = 0, hordeKm = 0;
+        int hordeSteps = 0;
+        long ffNs = 0, ffWorst = 0;
+        int ffN = 0;
+        for (int k = 1; k <= days * 144; k++) {
+            long s0 = System.nanoTime();
+            w.step();
+            long d = System.nanoTime() - s0;
+            ffNs += d;
+            ffN++;
+            ffWorst = Math.max(ffWorst, d);
+            // hordes on the move: their speed from one ten-second step to the next
+            for (Strategic.Horde h : w.strat.hordes) {
+                if (!h.alive) continue;
+                float[] p = hordeAt.get(h.id);
+                if (p != null && (p[0] != h.x || p[1] != h.y)) {
+                    float kmh = (float) Math.hypot(h.x - p[0], h.y - p[1]) / 4000f / (World.STRATEGIC_DT / 3600f * 60f);
+                    hordeKmh += kmh;
+                    hordeSteps++;
+                    hordeMax = Math.max(hordeMax, kmh);
+                    hordeKm += (float) Math.hypot(h.x - p[0], h.y - p[1]) / 4000f;
+                }
+                hordeAt.put(h.id, new float[]{h.x, h.y});
+            }
+            if (k % 72 == 0) {
+                long mem = Mem.used() - base;
+                peakMem = Math.max(peakMem, mem);
+                // hordes: their mean and top speed on the move over the last half day, and how far they went
+                String hs = hordeSteps == 0 ? "" : String.format(" (on the move %.1f km/h, top %.1f, %.0f km walked)", hordeKmh / hordeSteps, hordeMax, hordeKm);
+                hordeKmh = hordeMax = hordeKm = 0;
+                hordeSteps = 0;
+                int cols = 0, colPeople = 0;
+                for (Strategic.Column cl : w.strat.columns)
+                    if (cl.alive) {
+                        cols++;
+                        colPeople += cl.count;
+                    }
+                int fm = 0;
+                for (Forces.Formation f : w.forces.formations) if (f.alive) fm++;
+                System.out.printf("%s  dead %d  people %d  hordes %d%s  refugee columns %d (%d people)  formations %d  gov %d  %d MB  update %.2f ms (worst %.1f)  awake districts %d%n",
+                        w.clock(), w.totalZombies(), w.livingCivilians(), w.strat.hordes.size(), hs, cols, colPeople, fm, w.gov.level, mem >> 20,
+                        ffNs / 1e6 / ffN, ffWorst / 1e6, w.sec.idx.awakeDistricts());
+                ffNs = ffWorst = 0;
+                ffN = 0;
+                newsSeen = story(w, newsSeen, 10);
+            }
+        }
+        for (Forces.Formation f : w.forces.formations)
+            if (f.alive) {
+                String home = f.home >= 0 ? r.facilities.get(f.home).name : "-";
+                System.out.printf("  formation %s (home %s): %s%s at (%.1f, %.1f km)%n", f.name, home, Forces.STATES[f.state],
+                        f.task >= 0 ? ", sent to " + r.settlements.get(f.task).name : "", f.gx / 4000f, f.gy / 4000f);
+            }
+        System.out.printf("peak memory %d MB, now %d MB; audit %s; %d chunks made, %d reads of pages not in memory%n", peakMem >> 20, (Mem.used() - base) >> 20,
+                Audit.check(w).isEmpty() ? "ok" : Audit.check(w), r.cache.generated, r.misses);
+        w.shutdown();
+    }
+
+    private static int count(Region r, int kind) {
+        int n = 0;
+        for (Region.Facility f : r.facilities) if (f.kind == kind) n++;
+        return n;
+    }
+
+    /** The radio's new lines (at most max of them). */
+    private static int story(World w, int from, int max) {
+        int n = w.news.log.size();
+        for (int i = Math.max(from, n - max); i < n; i++) System.out.println("      | " + w.news.log.get(i).text);
+        return n;
     }
 
     private static int[] parse(String[] a) {
@@ -215,7 +361,7 @@ public final class ScaleProbe {
             float dx = g.nx[x] - g.nx[y], dy = g.ny[x] - g.ny[y];
             if (dx * dx + dy * dy < g.shortTrip * g.shortTrip) continue;
             long q0 = g.searched, a0 = System.nanoTime();
-            int[] p1 = g.route(x, y);
+            int[] p1 = g.astar(x, y);
             long q1 = g.searched, a1 = System.nanoTime();
             int[] p2 = g.route2(x, y);
             long a2 = System.nanoTime();

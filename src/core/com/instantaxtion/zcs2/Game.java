@@ -34,6 +34,21 @@ public final class Game {
 
     // new game choices
     int ngMode, ngScenario, ngPreset, ngSize = 1;
+    /**
+     * A real-scale map size picked by a challenge code (a developer's way in until P10 puts them on the menu: e.g.
+     * ZC2-28672-0-7-lab_leak), or 0 for the menu's size.
+     */
+    int ngNational;
+
+    /** The map side the New Game screen will build. */
+    int ngMapSize() {
+        return ngNational > 0 ? ngNational : RegionGen.SIZES[ngSize];
+    }
+
+    String ngSizeName() {
+        if (ngNational > 0) for (int i = 0; i < Nation.SIZES.length; i++) if (Nation.SIZES[i] == ngNational) return Nation.SIZE_NAMES[i];
+        return ngNational > 0 ? "Nation" : RegionGen.SIZE_NAMES[ngSize];
+    }
     /** The role picked on the New Game screen (-1 = the scenario's own). */
     int ngRole = -1;
     /** A replay being watched (the world is fed its recorded inputs), or null. */
@@ -118,6 +133,8 @@ public final class Game {
 
     // inspector
     int inspEnt = -1, inspVeh = -1, inspFac = -1, inspSettle = -1;
+    /** National maps: a building (Region's id or a chunk's encoded one) or a district (8x8 sectors) tapped, or -1. */
+    int inspBuilding = -1, inspDistrict = -1;
     Squads.Squad inspSquad;
     Forces.Formation inspFormation;
     private float msgT;
@@ -482,13 +499,13 @@ public final class Game {
     }
 
     String regionCode() {
-        return RegionGen.SIZES[ngSize] + "-" + ngPreset + "-" + ngSeed;
+        return ngMapSize() + "-" + ngPreset + "-" + ngSeed;
     }
 
     /** A challenge: the map, the scenario and the role, as a code to share. */
     String challengeCode() {
         Content.Scenario sc = chosenScenario();
-        return "ZC2-" + RegionGen.SIZES[ngSize] + "-" + ngPreset + "-" + ngSeed + "-" + (sc == null ? "sandbox" : sc.id) + "-" + Roles.IDS[chosenRole()];
+        return "ZC2-" + ngMapSize() + "-" + ngPreset + "-" + ngSeed + "-" + (sc == null ? "sandbox" : sc.id) + "-" + Roles.IDS[chosenRole()];
     }
 
     static String challengeCodeOf(World w) {
@@ -508,8 +525,11 @@ public final class Game {
             long seed = Long.parseLong(p[3]);
             int si = -1;
             for (int i = 0; i < RegionGen.SIZES.length; i++) if (RegionGen.SIZES[i] == size) si = i;
-            if (si < 0 || preset < 0 || preset >= RegionGen.PRESETS.length) return false;
-            ngSize = si;
+            // (a real-scale size isn't on the menu yet: a code is the hidden way to one)
+            boolean nat = national(size) || size == SMALL_NATIONAL;
+            if ((si < 0 && !nat) || preset < 0 || preset >= RegionGen.PRESETS.length) return false;
+            if (si >= 0) ngSize = si;
+            ngNational = nat ? size : 0;
             ngPreset = preset;
             ngSeed = seed;
             codeNote = null;
@@ -634,7 +654,7 @@ public final class Game {
         // the map
         float bw = (rightW - ui.dp(16)) / 3;
         ui.button("preset", rightX, ry, bw, ui.dp(40), RegionGen.PRESETS[ngPreset], false, 13);
-        ui.button("size", rightX + bw + ui.dp(8), ry, bw, ui.dp(40), RegionGen.SIZE_NAMES[ngSize], false, 13);
+        ui.button("size", rightX + bw + ui.dp(8), ry, bw, ui.dp(40), ngSizeName(), false, 13);
         ui.button("seed", rightX + (bw + ui.dp(8)) * 2, ry, bw, ui.dp(40), "New map", false, 13);
         ry += ui.dp(46);
         // the start, and the challenge code tucked above it
@@ -832,20 +852,22 @@ public final class Game {
     }
 
     long key() {
-        return ngSeed * 31 + ngPreset * 7 + ngSize;
+        return ngSeed * 31 + ngPreset * 7 + ngSize + ngNational * 131L;
     }
+
+    /** The small national map the tests use (8,192 tiles), also allowed in a code. */
+    static final int SMALL_NATIONAL = 8192;
 
     /** A real-scale map size (built by NationGen). */
     static boolean national(int size) {
-        for (int s : Nation.SIZES) if (s == size) return true;
-        return false;
+        return Setup.national(size); // (Nation.SIZES, and the small test nation)
     }
 
     private void requestPreview() {
         final long k = key();
         if (previewKey == k || previewBusy || previewFailed == k || screen == S_LOADING) return;
         previewBusy = true;
-        final int size = RegionGen.SIZES[ngSize], preset = ngPreset;
+        final int size = ngMapSize(), preset = ngPreset;
         final long seed = ngSeed;
         Thread t = new Thread(new Runnable() {
             public void run() {
@@ -879,7 +901,7 @@ public final class Game {
     private void start() {
         final List<Content.Scenario> list = scenariosFor(ngMode);
         final Content.Scenario sc = list.isEmpty() ? null : list.get(Math.min(ngScenario, list.size() - 1));
-        final int size = RegionGen.SIZES[ngSize], preset = ngPreset;
+        final int size = ngMapSize(), preset = ngPreset;
         final long seed = ngSeed;
         final int role = chosenRole();
         final long k = key();
@@ -889,7 +911,7 @@ public final class Game {
         closeWorld();
         loadingFrom = S_NEW;
         screen = S_LOADING;
-        loadingText = "Building " + RegionGen.SIZE_NAMES[ngSize].toLowerCase() + " (" + RegionGen.PRESETS[preset].toLowerCase() + ")...";
+        loadingText = "Building " + ngSizeName().toLowerCase() + " (" + RegionGen.PRESETS[preset].toLowerCase() + ")...";
         loaded = null;
         loadError = null;
         final int gen = ++loadGen;
@@ -900,6 +922,8 @@ public final class Game {
                     if (usePreview) {
                         if (pt != null) pt.join();
                         if (previewKey == k) pre = preview;
+                        // (a real-scale map: the nation the preview built, its game region made over it)
+                        if (previewKey == k && pre == null && previewNation != null && previewNation.size == size) pre = Region.national(previewNation, null);
                     }
                     // the game changes its region (rubble, blown bridges): the preview mustn't show it, or be reused
                     preview = null;
@@ -1157,8 +1181,13 @@ public final class Game {
                     int land = 0, all = 0;
                     for (int k = 0; k < 16; k++) {
                         int tx = (int) ((cx + (k % 4 + 0.5f) / 4f) * w.r.W / n), ty = (int) ((cy + (k / 4 + 0.5f) / 4f) * w.r.H / n);
-                        int t = w.r.t(tx, ty);
                         all++;
+                        // (a national map: its coarse cover, no chunk is made for this)
+                        if (w.r.nation != null) {
+                            if (!Nation.wet(w.r.nation.coverAt(tx, ty))) land++;
+                            continue;
+                        }
+                        int t = w.r.t(tx, ty);
                         if (t != Tile.WATER && t != Tile.DEEP) land++;
                     }
                     cells[cy * n + cx] = land * 2 >= all;
@@ -1826,9 +1855,9 @@ public final class Game {
     private void minimap(Gfx g, float x, float y, float s) {
         g.color(0xE0000000);
         g.fillRoundRect(x - ui.dp(3), y - ui.dp(3), s + ui.dp(6), s + ui.dp(6), ui.dp(6));
-        g.image(view.map.regionImage, x, y, s, s);
+        g.image(view.np != null ? view.np.countryImage : view.map.regionImage, x, y, s, s);
         float k = s / w.r.px();
-        float cs = Region.SECT * Tile.SIZE;
+        float cs = w.r.sect * Tile.SIZE;
         for (int sec = 0; sec < w.sec.n; sec++) {
             int zz = w.sec.zIn[sec] + w.sp.secZ[sec];
             if (zz <= 0) continue;
@@ -2320,11 +2349,11 @@ public final class Game {
     private float inspectorH;
 
     boolean inspectorOpen() {
-        return inspEnt >= 0 || inspVeh >= 0 || inspFac >= 0 || inspSettle >= 0 || ((inspSquad != null || inspFormation != null) && !tool.equals("orders"));
+        return inspEnt >= 0 || inspVeh >= 0 || inspFac >= 0 || inspSettle >= 0 || inspBuilding >= 0 || inspDistrict >= 0 || ((inspSquad != null || inspFormation != null) && !tool.equals("orders"));
     }
 
     void closeInspector() {
-        inspEnt = inspVeh = inspFac = inspSettle = -1;
+        inspEnt = inspVeh = inspFac = inspSettle = inspBuilding = inspDistrict = -1;
         if (!tool.equals("orders")) {
             inspSquad = null;
             inspFormation = null;
@@ -2510,6 +2539,27 @@ public final class Game {
             acts.add("i:close");
             acts.add("Close");
             actions = acts.toArray(new String[0]);
+        } else if (inspBuilding >= 0) {
+            String[] d = describeBuilding(w, inspBuilding);
+            if (d == null) {
+                closeInspector();
+                return;
+            }
+            title = d[0];
+            sub = d[1];
+            body.append(d[2]);
+            inspIcon = "town";
+            actions = new String[]{"i:close", "Close"};
+        } else if (inspDistrict >= 0) {
+            int[] c = districtCounts(w, inspDistrict);
+            title = districtName(w, inspDistrict);
+            inspIcon = "town";
+            sub = "District, 2 km across";
+            bar("People", c[0] / (float) Math.max(1, c[3]), WorldView.C_CIV, WorldView.people(c[0]) + " of " + WorldView.people(c[3]));
+            bar("The dead", c[1] <= 0 ? 0 : (float) Math.log10(1 + c[1]) / 6, 0xFFE04848, WorldView.people(c[1]));
+            if (c[2] > 0) body.append(WorldView.people(c[2])).append(" bitten and not yet turned. ");
+            if (c[4] > 0) body.append(c[4]).append(c[4] == 1 ? " fire burning. " : " fires burning. ");
+            actions = new String[]{"i:close", "Close"};
         } else if (inspFormation != null) {
             Forces.Formation f = inspFormation;
             if (!f.alive) {
@@ -3865,7 +3915,7 @@ public final class Game {
                 return;
             case "start": start(); return;
             case "preset": ngPreset = (ngPreset + 1) % RegionGen.PRESETS.length; return;
-            case "size": ngSize = (ngSize + 1) % RegionGen.SIZES.length; return;
+            case "size": ngSize = (ngSize + 1) % RegionGen.SIZES.length; ngNational = 0; return;
             case "seed": ngSeed = (ngSeed * 1103515245L + 12345L + System.nanoTime()) % 1000000L; if (ngSeed < 0) ngSeed = -ngSeed; return;
             case "pause": screen = S_PAUSE; return;
             case "playpause": paused = !paused; return;
@@ -5017,8 +5067,115 @@ public final class Game {
                 return;
             }
         }
+        if (w.r.nation != null && x >= 0 && y >= 0 && x < w.r.px() && y < w.r.px()) {
+            // a national map: a building from the street view, a district from the district view
+            if (cam.zoom >= 0.22f) {
+                int b = buildingAt(w, x, y);
+                if (b >= 0) {
+                    inspBuilding = b;
+                    return;
+                }
+            } else if (cam.zoom >= 0.03f) {
+                inspDistrict = w.sec.idx.district(w.r.sectorOfPx(x, y));
+                return;
+            }
+        }
         int st = Tools.settlementAt(w, x, y);
         if (st >= 0 && cam.zoom < 0.3f) inspSettle = st;
+    }
+
+    /**
+     * The building at (x, y) px on a national map from a chunk in memory (the world's own, or the cache's), never
+     * generating one: Region's id or a chunk's encoded id, or -1.
+     */
+    static int buildingAt(World w, float x, float y) {
+        Region r = w.r;
+        int tx = (int) (x / Tile.SIZE), ty = (int) (y / Tile.SIZE);
+        if (!r.in(tx, ty)) return -1;
+        int cx = tx >> 6, cy = ty >> 6;
+        Chunk c = r.store.chunk(cy * r.store.pw + cx);
+        if (c == null && r.cache != null) c = r.cache.peek(cx, cy);
+        if (c == null) return -1;
+        return c.building(tx & 63, ty & 63);
+    }
+
+    /** A building's sheet (national maps): name, a line under it, and what's known, or null if its chunk is gone. */
+    static String[] describeBuilding(World w, int b) {
+        Region r = w.r;
+        int kind, floors, res, set;
+        if (Chunk.isChunkBuilding(b)) {
+            int p = Chunk.chunkOf(b);
+            Chunk c = r.store.chunk(p);
+            if (c == null && r.cache != null) c = r.cache.peek(p % r.store.pw, p / r.store.pw);
+            if (c == null) return null;
+            int i = Chunk.localOf(b);
+            if (i >= c.bCount) return null;
+            kind = c.bkind[i];
+            floors = c.bfloors[i];
+            res = c.bres[i];
+            set = c.settlement;
+        } else {
+            if (b >= r.bCount) return null;
+            kind = r.bkind[b];
+            floors = r.bfloors[b];
+            res = r.bres[b];
+            set = r.bset[b];
+        }
+        String where = set >= 0 && set < r.settlements.size() ? r.settlements.get(set).name : "the countryside";
+        String sub = floors <= 0 ? "Destroyed" : floors + (floors == 1 ? " floor" : " floors") + ", " + where;
+        StringBuilder body = new StringBuilder();
+        if (res > 0) {
+            body.append(WorldView.people(res)).append(res == 1 ? " lives here" : " live here");
+            // sheltering now: the sector's people indoors shared by homes
+            float dx = r.doorX(b), dy = r.doorY(b);
+            int s = dx >= 0 ? r.sectorOfPx(dx, dy) : r.sectorOfPx((r.bx(b) + 0.5f) * Tile.SIZE, (r.by(b) + 0.5f) * Tile.SIZE);
+            int in = w.sec.home[s] > 0 ? (int) ((long) w.sec.popIn[s] * res / w.sec.home[s]) : 0;
+            body.append(floors <= 0 ? ". " : "; about " + WorldView.people(Math.min(in, res * 3)) + " sheltering inside now. ");
+        }
+        if (w.fires.heat(b) > 0) body.append("On fire. ");
+        return new String[]{Region.BNAMES[kind], sub, body.toString()};
+    }
+
+    /** A district's people indoors and out, the dead, the bitten, home count and fires: {people, dead, infected, homes, fires}. */
+    static int[] districtCounts(World w, int d) {
+        SectorIndex ix = w.sec.idx;
+        int dx = d % ix.dw, dy = d / ix.dw;
+        int[] out = new int[5];
+        for (int y = dy * SectorIndex.D; y < Math.min(w.sec.sh, (dy + 1) * SectorIndex.D); y++)
+            for (int x = dx * SectorIndex.D; x < Math.min(w.sec.sw, (dx + 1) * SectorIndex.D); x++) {
+                int s = y * w.sec.sw + x;
+                out[0] += w.sec.popIn[s] + w.sp.secCiv[s];
+                out[1] += w.sec.zIn[s] + w.sp.secZ[s];
+                out[2] += (int) w.sec.inf[s];
+                out[3] += w.sec.home[s];
+                if (w.fires.burning(s)) out[4]++;
+            }
+        return out;
+    }
+
+    /** A district's name: its kind (centre, suburb...) and the settlement most of its people live in. */
+    static String districtName(World w, int d) {
+        SectorIndex ix = w.sec.idx;
+        Nation na = w.r.nation;
+        int dx = d % ix.dw, dy = d / ix.dw;
+        java.util.Map<Integer, Integer> by = new java.util.TreeMap<Integer, Integer>();
+        int[] kinds = new int[Nation.DISTRICT_NAMES.length];
+        for (int y = dy * SectorIndex.D; y < Math.min(w.sec.sh, (dy + 1) * SectorIndex.D); y++)
+            for (int x = dx * SectorIndex.D; x < Math.min(w.sec.sw, (dx + 1) * SectorIndex.D); x++) {
+                int s = y * w.sec.sw + x, st = w.sec.settlement[s];
+                if (st >= 0) by.put(st, (by.containsKey(st) ? by.get(st) : 0) + w.sec.home[s] + 1);
+                if (na != null) kinds[na.district[s]] += w.sec.home[s] + 1;
+            }
+        int best = -1, bn = 0;
+        for (java.util.Map.Entry<Integer, Integer> en : by.entrySet())
+            if (en.getValue() > bn) {
+                bn = en.getValue();
+                best = en.getKey();
+            }
+        int kind = 0;
+        for (int k = 1; k < kinds.length; k++) if (kinds[k] > kinds[kind]) kind = k;
+        String place = best >= 0 ? w.r.settlements.get(best).name : "Open country";
+        return best >= 0 && kind != Nation.D_NONE ? place + ": " + Nation.DISTRICT_NAMES[kind].toLowerCase() : place;
     }
 
     public void key(int code) {

@@ -242,13 +242,13 @@ final class CivAI {
             int step = Math.max(1, bl.length / 24);
             for (int k = 0; k < bl.length; k += step) {
                 int b = bl[k];
-                float dx = w.doorX[b] - e.x[i], dy = w.doorY[b] - e.y[i], dd = dx * dx + dy * dy;
+                float ddx = w.r.doorX(b), ddy = w.r.doorY(b), dx = ddx - e.x[i], dy = ddy - e.y[i], dd = dx * dx + dy * dy;
                 if (d >= 0) dd += 200 * 200;
                 if (zt >= 0 && dx * zx + dy * zy > 0) dd += 400 * 400; // that way is towards the dead
                 if (dd < bd) {
                     bd = dd;
-                    bx = w.doorX[b];
-                    by = w.doorY[b];
+                    bx = ddx;
+                    by = ddy;
                 }
             }
         }

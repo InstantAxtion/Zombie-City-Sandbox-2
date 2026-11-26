@@ -36,6 +36,8 @@ public final class WorldView {
     private final float[] poly = new float[16];
     /** Buildings that have burned (drawn charred): what the view has seen, not saved. */
     private boolean[] scorched;
+    /** National maps: buildings seen burning, by id (Region's or a chunk's encoded ids). */
+    private final java.util.HashSet<Integer> scorchedIds = new java.util.HashSet<Integer>();
 
     // soft sprites, made once: glows, smoke, shadow, the vignette
     GImage glowWarm, glowRed, glowBlue, glowWhite, glowFire, smoke, shadow, vignette;
@@ -70,10 +72,42 @@ public final class WorldView {
     public WorldView(World w, Platform pf) {
         this.w = w;
         this.pf = pf;
-        map = new MapPainter(w.r, pf, 64);
-        np = null;
-        nat = null;
+        if (w.r.nation != null) {
+            // a real-scale map: the national painter, its street pictures from the world's own chunks
+            np = new NationPainter(worldSource(w), pf);
+            nat = w.r.nation;
+            map = new MapPainter(np.src, pf, np.countryImage);
+            map.watch(w.r);
+        } else {
+            map = new MapPainter(w.r, pf, 64);
+            np = null;
+            nat = null;
+        }
         sprites();
+    }
+
+    /**
+     * Drawing a national World: a chunk the active set holds is drawn as it stands (with the game's edits: rubble,
+     * barricades), else the cache's copy; missing ones are made in the background. Never touches the simulation.
+     */
+    static NationPainter.Source worldSource(final World w) {
+        final Region r = w.r;
+        final NationPainter.Source cached = NationPainter.source(r.nation, r.cache);
+        return new NationPainter.Source() {
+            public Nation nation() {
+                return r.nation;
+            }
+
+            public Chunk chunk(int cx, int cy) {
+                if (cx < 0 || cy < 0 || cx >= r.store.pw || cy >= r.store.ph) return null;
+                Chunk c = r.store.chunk(cy * r.store.pw + cx);
+                return c != null ? c : cached.chunk(cx, cy);
+            }
+
+            public void want(int cx, int cy) {
+                cached.want(cx, cy);
+            }
+        };
     }
 
     /**
@@ -432,13 +466,20 @@ public final class WorldView {
 
     private void buildings(Gfx g, Camera cam, float x0, float y0, float x1, float y1) {
         int n;
-        if (np != null) n = nationBuildings(x0, y0, x1, y1);
-        else {
+        if (np != null) {
+            n = visN = nationBuildings(x0, y0, x1, y1);
+            if (w != null)
+                for (int k = 0; k < n; k++) {
+                    // burned (by encoded id: a chunk's buildings too), drawn charred from then on
+                    if (w.fires.heat(dbid[k]) > 0) scorchedIds.add(dbid[k]);
+                    if (!scorchedIds.isEmpty() && scorchedIds.contains(dbid[k])) dbr[k] = MapPainter.mix(dbr[k], 0xFF201A16, 0.7f);
+                }
+        } else {
             Region r = w.r;
             n = visN = visible(x0, y0, x1, y1);
             for (int k = 0; k < n; k++) {
                 int b = vis[k];
-                if (w.fires.heat[b] > 0) scorched[b] = true;
+                if (w.fires.heat(b) > 0) scorched[b] = true;
             }
             growDrawn(n);
             for (int k = 0; k < n; k++) {
@@ -693,8 +734,46 @@ public final class WorldView {
         }
     }
 
+    /**
+     * Lit windows on a national map: the buildings drawn this frame (homes, hospitals and police stations), from the
+     * drawn arrays, so drawing never reads a chunk the simulation hasn't got.
+     */
+    private void nationLights(Gfx g, Camera cam, float night) {
+        float z = cam.zoom;
+        float ccx = cam.cx, ccy = cam.cy;
+        float lk = lean3d ? 0.0016f * clamp01((z - 0.22f) / 0.12f) : 0;
+        int warm = MapPainter.alpha(0xFFFFD58A, 0.25f + night * 0.65f);
+        for (int k = 0; k < visN; k++) {
+            int kind = dbk[k], b = dbid[k];
+            boolean home = kind == Region.B_HOUSE || kind == Region.B_APARTMENT || kind == Region.B_TOWER || kind == Region.B_FARMHOUSE;
+            if (!home && kind != Region.B_HOSPITAL && kind != Region.B_POLICE) continue;
+            float wx = dbx[k] * 16f, wy = dby[k] * 16f, ww = dbw[k] * 16f, wh = dbh[k] * 16f;
+            if (scorchedIds.contains(b) || !w.strat.lit(w.r.sectorOfPx(wx + ww / 2, wy + wh / 2))) continue;
+            float height = Math.min(40, dbf[k]) * 3.2f + 4;
+            float lx = (wx + ww / 2 - ccx) * lk * height * z, ly = (wy + wh / 2 - ccy) * lk * height * z;
+            float ll = (float) Math.sqrt(lx * lx + ly * ly);
+            if (ll > 120 * z) {
+                lx *= 120 * z / ll;
+                ly *= 120 * z / ll;
+            }
+            float sx = cam.toScreenX(wx) + lx, sy = cam.toScreenY(wy) + ly, sw = ww * z, sh = wh * z;
+            g.color(warm);
+            int nx = Math.min(12, Math.max(1, (int) (sw / Math.max(3, 11 * z)))), ny = Math.min(12, Math.max(1, (int) (sh / Math.max(3, 11 * z))));
+            float s = Math.max(1.2f, 2.6f * z);
+            for (int j = 0; j < ny; j++)
+                for (int i = 0; i < nx; i++) {
+                    if (Rng.unit(w.r.seed, b * 31 + i, j) < 0.6f) continue;
+                    g.fillRect(sx + (i + 0.35f) * sw / nx, sy + (j + 0.35f) * sh / ny, s, s);
+                }
+        }
+    }
+
     /** Lit windows in powered places at night (drawn after the dark). */
     private void lights(Gfx g, Camera cam, float night) {
+        if (np != null) {
+            nationLights(g, cam, night);
+            return;
+        }
         Region r = w.r;
         float z = cam.zoom;
         float ccx = cam.cx, ccy = cam.cy;
@@ -747,6 +826,8 @@ public final class WorldView {
             if (z >= 0.3f) {
                 streetLights(g, cam, night);
                 if (z >= 0.22f) lights(g, cam, night);
+            } else if (np != null) {
+                nationNightLights(g, cam, night);
             } else {
                 for (Region.Settlement s : w.r.settlements) {
                     if (s.kind == Region.S_HOLDOUT || s.kind == Region.S_CAMP) continue;
@@ -760,12 +841,68 @@ public final class WorldView {
         }
     }
 
+    /**
+     * A national map by night from high up: each lived-in, powered sector glows by how many live there (the city as
+     * a carpet of light, dark where the power is gone); from the whole country, each town as one glow its own size.
+     */
+    private void nationNightLights(Gfx g, Camera cam, float night) {
+        float z = cam.zoom;
+        Sectors sec = w.sec;
+        float cs = w.r.sect * Tile.SIZE;
+        if (z >= 0.004f) {
+            int x0 = Math.max(0, (int) (cam.x0() / cs) - 1), y0 = Math.max(0, (int) (cam.y0() / cs) - 1);
+            int x1 = Math.min(sec.sw - 1, (int) (cam.x1() / cs) + 1), y1 = Math.min(sec.sh - 1, (int) (cam.y1() / cs) + 1);
+            int step = (x1 - x0 + 1) * (y1 - y0 + 1) > 6000 ? 2 : 1;
+            float size = cs * z * 2.6f * step;
+            for (int sy = y0; sy <= y1; sy += step)
+                for (int sx = x0; sx <= x1; sx += step) {
+                    int s = sy * sec.sw + sx;
+                    int home = sec.home[s];
+                    if (home < 60 || !w.strat.lit(s)) continue;
+                    float a = night * Math.min(0.4f, 0.07f + home / 14000f);
+                    glow(g, glowWarm, cam.toScreenX((sx + 0.5f) * cs), cam.toScreenY((sy + 0.5f) * cs), size, a);
+                }
+            return;
+        }
+        for (Region.Settlement s : w.r.settlements) {
+            if (s.kind == Region.S_HOLDOUT || s.kind == Region.S_CAMP) continue;
+            if (s.grid >= 0 && !w.strat.gridOn[s.grid]) continue;
+            float x = cam.toScreenX(s.cx * 16f), y = cam.toScreenY(s.cy * 16f);
+            float rad = Math.max(s.radius * 16f * z * 1.1f, 3 * dp);
+            if (x < -rad || y < -rad || x > cam.sw + rad || y > cam.sh + rad) continue;
+            glow(g, glowWarm, x, y, rad * 2, night * 0.55f);
+        }
+    }
+
+    /** Dry ground at (x, y) px: a national map's coarse cover (drawing never makes a chunk), else the tile. */
+    private boolean dryAt(float x, float y) {
+        if (w.r.nation != null) return !Nation.wet(w.r.nation.coverAt((int) (x / Tile.SIZE), (int) (y / Tile.SIZE)));
+        return Tile.walkable(w.r.tileAtPx(x, y));
+    }
+
     private void streetLights(Gfx g, Camera cam, float night) {
         RoadGraph rg = w.r.roads;
         float z = cam.zoom;
         float size = Math.max(70 * z, 10 * dp);
         float x0 = cam.x0() - 60, y0 = cam.y0() - 60, x1 = cam.x1() + 60, y1 = cam.y1() + 60;
         int drawn = 0;
+        if (np != null) {
+            // a national map: the junctions of the chunks in view (a country has too many to look through)
+            int[] byChunk = rg.nodeChunks(ActiveSet.PX);
+            int cx0 = Math.max(0, (int) (x0 / ActiveSet.PX)), cy0 = Math.max(0, (int) (y0 / ActiveSet.PX));
+            int cx1 = (int) (x1 / ActiveSet.PX), cy1 = (int) (y1 / ActiveSet.PX);
+            for (int cy = cy0; cy <= cy1; cy++)
+                for (int cx = cx0; cx <= cx1; cx++)
+                    for (int k = rg.nodeChunkFrom(cx, cy); k < rg.nodeChunkTo(cx, cy) && drawn < 400; k++) {
+                        int i = byChunk[k];
+                        float x = rg.nx[i], y = rg.ny[i];
+                        if (x < x0 || x > x1 || y < y0 || y > y1) continue;
+                        if (rg.nset[i] < 0 || !w.strat.lit(w.r.sectorOfPx(x, y))) continue;
+                        glow(g, glowWarm, cam.toScreenX(x), cam.toScreenY(y), size, night * 0.55f);
+                        drawn++;
+                    }
+            return;
+        }
         for (int i = 0; i < rg.nodeCount && drawn < 400; i++) {
             float x = rg.nx[i], y = rg.ny[i];
             if (x < x0 || x > x1 || y < y0 || y > y1) continue;
@@ -1920,13 +2057,14 @@ public final class WorldView {
                     if (natStamp[b] == natStampN) continue;
                     natStamp[b] = natStampN;
                     int bx = nat.bx[b], by = nat.by[b], bw = nat.bw[b], bh = nat.bh[b];
-                    if (nat.bfloors[b] <= 0 || bx > tx1 || by > ty1 || bx + bw < tx0 + 36 || by + bh < ty0 + 36) continue;
+                    byte[] nbf = w != null ? w.r.bfloors : nat.bfloors; // (a world's own: the ones brought down)
+                    if (nbf[b] <= 0 || bx > tx1 || by > ty1 || bx + bw < tx0 + 36 || by + bh < ty0 + 36) continue;
                     growDrawn(n + 1);
                     dbx[n] = bx;
                     dby[n] = by;
                     dbw[n] = bw;
                     dbh[n] = bh;
-                    dbf[n] = nat.bfloors[b];
+                    dbf[n] = nbf[b];
                     dbr[n] = nat.broof[b];
                     dbk[n] = nat.bkind[b];
                     dbid[n] = b;
@@ -2008,7 +2146,7 @@ public final class WorldView {
     /** The chosen overlay over the sectors, and state borders when far out. */
     private void layers(Gfx g, Camera cam) {
         float z = cam.zoom;
-        float cs = Region.SECT * Tile.SIZE;
+        float cs = w.r.sect * Tile.SIZE;
         Sectors sec = w.sec;
         int sx0 = Math.max(0, (int) (cam.x0() / cs)), sy0 = Math.max(0, (int) (cam.y0() / cs));
         int sx1 = Math.min(sec.sw - 1, (int) (cam.x1() / cs)), sy1 = Math.min(sec.sh - 1, (int) (cam.y1() / cs));
@@ -2043,7 +2181,7 @@ public final class WorldView {
                     int[] cnt = new int[ns];
                     for (int s = 0; s < sec.n; s++) {
                         int st = w.roles.stateOfSector(s);
-                        if (st < 0 || !Tile.walkable(w.r.tileAtPx(sec.cx(s), sec.cy(s)))) continue;
+                        if (st < 0 || !dryAt(sec.cx(s), sec.cy(s))) continue;
                         stateX[st] += sec.cx(s);
                         stateY[st] += sec.cy(s);
                         cnt[st]++;
@@ -2318,11 +2456,11 @@ public final class WorldView {
                     default:
                         if (heatOf == OV_TRUST) val = sec.home[s] > 0 ? Math.min(1, sec.panic[s]) : 0;
                         else if (heatOf == OV_DEATHS) {
-                            float d = w.director.deaths[s] + sec.bodies[s];
+                            float d = w.director.deaths[w.director.cell(s)] + sec.bodies[s];
                             max = Math.max(max, d);
                             val = d <= 0 ? 0 : Math.min(1, 0.2f + (float) Math.log10(1 + d) * 0.2f);
                         } else if (heatOf == OV_PEAK) {
-                            float p = w.director.peak[s];
+                            float p = w.director.peak[w.director.cell(s)];
                             max = Math.max(max, p);
                             val = p <= 0 ? 0 : Math.min(1, 0.15f + (float) Math.log10(1 + p) * 0.2f);
                         } else if (heatOf == OV_UTIL) val = sec.home[s] > 0 && !w.strat.lit(s) ? 0.8f : 0;
@@ -2380,7 +2518,7 @@ public final class WorldView {
 
         void draw(Gfx g, Camera cam, float alpha) {
             if (time - builtAt > 0.5f || time < builtAt) build();
-            float cs = Region.SECT * Tile.SIZE;
+            float cs = w.r.sect * Tile.SIZE;
             g.image(img, cam.toScreenX(0), cam.toScreenY(0), w.sec.sw * cs * cam.zoom, w.sec.sh * cs * cam.zoom, alpha);
         }
     }

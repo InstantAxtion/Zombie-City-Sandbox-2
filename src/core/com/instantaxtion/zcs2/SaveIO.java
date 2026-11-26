@@ -273,7 +273,7 @@ public final class SaveIO {
         long rseed = in.readLong(), seed = in.readLong();
         String scen = in.readUTF();
         int mode = in.readInt();
-        Region r = RegionGen.generate(size, preset, rseed);
+        Region r = Setup.region(size, preset, rseed, threads);
         // a sparse active set (version 7, or 8 says), restored before anything else so the world goes on with exactly
         // that set
         boolean sparse = ver >= 8 ? in.readBoolean() : ver == 7;
@@ -285,8 +285,16 @@ public final class SaveIO {
         if (ver >= 8) {
             Overlay ov = Overlay.read(in);
             if (ov.pages() != r.store.pages()) throw new IOException("save is damaged");
-            ov.applyTo(r);
-            r.overlay = ov;
+            if (r.nation != null) {
+                // a national map: the pages the active set took in get the edits (from the cache), the rest when
+                // they come in
+                r.overlay = ov;
+                ov.takeOriginals(r.nation);
+                w.refreshPages();
+            } else {
+                ov.applyTo(r);
+                r.overlay = ov;
+            }
         } else {
             // every tile: kept as generated first, so the edits can be told from the rest (the overlay)
             generated = new byte[r.store.pages()][];
@@ -296,7 +304,7 @@ public final class SaveIO {
         byte[] floors = readBytes(in);
         System.arraycopy(floors, 0, r.bfloors, 0, Math.min(floors.length, r.bCount));
         if (generated != null) r.overlay = Overlay.diff(r, generated);
-        for (int b = 0; b < r.bCount; b++) {
+        for (int b = 0; b < r.bCount && r.nation == null; b++) {
             if (r.bfloors[b] != 0) continue;
             for (int ty = r.by[b]; ty < r.by[b] + r.bh[b]; ty++)
                 for (int tx = r.bx[b]; tx < r.bx[b] + r.bw[b]; tx++)
@@ -305,7 +313,7 @@ public final class SaveIO {
         boolean[] alive = readBools(in);
         System.arraycopy(alive, 0, r.roads.ealive, 0, Math.min(alive.length, r.roads.edgeCount));
         readFacilities(in, w, map);
-        r.rebuildNav(0, 0, r.W - 1, r.H - 1);
+        if (r.nation == null) r.rebuildNav(0, 0, r.W - 1, r.H - 1); // (a chunk's cells come with it, edits applied)
         w.sec.connectivity();
         w.tick = in.readLong();
         w.time = in.readDouble();

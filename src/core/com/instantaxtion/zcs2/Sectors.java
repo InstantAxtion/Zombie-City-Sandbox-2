@@ -48,6 +48,19 @@ public final class Sectors {
         // a sector belongs to the settlement whose residents live in it (most of them), not the one whose
         // circle happens to cover its middle: the towns' numbers then add up to their own people
         int ns = r.settlements.size();
+        if (r.nation != null) {
+            // a national map: the nation's residents per sector are the count (chunks only share them among their
+            // buildings), and its sector raster says whose each sector is
+            Nation na = r.nation;
+            if (na.sw != sw || sw != sh) throw new IllegalStateException("sectors must be the nation's");
+            System.arraycopy(na.residents, 0, popIn, 0, n);
+            System.arraycopy(na.residents, 0, home, 0, n);
+            System.arraycopy(na.secSettlement, 0, settlement, 0, n);
+            for (int s = 0; s < n; s++) grid[s] = (byte) (settlement[s] < 0 ? -1 : r.settlements.get(settlement[s]).grid);
+            connectivity();
+            idx = new SectorIndex(w, this);
+            return;
+        }
         java.util.Map<Long, Integer> share = new java.util.HashMap<Long, Integer>();
         for (int b = 0; b < r.bCount; b++) {
             if (w.doorX[b] < 0) continue;
@@ -106,9 +119,89 @@ public final class Sectors {
         connectSectors(Math.max(0, tx0 / st - 1), Math.max(0, ty0 / st - 1), Math.min(sw - 1, tx1 / st + 1), Math.min(sh - 1, ty1 / st + 1));
     }
 
+    /**
+     * National maps: a border is open where dry coarse cells meet across it, or a live road crosses it (bridges).
+     * Neither the tiles nor what is resident is read, so construction, loading and play all agree.
+     */
+    private void connectNational(int sx0, int sy0, int sx1, int sy1) {
+        Region r = w.r;
+        Nation na = r.nation;
+        int per = Nation.SECT / Nation.CELL, cw = na.cw;
+        int[] dx = {1, -1, 0, 0}, dy = {0, 0, 1, -1};
+        for (int sy = sy0; sy <= sy1; sy++)
+            for (int sx = sx0; sx <= sx1; sx++) {
+                int s = sy * sw + sx;
+                connect[s] &= (byte) 0xF0;
+                for (int d = 0; d < 4; d++) {
+                    int tx = sx + dx[d], ty = sy + dy[d];
+                    if (tx < 0 || ty < 0 || tx >= sw || ty >= sh) continue;
+                    boolean open = false;
+                    for (int k = 0; k < per && !open; k++) {
+                        int ax, ay, bx, by;
+                        if (dx[d] != 0) {
+                            ax = dx[d] > 0 ? (sx + 1) * per - 1 : sx * per;
+                            bx = ax + dx[d];
+                            ay = by = sy * per + k;
+                        } else {
+                            ay = dy[d] > 0 ? (sy + 1) * per - 1 : sy * per;
+                            by = ay + dy[d];
+                            ax = bx = sx * per + k;
+                        }
+                        open = !Nation.wet(na.cover[ay * cw + ax]) && !Nation.wet(na.cover[by * cw + bx]);
+                    }
+                    if (open) connect[s] |= (byte) (1 << d);
+                }
+            }
+        // roads crossing a border (over water, bridges): every live road bucketed in the box's chunks
+        RoadGraph g = r.roads;
+        if (g.chunkEdgeStart == null) return;
+        float cs2 = cs;
+        for (int sy = sy0; sy <= sy1; sy++)
+            for (int sx = sx0; sx <= sx1; sx++) {
+                int c = sy * g.chunkW + sx;
+                for (int k = g.chunkEdgeStart[c]; k < g.chunkEdgeStart[c + 1]; k++) {
+                    int e = g.chunkEdge[k];
+                    if (!g.ealive[e]) continue;
+                    float ax = g.nx[g.ea[e]], ay = g.ny[g.ea[e]], bx = g.nx[g.eb[e]], by = g.ny[g.eb[e]];
+                    float len = (float) Math.sqrt((bx - ax) * (bx - ax) + (by - ay) * (by - ay));
+                    int steps = (int) (len / 256) + 1;
+                    int last = -1;
+                    for (int i = 0; i <= steps; i++) {
+                        float x = ax + (bx - ax) * i / steps, y = ay + (by - ay) * i / steps;
+                        int qx = Math.min(sw - 1, Math.max(0, (int) (x / cs2))), qy = Math.min(sh - 1, Math.max(0, (int) (y / cs2)));
+                        int q = qy * sw + qx;
+                        if (last >= 0 && q != last) {
+                            int lx = last % sw, ly = last / sw;
+                            // only the sector in the box records its side (its neighbour is in the box too, or keeps its own)
+                            if (lx == qx + 1 && ly == qy) roadOpen(last, 1, q, 0, sx0, sy0, sx1, sy1);
+                            else if (lx == qx - 1 && ly == qy) roadOpen(last, 0, q, 1, sx0, sy0, sx1, sy1);
+                            else if (ly == qy + 1 && lx == qx) roadOpen(last, 3, q, 2, sx0, sy0, sx1, sy1);
+                            else if (ly == qy - 1 && lx == qx) roadOpen(last, 2, q, 3, sx0, sy0, sx1, sy1);
+                        }
+                        last = q;
+                    }
+                }
+            }
+    }
+
+    private void roadOpen(int a, int da, int b, int db, int sx0, int sy0, int sx1, int sy1) {
+        if (inBox(a, sx0, sy0, sx1, sy1)) connect[a] |= (byte) (1 << da);
+        if (inBox(b, sx0, sy0, sx1, sy1)) connect[b] |= (byte) (1 << db);
+    }
+
+    private boolean inBox(int s, int sx0, int sy0, int sx1, int sy1) {
+        int x = s % sw, y = s / sw;
+        return x >= sx0 && x <= sx1 && y >= sy0 && y <= sy1;
+    }
+
     private void connectSectors(int sx0, int sy0, int sx1, int sy1) {
         int[] dx = {1, -1, 0, 0, 1, 1, -1, -1}, dy = {0, 0, 1, -1, 1, -1, 1, -1};
         Region r = w.r;
+        if (r.nation != null) {
+            connectNational(sx0, sy0, sx1, sy1);
+            diagonals(sx0, sy0, sx1, sy1);
+            return;
+        }
         int per = r.sect / Region.NAV;
         for (int sy = sy0; sy <= sy1; sy++)
             for (int sx = sx0; sx <= sx1; sx++) {
@@ -135,6 +228,11 @@ public final class Sectors {
                     if (open) connect[s] |= (byte) (1 << d);
                 }
             }
+        diagonals(sx0, sy0, sx1, sy1);
+    }
+
+    private void diagonals(int sx0, int sy0, int sx1, int sy1) {
+        int[] dx = {1, -1, 0, 0, 1, 1, -1, -1}, dy = {0, 0, 1, -1, 1, -1, 1, -1};
         // diagonals read the orthogonal bits of the sector and its neighbours: one ring further
         for (int sy = Math.max(0, sy0 - 1); sy <= Math.min(sh - 1, sy1 + 1); sy++)
             for (int sx = Math.max(0, sx0 - 1); sx <= Math.min(sw - 1, sx1 + 1); sx++) {
@@ -389,11 +487,12 @@ public final class Sectors {
         if (bl.length > 0) {
             for (int a = 0; a < 6; a++) {
                 int b = bl[Rng.hashInt(w.seed, w.tick * 31 + s, k * 7 + a, bl.length)];
-                if (w.doorX[b] >= 0) {
+                if (w.r.doorX(b) >= 0) {
                     float jx = (Rng.unit(w.seed, w.tick + k, s * 3L + a) - 0.5f) * 10;
                     float jy = (Rng.unit(w.seed, w.tick + k, s * 3L + a + 1) - 0.5f) * 10;
-                    if (w.r.walkablePx(w.doorX[b] + jx, w.doorY[b] + jy)) return new float[]{w.doorX[b] + jx, w.doorY[b] + jy};
-                    return new float[]{w.doorX[b], w.doorY[b]};
+                    float ddx = w.r.doorX(b), ddy = w.r.doorY(b);
+                    if (w.r.walkablePx(ddx + jx, ddy + jy)) return new float[]{ddx + jx, ddy + jy};
+                    return new float[]{ddx, ddy};
                 }
             }
         }

@@ -277,6 +277,28 @@ public final class Society extends Module {
 
     // ------------------------------------------------------------------ looting
 
+    /**
+     * National maps: a shop or warehouse of the town, found by picking one of its lived-in sectors and then a building
+     * in that sector's chunk (read from the cache if it isn't resident: chunks are pure, so this is the same either way).
+     */
+    private int lootTarget(int st) {
+        int[] secs = w.sec.idx.bySettlement[st];
+        if (secs.length == 0) return -1;
+        for (int k = 0; k < 6; k++) {
+            int s = secs[Rng.hashInt(w.seed, w.tick + k, st * 3L + 1, secs.length)];
+            if (w.sec.home[s] <= 0) continue;
+            Chunk c = w.r.chunkAt(s);
+            if (c.bCount == 0) continue;
+            for (int a = 0; a < 12; a++) {
+                int i = Rng.hashInt(w.seed, w.tick + k * 16 + a, st * 3L + 2, c.bCount);
+                int kind = c.bkind[i];
+                if (c.bfloors[i] > 0 && (kind == Region.B_SHOP || kind == Region.B_MALL || kind == Region.B_WAREHOUSE || kind == Region.B_FOODW))
+                    return c.id(i);
+            }
+        }
+        return -1;
+    }
+
     private void looting() {
         float trustAt = w.c.rule("lootTrust", 35), fearAt = w.c.rule("lootFear", 0.5f);
         for (Region.Settlement s : w.r.settlements) {
@@ -288,7 +310,8 @@ public final class Society extends Module {
             if (Rng.unit(w.seed, w.tick, st * 7L + 99) > (w.gov.martialLaw() ? 0.1f : 0.4f)) continue;
             // a shop or warehouse in the town
             int b = -1;
-            for (int k = 0; k < 30 && b < 0; k++) {
+            if (w.r.nation != null) b = lootTarget(st);
+            else for (int k = 0; k < 30 && b < 0; k++) {
                 int c = Rng.hashInt(w.seed, w.tick + k, st, w.r.bCount);
                 int kind = w.r.bkind(c);
                 if (w.r.bset(c) == st && w.r.bfloors(c) > 0 && (kind == Region.B_SHOP || kind == Region.B_MALL || kind == Region.B_WAREHOUSE || kind == Region.B_FOODW))
@@ -325,7 +348,7 @@ public final class Society extends Module {
             if (t == null) continue;
             Squads.Squad sq = w.forces.deploy(best, t);
             if (sq == null) continue;
-            float px = w.doorX.length > b && w.doorX[b] >= 0 ? w.doorX[b] : x, py = w.doorY.length > b && w.doorY[b] >= 0 ? w.doorY[b] : y;
+            float px = w.r.doorX(b) >= 0 ? w.r.doorX(b) : x, py = w.r.doorY(b) >= 0 ? w.r.doorY(b) : y;
             w.sq.order(sq, Squads.O_RESPOND, px, py);
             responders.add(new int[]{sq.id, 120});
         }

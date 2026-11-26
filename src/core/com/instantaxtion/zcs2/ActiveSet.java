@@ -144,6 +144,13 @@ public final class ActiveSet {
         if (slotOf[p] < 0) activate(p);
     }
 
+    /** Page p is needed now (an edit to it): active from now on, as touchPx. Serial code only. */
+    void touchPage(int p) {
+        if (!sparse) return;
+        lastWant[p] = Math.max(lastWant[p], now());
+        if (slotOf[p] < 0) activate(p);
+    }
+
     private int now() {
         return (int) Math.floor(w.time);
     }
