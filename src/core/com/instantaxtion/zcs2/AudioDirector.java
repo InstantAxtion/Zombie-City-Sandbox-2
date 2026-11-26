@@ -587,7 +587,7 @@ final class AudioDirector {
         }
         // the dead counted by the sector (indoors and folded into numbers), and hordes on the march
         Sectors sec = w.sec;
-        float cs = Region.SECT * Tile.SIZE;
+        float cs = w.r.sect * Tile.SIZE;
         float weight = zSeen * gainAt(zSeen > 0 ? zCX : lx, zSeen > 0 ? zCY : ly, 3000) * 1.5f, panAcc = zSeen > 0 ? panOut * weight : 0;
         int s0x = Math.max(0, (int) ((lx - halfW - 3000) / cs)), s1x = Math.min(sec.sw - 1, (int) ((lx + halfW + 3000) / cs));
         int s0y = Math.max(0, (int) ((ly - halfH - 3000) / cs)), s1y = Math.min(sec.sh - 1, (int) ((ly + halfH + 3000) / cs));

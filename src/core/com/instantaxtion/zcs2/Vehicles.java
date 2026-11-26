@@ -196,7 +196,7 @@ public final class Vehicles implements ActiveSet.Paged {
     public int near(float px, float py, float rad) {
         if (gTouchedN == 0) return -1;
         // any car in the sectors this search could reach? (cells are 128 px, the search covers one cell round)
-        float cs = Region.SECT * Tile.SIZE;
+        float cs = w.r.sect * Tile.SIZE;
         int sw = w.r.secW, sh = w.r.secH;
         int sx0 = Math.max(0, (int) (((int) (px / GC) - 1) * GC / cs)), sx1 = Math.min(sw - 1, (int) (((int) (px / GC) + 2) * GC / cs));
         int sy0 = Math.max(0, (int) (((int) (py / GC) - 1) * GC / cs)), sy1 = Math.min(sh - 1, (int) (((int) (py / GC) + 2) * GC / cs));

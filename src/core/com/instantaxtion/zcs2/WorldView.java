@@ -874,6 +874,12 @@ public final class WorldView {
         }
     }
 
+    /** Dry ground at (x, y) px: a national map's coarse cover (drawing never makes a chunk), else the tile. */
+    private boolean dryAt(float x, float y) {
+        if (w.r.nation != null) return !Nation.wet(w.r.nation.coverAt((int) (x / Tile.SIZE), (int) (y / Tile.SIZE)));
+        return Tile.walkable(w.r.tileAtPx(x, y));
+    }
+
     private void streetLights(Gfx g, Camera cam, float night) {
         RoadGraph rg = w.r.roads;
         float z = cam.zoom;
@@ -1908,7 +1914,7 @@ public final class WorldView {
     /** The chosen overlay over the sectors, and state borders when far out. */
     private void layers(Gfx g, Camera cam) {
         float z = cam.zoom;
-        float cs = Region.SECT * Tile.SIZE;
+        float cs = w.r.sect * Tile.SIZE;
         Sectors sec = w.sec;
         int sx0 = Math.max(0, (int) (cam.x0() / cs)), sy0 = Math.max(0, (int) (cam.y0() / cs));
         int sx1 = Math.min(sec.sw - 1, (int) (cam.x1() / cs)), sy1 = Math.min(sec.sh - 1, (int) (cam.y1() / cs));
@@ -1943,7 +1949,7 @@ public final class WorldView {
                     int[] cnt = new int[ns];
                     for (int s = 0; s < sec.n; s++) {
                         int st = w.roles.stateOfSector(s);
-                        if (st < 0 || !Tile.walkable(w.r.tileAtPx(sec.cx(s), sec.cy(s)))) continue;
+                        if (st < 0 || !dryAt(sec.cx(s), sec.cy(s))) continue;
                         stateX[st] += sec.cx(s);
                         stateY[st] += sec.cy(s);
                         cnt[st]++;
@@ -2280,7 +2286,7 @@ public final class WorldView {
 
         void draw(Gfx g, Camera cam, float alpha) {
             if (time - builtAt > 0.5f || time < builtAt) build();
-            float cs = Region.SECT * Tile.SIZE;
+            float cs = w.r.sect * Tile.SIZE;
             g.image(img, cam.toScreenX(0), cam.toScreenY(0), w.sec.sw * cs * cam.zoom, w.sec.sh * cs * cam.zoom, alpha);
         }
     }

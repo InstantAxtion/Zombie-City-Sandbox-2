@@ -433,7 +433,7 @@ public final class Setup {
                 // the countryside has fallen: the dead everywhere outside the towns, and hordes
                 List<Integer> open = new ArrayList<Integer>();
                 for (int s = 0; s < w.sec.n; s++)
-                    if (w.sec.settlement[s] < 0 && w.sec.connect[s] != 0 && Tile.walkable(r.tileAtPx(w.sec.cx(s), w.sec.cy(s)))) open.add(s);
+                    if (w.sec.settlement[s] < 0 && w.sec.connect[s] != 0 && dryMiddle(w, s)) open.add(s);
                 int hordes = 4;
                 int left = n;
                 for (int k = 0; k < hordes && !open.isEmpty(); k++) {
@@ -740,6 +740,13 @@ public final class Setup {
             if (ddx * ddx + ddy * ddy < 1200f * 1200f) return false;
         }
         return true;
+    }
+
+    /** The middle of sector s is dry ground (a national map: its coarse cover, so no chunk is made for every sector). */
+    private static boolean dryMiddle(World w, int s) {
+        float x = w.sec.cx(s), y = w.sec.cy(s);
+        if (w.r.nation != null) return !Nation.wet(w.r.nation.coverAt((int) (x / Tile.SIZE), (int) (y / Tile.SIZE)));
+        return Tile.walkable(w.r.tileAtPx(x, y));
     }
 
     /** A walkable point near (x, y). */
