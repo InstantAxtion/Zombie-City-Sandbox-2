@@ -178,6 +178,21 @@ public final class SectorIndex {
         }
     }
 
+    /**
+     * People indoors in sector s change by delta without waking its district (Commute: the day's comings and goings
+     * leave a quiet sector quiet): a sleeping district's frozen totals and its sum of the living follow.
+     */
+    public void addPop(int s, int delta) {
+        if (delta == 0) return;
+        sec.popIn[s] += delta;
+        int d = district(s);
+        if (awake[d]) return;
+        frozenTotal += delta;
+        int st = sec.settlement[s];
+        if (st >= 0 && st < frozenPop.length) frozenPop[st] += delta;
+        living[d] += delta;
+    }
+
     public boolean awake(int s) {
         return awake[district(s)];
     }

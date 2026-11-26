@@ -69,6 +69,33 @@ number of people is exactly the same afterwards.
 
 The camera is therefore an input to the simulation, like a tap. A replay would record it.
 
+## A normal day (Life and Commute)
+
+The counts move with the clock (rule `lifeFlow`): every sector has a weight as a place of work (offices, shops,
+schools, industry, the centre; from the buildings on today's maps, from the district types on national ones), and
+once a game hour, in a phase fixed by its id, each town's calm sectors (nothing of the outbreak in them) are brought
+to the hour's spread: up to `lifeFlowShare` of its people at the places of work by day, everyone at home by night.
+A sleeping district's people change without waking it (`SectorIndex.addPop` keeps its frozen totals), so a quiet
+country stays cheap, and the frozen totals check (`SectorIndex.paranoid`) still holds.
+
+Round the camera at street level (rule `life`) the city goes about its day as a level of detail, only inside the
+camera's rectangle and a margin, so only in active chunks (the city's vehicles never pull the active set along).
+Every car's driver and every bus passenger is a resident of a sector who gets in (from `popIn`, or `inf` for the
+bitten) and is counted again where they get out, or where they were going when the camera leaves; a train's
+passengers are counted aboard (`Life.carried`, in `Audit.people`). Cars (`Vehicles.R_LIFE`) are ordinary vehicles:
+they drive, queue, run the dead down, are wrecked and burn, and are saved with the rest. How many depends on the hour
+(`Life.rush`) and the streets (the centre busy all day, the suburbs at the rush hours); parked cars fill the kerbs'
+places that a hash of the street keeps, and their alarms go off when the dead brush past (a sound, and a noise on
+the scent field). When the dead come, cars flee away from them, jam, and are abandoned with their people running.
+Buses loop their town's lines stop to stop, people getting off and on; trains come through on the railways and stop
+at stations, carrying the bitten with the rest. Each police station in view sends patrol cars round its district,
+and each base a humvee round its fence, from their pools, standing down into them when out of sight; the people
+still in the pools stand in the yards and bases as figures (sentries, a fence patrol, a drill by day). People come
+out of doors with somewhere to be for the hour (work or school in the morning, the shops by day, home in the
+evening), walk there and go in; some come out together and follow whoever leads them, running with them when the
+dead come, and a crowd packed tight in flight tramples some underfoot. Everything is decided on the game's thread
+with hashed dice, except following a leader, which reads only where the leader is.
+
 ## The dead as a fluid
 
 `Flow` runs one multi-source breadth-first search over the 32 px navigation grid from every living person on the

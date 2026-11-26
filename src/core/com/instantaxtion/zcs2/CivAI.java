@@ -5,7 +5,7 @@ package com.instantaxtion.zcs2;
  * Runs in parallel: reads anything, writes only its own entity's slot.
  */
 final class CivAI {
-    static final byte S_WANDER = 0, S_FLEE = 1, S_SHELTER = 2, S_EVAC = 3, S_HOME = 4, S_PLAYER = 5, S_MILITIA = 6;
+    static final byte S_WANDER = 0, S_FLEE = 1, S_SHELTER = 2, S_EVAC = 3, S_HOME = 4, S_PLAYER = 5, S_MILITIA = 6, S_ERRAND = 7;
     static final int I_ENTER = 20, I_EVAC = 21;
     private final World w;
 
@@ -63,6 +63,13 @@ final class CivAI {
             switch (e.state[i]) {
                 case S_FLEE: {
                     e.timer[i] -= dt;
+                    // a family runs together: after whoever leads it
+                    // (only where the leader is and how it moves: the move phase writes those, never a think)
+                    int ld = leader(i);
+                    if (ld >= 0 && e.timer[i] > 0) {
+                        e.gx[i] = e.x[ld] + e.vx[ld] * 0.6f;
+                        e.gy[i] = e.y[ld] + e.vy[ld] * 0.6f;
+                    }
                     float sx = e.gx[i] - x, sy = e.gy[i] - y;
                     if (e.timer[i] <= 0) {
                         int settle = w.sec.settlement[w.r.sectorOfPx(x, y)];
@@ -113,6 +120,33 @@ final class CivAI {
                     speed = u.walk * 0.8f;
                     break;
                 }
+                case S_ERRAND: {
+                    // somewhere to be (Life): to that door and in; with company, keeping with whoever leads
+                    e.timer[i] -= dt;
+                    int ld = leader(i);
+                    float sx = e.gx[i] - x, sy = e.gy[i] - y, sl = (float) Math.sqrt(sx * sx + sy * sy);
+                    if (sl < 10) {
+                        e.intent[i] = I_ENTER;
+                        break;
+                    }
+                    if (e.timer[i] <= 0 || w.gov.streetsClosed()) {
+                        e.state[i] = S_HOME;
+                        pickShelter(i, s);
+                    }
+                    dirX = sx / sl;
+                    dirY = sy / sl;
+                    speed = u.walk * 0.85f;
+                    if (ld >= 0) {
+                        // a step behind and beside them, not on top: slow when close, catch up when not
+                        float lx = e.x[ld] - x, ly = e.y[ld] - y, l = (float) Math.sqrt(lx * lx + ly * ly);
+                        if (l > 16) {
+                            dirX = lx / l * 0.7f + dirX * 0.3f;
+                            dirY = ly / l * 0.7f + dirY * 0.3f;
+                            speed = u.walk * (l > 40 ? 1.3f : 1f);
+                        } else if (l < 9) speed = u.walk * 0.6f;
+                    }
+                    break;
+                }
                 case S_SHELTER:
                 case S_HOME: {
                     float sx = e.gx[i] - x, sy = e.gy[i] - y, sl = (float) Math.sqrt(sx * sx + sy * sy);
@@ -142,6 +176,19 @@ final class CivAI {
             }
         }
         steer(i, dirX, dirY, speed, s);
+    }
+
+    /**
+     * Whoever leads this one's family or group (Life), if still about and near; else -1. Reads only what no think
+     * writes (where they are, what they are, the leader's mark), so it is the same on any number of threads.
+     */
+    private int leader(int i) {
+        Ents e = w.e;
+        int ld = e.target[i];
+        if (ld < 0 || ld == i || ld >= e.top || e.kind[i] != Ents.CIV) return -1;
+        if (e.loc[ld] != Ents.FREE || e.kind[ld] != Ents.CIV || (e.flags[ld] & Ents.F_LEADER) == 0) return -1;
+        float dx = e.x[ld] - e.x[i], dy = e.y[ld] - e.y[i];
+        return dx * dx + dy * dy < 200 * 200 ? ld : -1;
     }
 
     /** An armed resident holding their street: shoot what comes, step back from what gets close. */

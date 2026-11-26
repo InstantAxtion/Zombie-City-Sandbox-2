@@ -71,6 +71,7 @@ public final class Tools {
             py = w.r.roads.ny[n];
         }
         int faction = t.faction.equals("police") ? Ents.COP : Ents.SOLDIER;
+        w.act.touchPx(px, py);
         int v = w.veh.add(t, px, py, 0, nearestFacility(w, px, py, faction));
         w.veh.timer[v] = 99;
         if (t.flies) {
@@ -255,7 +256,16 @@ public final class Tools {
     /** A squad from content.ini's [squad] list, with its vehicle, placed at (x, y) and holding there. */
     public static Squads.Squad placeTemplate(World w, String id, float x, float y) {
         Content.SquadT t = w.c.squadT(id);
-        if (t == null || !w.r.walkablePx(x, y)) return null;
+        if (t == null) return null;
+        if (!w.r.walkablePx(x, y)) {
+            // put down on a building (a national map's towns are mostly roofs): the open ground nearest
+            float[] o = w.r.openGroundNear(x, y, false);
+            if (o == null || !w.r.walkablePx(o[0], o[1])) return null;
+            x = o[0];
+            y = o[1];
+        }
+        // the chunk it stands in is active from now on (taken in through the cache on a national map)
+        w.act.touchPx(x, y);
         int faction = t.faction.equals("police") ? Ents.COP : Ents.SOLDIER;
         Squads.Squad s = w.sq.create(faction, nearestFacility(w, x, y, faction), t.name);
         s.template = t.index;
@@ -271,6 +281,7 @@ public final class Tools {
         if (t.vehicle != null && !t.vehicle.flies) {
             int n = w.r.roads.nearestNode(x, y, 600);
             if (n >= 0) {
+                w.act.touchPx(w.r.roads.nx[n], w.r.roads.ny[n]);
                 int v = w.veh.add(t.vehicle, w.r.roads.nx[n], w.r.roads.ny[n], 0, s.home);
                 w.veh.timer[v] = 99;
                 w.veh.state[v] = Vehicles.V_ARRIVED;
@@ -305,6 +316,7 @@ public final class Tools {
             fx = 0;
             fy = -1;
         }
+        w.act.touchPx(x, y);
         return w.defs.place(kind, x, y, fx, fy);
     }
 
@@ -318,6 +330,8 @@ public final class Tools {
      */
     public static int build(World w, int what, float x, float y) {
         Region r = w.r;
+        // the chunk built in is active from now on (r.set takes in any other page an edit reaches, into the overlay)
+        w.act.touchPx(x, y);
         int cx = (int) Math.floor(x / Tile.SIZE), cy = (int) Math.floor(y / Tile.SIZE);
         boolean line = what == B_BARRICADE || what == B_WALL;
         int rad = line ? 1 : what == B_CLEAR ? 2 : 1;

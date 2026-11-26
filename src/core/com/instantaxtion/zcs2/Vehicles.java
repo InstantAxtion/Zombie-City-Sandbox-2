@@ -13,6 +13,8 @@ public final class Vehicles implements ActiveSet.Paged {
     public static final String[] STATE_NAMES = {"", "Parked", "Driving", "On scene", "Wrecked", "Flying", "Over the fight",
             "Returning", "Strike run", "Parking", "Pulling in"};
     public static final byte R_SQUAD = 0, R_PATROL = 1, R_SUPPLY = 2, R_AIR = 3, R_STRIKE = 4, R_TRANSPORT = 5;
+    /** The city's own traffic, parked cars and buses (Life): drawn from the counts near the camera, folded back away from it. */
+    public static final byte R_LIFE = 6;
 
     private final World w;
     public int top;
@@ -144,6 +146,64 @@ public final class Vehicles implements ActiveSet.Paged {
             }
         }
         return v;
+    }
+
+    /**
+     * Life's vehicles: put down exactly at (px, py) with no search for a free place (Life has made sure there is room),
+     * as the city's own (R_LIFE).
+     */
+    int addLife(Content.VType t, float px, float py, float heading) {
+        int v = -1;
+        for (int i = 0; i < top; i++) if (state[i] == V_NONE) { v = i; break; }
+        if (v < 0) {
+            if (top == x.length) grow(top * 2);
+            v = top++;
+        }
+        x[v] = px;
+        y[v] = py;
+        head[v] = heading;
+        spd[v] = 0;
+        hp[v] = t.hp;
+        type[v] = (short) t.index;
+        state[v] = V_PARKED;
+        role[v] = R_LIFE;
+        squad[v] = -1;
+        home[v] = -1;
+        homeX[v] = px;
+        homeY[v] = py;
+        route[v] = null;
+        ri[v] = 0;
+        seg[v] = 0;
+        if (crew[v] == null || crew[v].length < Math.max(1, t.seats)) crew[v] = new int[Math.max(1, t.seats)];
+        crewN[v] = 0;
+        fuel[v] = 1;
+        stuck[v] = wpnT[v] = wpn2T[v] = timer[v] = mobT[v] = ghost[v] = 0;
+        alt[v] = 0;
+        ammo[v] = 0;
+        kills[v] = 0;
+        cargo[v] = 0;
+        target[v] = -1;
+        siren[v] = false;
+        returning[v] = false;
+        uid[v] = nextUid++;
+        slotX[v] = slotY[v] = slotH[v] = wait[v] = 0;
+        return v;
+    }
+
+    /** Is the footprint (half sizes hl, hw) at (px, py) facing h clear of every road vehicle in the grid (as of the last step)? */
+    boolean clearAt(float px, float py, float h, float hl, float hw) {
+        int cx = (int) (px / GC), cy = (int) (py / GC);
+        for (int yy = cy - 1; yy <= cy + 1; yy++)
+            for (int xx = cx - 1; xx <= cx + 1; xx++) {
+                int c = gcell(xx, yy);
+                for (int j = gStart[c]; j < gEnd[c]; j++) {
+                    int o = gList[j];
+                    if (!onRoad(o)) continue;
+                    Content.VType to = type(o);
+                    if (boxesOverlap(px, py, h, hl, hw, x[o], y[o], head[o], to.length * 0.5f, to.width * 0.5f)) return false;
+                }
+            }
+        return true;
     }
 
     private void grow(int n) {
@@ -388,6 +448,8 @@ public final class Vehicles implements ActiveSet.Paged {
 
     /** A patrol car reached its spot: on to another one in its town. */
     public void patrolOn(int v) {
+        // one of the patrols Life sent out to be seen: round its own district
+        if (w.life.patrolOn(v)) return;
         RoadGraph g = w.r.roads;
         int homeSet = home[v] >= 0 ? w.r.facilities.get(home[v]).settlement : -1;
         // (a national map: picked from the town's own junctions, not a whole country's)
@@ -455,7 +517,8 @@ public final class Vehicles implements ActiveSet.Paged {
         siren[v] = false;
         w.fx.add(Effects.BLAST, x[v], y[v], 30, 0, 0.6f);
         w.fx.sound("boom", x[v], y[v]);
-        w.stats.vehiclesLost++;
+        if (role[v] != R_LIFE) w.stats.vehiclesLost++;
+        else w.life.wrecked(v);
         w.fires.igniteNear(x[v], y[v], 0.5f);
         if (type(v).flies) {
             w.news.radio(type(v).name + " down!", x[v], y[v], News.LOSS);
@@ -498,6 +561,8 @@ public final class Vehicles implements ActiveSet.Paged {
                     if (timer[v] > 300) state[v] = V_NONE; // towed away
                     continue;
                 default:
+                    // a parked car of the city's with nobody in it: nothing to do (Life sees to its alarm)
+                    if (role[v] == R_LIFE && crewN[v] == 0) continue;
                     timer[v] += dt;
                     spd[v] = 0;
                     mobCheck(v, dt);
@@ -820,7 +885,7 @@ public final class Vehicles implements ActiveSet.Paged {
                     if (cdx * cdx + cdy * cdy < 26 * 26) around++;
                     if (d2 > t.width * t.width * 0.5f) continue;
                     if (spd[v] > 40) {
-                        w.combat.killZombie(z, -1, t.faction.equals("army") ? Ents.SOLDIER : Ents.COP, Combat.CAUSE_VEHICLE);
+                        w.combat.killZombie(z, -1, t.faction.equals("army") ? Ents.SOLDIER : role[v] == R_LIFE ? Ents.CIV : Ents.COP, Combat.CAUSE_VEHICLE);
                         kills[v]++;
                         hp[v] -= 5 * (1 - t.armor);
                         spd[v] *= 0.9f;

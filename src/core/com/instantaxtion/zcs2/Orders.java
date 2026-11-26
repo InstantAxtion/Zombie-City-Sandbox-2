@@ -283,6 +283,8 @@ public final class Orders extends Module {
             vh.x[v] = nx;
             vh.y[v] = ny;
         } else vh.spd[v] = 0;
+        // on a national map the chunk under the wheels stays active (driven out of the active area, it takes it in)
+        w.act.touchPx(vh.x[v], vh.y[v]);
         // the dead in the way go under it
         if (Math.abs(vh.spd[v]) > 40) {
             Ents e = w.e;

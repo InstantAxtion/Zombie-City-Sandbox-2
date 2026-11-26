@@ -26,6 +26,12 @@ public final class ScaleProbe {
             String[] scen = a.length > 3 ? java.util.Arrays.copyOfRange(a, 3, a.length) : new String[]{"lab_leak", "hold_city"};
             for (String s : scen) game(c, size, days, s);
         }
+        if (what.equals("life")) {
+            int size = a.length > 1 ? Integer.parseInt(a[1]) : 28672;
+            float hour = a.length > 2 ? Float.parseFloat(a[2]) : 9.5f;
+            String where = a.length > 3 ? a[3] : "centre";
+            life(size, hour, where);
+        }
         if (what.equals("save")) {
             Content c = Content.load(new FileInputStream("assets/content.ini"));
             int[] sizes = a.length > 1 ? parse(a) : new int[]{1024, 2304, 3072};
@@ -188,6 +194,95 @@ public final class ScaleProbe {
         int[] s = new int[a.length - 1];
         for (int i = 1; i < a.length; i++) s[i - 1] = Integer.parseInt(a[i]);
         return s;
+    }
+
+    /**
+     * The normal day's cost (Life and Commute): the same sandbox game with the life rules on and off, the camera at
+     * street zoom (a phone at 0.5) over the capital's centre or a suburb, from the given hour; step times at 1x
+     * alternating between the two worlds, and what is out on the streets.
+     *   ScaleProbe life [size] [hour] [centre|suburb]
+     */
+    static void life(int size, float hour, String where) throws Exception {
+        Content on = Content.load(new FileInputStream("assets/content.ini"));
+        Content off = Content.load(new FileInputStream("assets/content.ini"));
+        off.setRule("life", 0);
+        off.setRule("lifeFlow", 0);
+        World[] ws = new World[2];
+        for (int k = 0; k < 2; k++) {
+            long t0 = System.nanoTime();
+            ws[k] = Setup.newGame(k == 0 ? on : off, size, RegionGen.COAST, 7, (k == 0 ? on : off).scenario("sandbox"), 2);
+            System.out.printf("%s built in %d ms%n", k == 0 ? "life on" : "life off", (System.nanoTime() - t0) / 1000000);
+        }
+        float[] at = lifeSpot(ws[0], where);
+        System.out.printf("camera over %s at (%.0f, %.0f), sector people %d%n", where, at[0], at[1], ws[0].sec.popIn[ws[0].r.sectorOfPx(at[0], at[1])]);
+        for (World w : ws) {
+            w.camX0 = at[0] - 1080; w.camX1 = at[0] + 1080; w.camY0 = at[1] - 2400; w.camY1 = at[1] + 2400;
+            w.camDetail = true;
+            // to the hour (fast-forwarded as numbers, then a minute at 1x for the streets to fill)
+            w.camDetail = false;
+            w.setStrategic(true);
+            while (w.hour() < hour - 1.05f || w.hour() > hour + 2) w.step();
+            w.setStrategic(false);
+            w.camDetail = true;
+            for (int k = 0; k < 60 * 20; k++) w.step();
+        }
+        long[] ns = new long[2];
+        long[] worst = new long[2];
+        int rounds = 12, per = 200;
+        for (int r = 0; r < rounds; r++)
+            for (int k = 0; k < 2; k++) {
+                World w = ws[(r + k) % 2];
+                int which = (r + k) % 2;
+                for (int i = 0; i < per; i++) {
+                    long t0 = System.nanoTime();
+                    w.step();
+                    long d = System.nanoTime() - t0;
+                    if (r > 0) {
+                        ns[which] += d;
+                        worst[which] = Math.max(worst[which], d);
+                    }
+                }
+            }
+        int n = (rounds - 1) * per;
+        for (int k = 0; k < 2; k++) {
+            World w = ws[k];
+            Life l = w.life;
+            int civ = 0, cops = 0, sol = 0;
+            for (int i = 0; i < w.e.top; i++) if (w.e.loc[i] == Ents.FREE) {
+                if (w.e.kind[i] == Ents.CIV) civ++;
+                else if (w.e.kind[i] == Ents.COP) cops++;
+                else if (w.e.kind[i] == Ents.SOLDIER) sol++;
+            }
+            System.out.printf("%s  %s: step %.3f ms (worst %.1f)  cars %d parked %d buses %d abandoned %d trains %d  on foot %d  police %d  soldiers %d  patrols %d  vehicles %d  active chunks %d  moved by commute %d  ledger %d  %s%n",
+                    k == 0 ? "life on " : "life off", w.clock(), ns[k] / 1e6 / n, worst[k] / 1e6, l.cars, l.parked, l.buses, l.abandoned, l.trains(), civ, cops, sol, UiShot.patrols(w),
+                    w.veh.top, w.act.activeCount(), l.commute.moved, Audit.ledger(w), Audit.check(w).isEmpty() ? "audit ok" : "AUDIT " + Audit.check(w));
+        }
+        System.out.printf("extra per step: %.3f ms%n", (ns[0] - ns[1]) / 1e6 / n);
+        for (World w : ws) w.shutdown();
+    }
+
+    /** The capital's centre, or a suburb of it (a lived-in sector a few km out). */
+    static float[] lifeSpot(World w, String where) {
+        Region.Settlement c = w.r.city();
+        float x = c.cx * 16f, y = c.cy * 16f;
+        if (where.equals("centre")) return new float[]{x, y};
+        float best = -1, bx = x, by = y;
+        Sectors sec = w.sec;
+        for (int s = 0; s < sec.n; s++) {
+            if (sec.settlement[s] != c.id || sec.home[s] <= 0) continue;
+            float d = (float) Math.hypot(sec.cx(s) - x, sec.cy(s) - y);
+            float want = w.national ? 12000 : 2500;
+            // houses in gardens: a suburb on a national map, else plenty of homes and little work
+            boolean sub = w.r.nation != null ? w.r.nation.district[s] == Nation.D_SUBURB
+                    : w.life.commute.jobs(s) < 0.15f * sec.home[s] && w.life.commute.busy(s) < 0.6f;
+            float score = -Math.abs(d - want) + (sub ? 6000 : 0) + Math.min(sec.home[s], 3000) * 0.3f;
+            if (score > best) {
+                best = score;
+                bx = sec.cx(s);
+                by = sec.cy(s);
+            }
+        }
+        return new float[]{bx, by};
     }
 
     static void world(Content c, int size) throws Exception {

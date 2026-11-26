@@ -123,30 +123,34 @@ public final class Tests {
      * GOLDEN_STATE unchanged), and again after the legibility records and the player tools (new modules saved: records,
      * rules, defences, orders; the fallen list's wording; the loss summary counting those bitten in the streets; GOLDEN_STATE
      * unchanged). Re-record GOLDEN, never GOLDEN_STATE, when only the save format changes.
+     * Both were recorded again when the normal day came in (rules life and lifeFlow, on purpose: the counts move
+     * between homes and work with the hour, and the city's traffic and people round the camera are drawn from them).
+     * With those two rules at 0 the code gives the old GOLDEN_STATE exactly, and with content.ini as it was before
+     * them the old GOLDEN too.
      */
     static final long[][] GOLDEN_STATE = {
-            {6154099638746837556L, -9156902886684524058L, 1866682250405222742L, -9217401520979297812L, 1537591524836997222L, -8950698979581103624L,
-                    3059366993590332249L},
-            {-4697992628451381715L, -6931469245727560265L, -5508742737116565048L, -3574159798741121094L, 4128291540105232830L, -3076895070413400139L,
-                    -7482936298783282732L, -2565931173707041015L, 8901680440373551788L},
-            {2669539334927021982L, 5082642762841353669L, 2603151380757143770L, -6044626732400343070L, 3507074812292639330L, -3478852375069038352L,
-                    1787556130824858488L, 5193441266276925038L, -883700040074343183L, -85772300382242973L, -8993930778584621293L},
-            {2265108056685414850L, 8850664470762981082L, 5771621299069563770L, 3680484559685360948L, -813934901969217142L, -3596638819943977356L,
-                    -4150637171513662266L, 2513615130887085674L, 5484921617596929969L, 5484921617596929969L, 5484921617596929969L},
-            {9203599559297672127L, 322868898503127492L, -7576750052767853140L, -1181182264550250388L, -2554451663253278120L, 4810535057634520153L,
-                    6368992452856273708L, -6427083911352453662L, 7221599643894830012L},
+            {-9048877486888558763L, -5074671415040436397L, -7091719996387695111L, 5514597120603307591L, -9060996376688164900L, -2464322849719482128L,
+                    -8806496574989025427L},
+            {-4612109667781531387L, 8148228355577481168L, -3789379237918480937L, -8720357643317598861L, 7805403087932392722L, 9087861142141795830L,
+                    5601821122340862675L, -8178928060073826903L, -3450227958994545031L},
+            {-5352660960698400984L, 3856382757349242375L, 2892717960740663617L, 5948764704801302308L, 8017571868137675746L, -4595630069377124760L,
+                    -2206240929984095807L, 4309460876284602727L, 6493276397047788789L, -4999354706653124132L, -2101736541442976444L},
+            {7100082239672412198L, -3056807817964742206L, -5404289687014696788L, -8864410598376162752L, 7293556389757909732L, 6872087061174453523L,
+                    -3238728496210034461L, 1023340059064900564L, -490721386234721005L, -490721386234721005L, -490721386234721005L},
+            {-8002621144123268477L, -6845613328155906658L, -1866830996085695085L, 53101970365605354L, -8553037998629933908L, -125097791475767827L,
+                    6495605104087188105L, 779923143005276946L, -7816591287606685377L},
     };
     static final long[][] GOLDEN = {
-            {-8193793415238525116L, -7004733713144845094L, -907707203354145175L, -254396976498458212L, 5170563994093786088L, -7144089283857736708L,
-                    -5542973338301395879L},
-            {8436270967796543051L, -1372373955312707425L, -4400395897603510460L, 8760181010088331570L, 7529482120125989455L, -8237043799264234112L,
-                    -4357876521759485548L, 2474724364215757789L, 8371884720721526016L},
-            {-4058277883293441209L, 7714140762861020102L, -1052854246341621020L, 7466810861314145797L, 3945931235618920426L, 7397891071971143980L,
-                    -277908206918912947L, 6726350907800722039L, 4056650989822197619L, -5560747031343222826L, 3735126695740972300L},
-            {-4330945751826410012L, -32407494389542150L, -1298805461993309355L, -220475399928660370L, 8077583154867891679L, -4388622870487469656L,
-                    7414637724991303337L, 4739334684033463372L, 1008785119339241182L, 1008785119339241182L, 1008785119339241182L},
-            {-5836586603547433825L, -6286941515948888896L, 8613056083144120215L, 7280325674663685650L, -3739855656360487708L, 4538301549180007892L,
-                    4802109375552357823L, -7782977746996162124L, -1388057030145994410L},
+            {6309754689768874389L, 7406189750654730088L, 7695642657184519025L, 8936357741952145060L, -1251576490250153344L, 4711363514292514830L,
+                    -3582664604103002896L},
+            {2807474679602971400L, 7829840849902344672L, -6418116065024229316L, -8199002184781277367L, 2567038666215592274L, -2994245333952676426L,
+                    5002865335714608288L, -8486697417228122442L, 3075473085273510445L},
+            {-1973323166885732071L, 8831110480549904273L, -3745064386877292753L, 8097820878930281370L, 6671183277286627033L, 5733123435211390841L,
+                    3203510037199038008L, -8808996461018482781L, -1954214255473738789L, -6285382615691089809L, -603927546294691268L},
+            {-9011796240600742317L, 6333344084849238626L, -6951926128713228888L, -5222130195947670415L, 3295192560197013083L, 2474253430221769639L,
+                    995562456707406116L, 5139414067685585019L, 2404288482518842009L, 2404288482518842009L, 2404288482518842009L},
+            {7294133174361976433L, 3640680386046789829L, -2802742373616097310L, 4282240093908465812L, -2435815388202076298L, 6761050476622189751L,
+                    4244112700145719863L, -7866938319049588505L, -2775778183477439625L},
     };
 
     /**
@@ -292,7 +296,9 @@ public final class Tests {
             }
         }
         check(ccx >= 0, "no street for the arena");
-        // at night, with everyone else indoors: nobody else on the streets for the dead to go after
+        // at night, with everyone else indoors: nobody else on the streets for the dead to go after (no traffic,
+        // no parked cars' alarms)
+        w.life.held = true;
         w.time = 14 * 60;
         for (int i = 0; i < w.e.top; i++) if (w.e.loc[i] == Ents.FREE && w.e.kind[i] == Ents.CIV) w.sec.shelter(i);
         int x0 = Integer.MAX_VALUE, y0 = Integer.MAX_VALUE, x1 = -1, y1 = -1;
@@ -2217,7 +2223,7 @@ public final class Tests {
                 check(out == 0, out + " squads still out ten minutes after it began (the dead were gone long before)");
                 int parked = 0;
                 for (int v = 0; v < w.veh.top; v++)
-                    if (w.veh.state[v] == Vehicles.V_ARRIVED && w.veh.squad[v] < 0 && w.veh.type(v).seats > 0 && !w.veh.type(v).flies) parked++;
+                    if (w.veh.state[v] == Vehicles.V_ARRIVED && w.veh.squad[v] < 0 && w.veh.type(v).seats > 0 && !w.veh.type(v).flies && w.veh.role[v] != Vehicles.R_LIFE) parked++;
                 check(parked == 0, parked + " abandoned squad vehicles left in the streets");
                 check(Audit.check(w).isEmpty(), Audit.check(w));
                 w.shutdown();
@@ -3024,6 +3030,7 @@ public final class Tests {
         scaleTests();
         sparseTests();
         nationalTests();
+        lifeTests();
     }
 
     // ------------------------------------------------------------------ active-area paging (docs/SCALE_PLAN.md P2)
@@ -3087,7 +3094,10 @@ public final class Tests {
                         check(most < w.act.pages / 2, "most of the map active: " + most + " of " + w.act.pages);
                         check(w.act.left > 0, "no chunk ever left the set");
                         check(w.veh.transitSteps > 0, "no vehicle went into transit");
-                        check(Audit.people(w) == before, "people " + Audit.people(w) + " vs " + before);
+                        // (nobody lost to the paging: everyone alive, or counted killed or turned; with the day's
+                        // life on the streets a passer-by may be bitten)
+                        check(Audit.ledger(w) == 0 && Audit.people(w) + w.stats.civDeaths + w.stats.civTurned == before,
+                                "people " + Audit.people(w) + " vs " + before + ", ledger " + Audit.ledger(w) + ", killed " + w.stats.civDeaths + ", turned " + w.stats.civTurned);
                         // the scent and the foot paths stop at the active chunks
                         for (int p = 0; p < w.act.pages; p++) {
                             if (w.act.active(p)) continue;
@@ -3115,6 +3125,201 @@ public final class Tests {
         } finally {
             World.strictParallel = was;
         }
+    }
+
+    /** The game clock moved on to hour h (today or tomorrow). */
+    static void toHour(World w, float h) {
+        w.time += ((h - w.hour()) % 24 + 24) % 24 * 60;
+    }
+
+    /** The city's vehicles Life has out, and people aboard any vehicle that aren't police or soldiers. */
+    static int[] lifeOut(World w) {
+        int mine = 0, aboard = 0;
+        for (int v = 0; v < w.veh.top; v++) if (w.life.mine(v)) mine++;
+        for (int i = 0; i < w.e.top; i++) if (w.e.loc[i] == Ents.ABOARD && w.e.kind[i] == Ents.CIV) aboard++;
+        return new int[]{mine, aboard};
+    }
+
+    /** Police and soldiers kept in every facility's pools, and out on the map. */
+    static long armedEverywhere(World w) {
+        long n = 0;
+        for (Region.Facility f : w.r.facilities) n += w.forces.armedAt(f, Ents.COP) + w.forces.armedAt(f, Ents.SOLDIER);
+        for (int i = 0; i < w.e.top; i++) if ((w.e.loc[i] == Ents.FREE || w.e.loc[i] == Ents.ABOARD) && w.e.armed(i)) n++;
+        return n;
+    }
+
+    /**
+     * A normal day round the camera on a map: traffic, parked cars, buses, patrols, people going places at 09:30;
+     * everyone counted the same throughout; and when the camera leaves, everything folds back exactly.
+     */
+    static void lifeFolds(int size) {
+        World w = game(5, size, "sandbox", 2);
+        check(w.life.on && w.life.flowOn, "life rules off");
+        Region.Settlement c = w.r.city();
+        toHour(w, 9.5f);
+        long before = Audit.people(w), armed = armedEverywhere(w);
+        int[] police = new int[w.r.facilities.size()];
+        for (int k = 0; k < police.length; k++) police[k] = w.forces.armedAt(w.r.facilities.get(k), Ents.COP);
+        int maxCars = 0, maxParked = 0, maxBuses = 0, maxWalkers = 0, errands = 0, patrolCars = 0;
+        long trainsSeen = 0;
+        for (int k = 0; k < 6; k++) {
+            camOver(w, c.cx * 16f + (k - 2) * 500, c.cy * 16f + (k % 2) * 400);
+            for (int t = 0; t < 10; t++) {
+                play(w, 2, t % 5 == 0);
+                maxCars = Math.max(maxCars, w.life.cars);
+                maxParked = Math.max(maxParked, w.life.parked);
+                maxBuses = Math.max(maxBuses, w.life.buses);
+                trainsSeen += w.life.trains();
+                int walkers = 0;
+                for (int i = 0; i < w.e.top; i++)
+                    if (w.e.loc[i] == Ents.FREE && w.e.kind[i] == Ents.CIV) {
+                        walkers++;
+                        if (w.e.state[i] == CivAI.S_ERRAND) errands++;
+                    }
+                maxWalkers = Math.max(maxWalkers, walkers);
+                for (Squads.Squad q : w.sq.list) if (q.alive && q.order == Squads.O_PATROL && q.vehicle >= 0 && w.veh.state[q.vehicle] == Vehicles.V_DRIVE) patrolCars++;
+                check(Audit.people(w) == before, "people " + Audit.people(w) + " vs " + before + " at " + w.clock());
+                check(Audit.ledger(w) == 0, "ledger " + Audit.ledger(w));
+                check(armedEverywhere(w) == armed, "police and soldiers " + armedEverywhere(w) + " vs " + armed);
+            }
+        }
+        System.out.printf("        %d tiles at %s: up to %d cars, %d parked, %d buses, %d on foot (%d errand-steps), patrol-car checks %d, train-seconds %d, %d spawned, %d folded%n",
+                size, w.clock(), maxCars, maxParked, maxBuses, maxWalkers, errands, patrolCars, trainsSeen, w.life.spawned, w.life.folded);
+        check(maxCars >= 15, "only " + maxCars + " cars driving at the morning rush");
+        check(maxParked >= 30, "only " + maxParked + " parked cars");
+        check(maxWalkers >= 20 && errands > 0, "nobody walking anywhere: " + maxWalkers + ", errands " + errands);
+        check(patrolCars > 0, "no patrol car out of the stations in view");
+        // over a railway, if the map has one: passenger trains come through, their people counted aboard
+        RoadGraph rl = w.r.rails;
+        if (rl.edgeCount > 0) {
+            int e = rl.edgeCount / 2;
+            float rx = (rl.nx[rl.ea[e]] + rl.nx[rl.eb[e]]) / 2, ry = (rl.ny[rl.ea[e]] + rl.ny[rl.eb[e]]) / 2;
+            camOver(w, rx, ry);
+            long carried = 0;
+            int seen = 0;
+            for (int t = 0; t < 120; t++) {
+                play(w, 1, t % 20 == 0);
+                seen += w.life.trains();
+                carried = Math.max(carried, w.life.carried());
+                check(Audit.people(w) == before, "people " + Audit.people(w) + " vs " + before + " with a train about");
+            }
+            System.out.printf("        a railway: train-seconds %d, up to %d people aboard%n", seen, carried);
+            check(seen > 0, "no train came along the line in two minutes");
+        }
+        w.camDetail = false;
+        play(w, 3, true);
+        int[] out = lifeOut(w);
+        check(out[0] == 0 && out[1] == 0 && w.life.trains() == 0, "after the camera left: " + out[0] + " vehicles, " + out[1] + " aboard, " + w.life.trains() + " trains");
+        check(Audit.people(w) == before, "people after the camera left: " + Audit.people(w) + " vs " + before);
+        for (int k = 0; k < police.length; k++)
+            check(w.forces.armedAt(w.r.facilities.get(k), Ents.COP) == police[k], "station " + k + " has " + w.forces.armedAt(w.r.facilities.get(k), Ents.COP) + " officers, had " + police[k]);
+        check(Audit.check(w).isEmpty(), Audit.check(w));
+        w.shutdown();
+    }
+
+    /** With an outbreak among the traffic: the same on 1 and 2 threads, and after a save and a load. */
+    static void lifeExact(int size) throws Exception {
+        World a = game(11, size, "sandbox", 1), b = game(11, size, "sandbox", 2);
+        Region.Settlement c = a.r.city();
+        float x = c.cx * 16f, y = c.cy * 16f;
+        for (World w : new World[]{a, b}) {
+            toHour(w, 17.4f);
+            camOver(w, x, y);
+        }
+        int fled = 0;
+        for (int k = 0; k < 60 * 20; k++) {
+            if (k == 20 * 20) {
+                Tools.paintZombies(a, x + 200, y - 300, 120, 200, -1);
+                Tools.paintZombies(b, x + 200, y - 300, 120, 200, -1);
+            }
+            a.step();
+            b.step();
+            if (k % 100 == 0) check(Audit.hash(a) == Audit.hash(b), "1 and 2 threads differ at step " + k);
+            if (k % 20 == 0) for (int v = 0; v < a.veh.top; v++) if (a.life.mine(v) && a.life.flee[v]) fled++;
+        }
+        check(Audit.check(a).isEmpty(), Audit.check(a));
+        System.out.printf("        %d tiles: car-seconds fleeing %d, abandoned %d, trampled %d, cars %d, parked %d%n", size, fled, a.life.abandoned, a.life.trampled, a.life.cars, a.life.parked);
+        check(fled > 0, "no car fled the dead");
+        ByteArrayOutputStream bo = new ByteArrayOutputStream();
+        SaveIO.save(a, bo);
+        World l = SaveIO.load(content, new ByteArrayInputStream(bo.toByteArray()), 2);
+        check(Audit.hash(l) == Audit.hash(a), "different straight after loading");
+        check(Audit.check(l).isEmpty(), "loaded game fails the audit: " + Audit.check(l));
+        check(Audit.people(l) == Audit.people(a), "people differ after loading");
+        for (int k = 0; k < 30 * 20; k++) {
+            a.step();
+            l.step();
+            if (k % 100 == 0) check(Audit.hash(l) == Audit.hash(a), "diverged " + k + " steps after loading");
+        }
+        check(Audit.ledger(a) == 0, "ledger " + Audit.ledger(a));
+        a.shutdown();
+        b.shutdown();
+        l.shutdown();
+    }
+
+    private static void lifeTests() {
+        test("life: a normal morning round the camera, everyone counted, all folded back when it leaves (1024)", new T() {
+            public void run() {
+                lifeFolds(1024);
+            }
+        });
+        test("life: a normal morning in a national capital folds back exactly (8192)", new T() {
+            public void run() throws Exception {
+                strict(new T() {
+                    public void run() {
+                        lifeFolds(NAT);
+                    }
+                });
+            }
+        });
+        test("life: traffic fleeing an outbreak is the same on 1 and 2 threads and after a load (1024)", new T() {
+            public void run() throws Exception {
+                lifeExact(1024);
+            }
+        });
+        test("life: traffic fleeing an outbreak is the same on 1 and 2 threads and after a load (8192)", new T() {
+            public void run() throws Exception {
+                strict(new T() {
+                    public void run() throws Exception {
+                        lifeExact(NAT);
+                    }
+                });
+            }
+        });
+        test("life: by day the town's people are at work, by night at home, and nobody is lost (1536, 8192)", new T() {
+            public void run() {
+                for (int size : new int[]{1536, NAT}) {
+                    World w = game(3, size, "sandbox", 2);
+                    SectorIndex.paranoid = true;
+                    try {
+                        Sectors sec = w.sec;
+                        long people = Audit.people(w);
+                        int st = w.r.city().id;
+                        // the sectors with more work than homes, and their people at 03:00 and 13:00
+                        long[] atWork = new long[2];
+                        for (int k = 0; k < 2; k++) {
+                            toHour(w, k == 0 ? 3f : 13f);
+                            w.setStrategic(true);
+                            for (int t = 0; t < 12; t++) w.step();
+                            w.setStrategic(false);
+                            double J = 0, H = 0;
+                            for (int s : sec.idx.bySettlement[st]) {
+                                J += w.life.commute.jobs(s);
+                                H += sec.home[s];
+                            }
+                            for (int s : sec.idx.bySettlement[st]) if (w.life.commute.jobs(s) / J > sec.home[s] / H * 1.5) atWork[k] += sec.popIn[s];
+                            check(Audit.people(w) == people, "people " + Audit.people(w) + " vs " + people);
+                        }
+                        System.out.printf("        %d tiles: people in the places of work at 03:00 %d, at 13:00 %d; %d moved%n", size, atWork[0], atWork[1], w.life.commute.moved);
+                        check(atWork[1] > atWork[0] * 1.3f, "the places of work don't fill by day: " + atWork[0] + " -> " + atWork[1]);
+                        check(Audit.ledger(w) == 0, "ledger " + Audit.ledger(w));
+                    } finally {
+                        SectorIndex.paranoid = false;
+                    }
+                    w.shutdown();
+                }
+            }
+        });
     }
 
     private static void nationalTests() {

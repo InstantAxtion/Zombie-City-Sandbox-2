@@ -1260,7 +1260,7 @@ public final class SaveIO {
         System.arraycopy(b, 0, a, 0, Math.min(a.length, b.length));
     }
 
-    private static void intArr(DataOutputStream o, int[] a) throws IOException {
+    static void intArr(DataOutputStream o, int[] a) throws IOException {
         if (a == null) {
             o.writeInt(-1);
             return;
@@ -1269,7 +1269,7 @@ public final class SaveIO {
         for (int v : a) o.writeInt(v);
     }
 
-    private static int[] readIntArr(DataInputStream in) throws IOException {
+    static int[] readIntArr(DataInputStream in) throws IOException {
         int n = in.readInt();
         if (n < 0) return null;
         int[] a = new int[n];
@@ -1277,7 +1277,7 @@ public final class SaveIO {
         return a;
     }
 
-    private static void floatArr(DataOutputStream o, float[] a) throws IOException {
+    static void floatArr(DataOutputStream o, float[] a) throws IOException {
         if (a == null) {
             o.writeInt(-1);
             return;
@@ -1286,7 +1286,7 @@ public final class SaveIO {
         for (float v : a) o.writeFloat(v);
     }
 
-    private static float[] readFloatArr(DataInputStream in) throws IOException {
+    static float[] readFloatArr(DataInputStream in) throws IOException {
         int n = in.readInt();
         if (n < 0) return null;
         float[] a = new float[n];
