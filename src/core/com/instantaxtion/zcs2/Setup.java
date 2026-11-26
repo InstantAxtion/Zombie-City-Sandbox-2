@@ -498,6 +498,12 @@ public final class Setup {
             float m = r.px();
             double ang = Rng.unit(w.seed, k, 301) * 6.283;
             float x = m / 2 + (float) Math.cos(ang) * m * 0.46f, y = m / 2 + (float) Math.sin(ang) * m * 0.46f;
+            float ring = w.rule("edgeHordeRing", 0);
+            if (ring > 0) {
+                // (a national map: loose in the country round the capital, not at the far borders)
+                x = Math.max(m * 0.02f, Math.min(m * 0.98f, r.city().cx * 16f + (float) Math.cos(ang) * ring));
+                y = Math.max(m * 0.02f, Math.min(m * 0.98f, r.city().cy * 16f + (float) Math.sin(ang) * ring));
+            }
             for (int a = 0; a < 60 && !r.walkablePx(x, y); a++) {
                 x += (m / 2 - x) * 0.04f;
                 y += (m / 2 - y) * 0.04f;
