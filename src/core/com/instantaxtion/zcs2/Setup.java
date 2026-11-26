@@ -36,6 +36,7 @@ public final class Setup {
         World w = new World(c, r, seed, threads);
         w.maxIndividuals = maxInd;
         w.scenario = sc;
+        Script.attach(w);
         w.mode = Roles.modeFor(role);
         Director.Header h = w.director.header;
         h.size = size;
@@ -49,7 +50,10 @@ public final class Setup {
         Region.Settlement city = r.city();
         originX = city.cx * 16f;
         originY = city.cy * 16f;
-        if (sc != null) scenario(w, sc);
+        if (sc != null) {
+            scenario(w, sc);
+            extras(w, sc);
+        }
         outbreakX = originX;
         outbreakY = originY;
         w.roles.assign(role, originX, originY);
@@ -217,6 +221,9 @@ public final class Setup {
     static void scenario(World w, Content.Scenario sc) {
         Region r = w.r;
         String o = sc.origin;
+        // an origin of content.ini's may name a built-in start of its own (start = lab...)
+        Data.Origin named = Data.origin(o);
+        if (named != null && named.facility < 0 && !named.start.equals(o)) o = named.start;
         int n = sc.zombies;
         Region.Facility at = null;
         if (o.equals("random")) {
@@ -331,6 +338,24 @@ public final class Setup {
         if (o.equals("lab")) at = facility(w, Region.F_LAB);
         else if (o.equals("prison")) at = facility(w, Region.F_PRISON);
         else if (o.equals("festival")) at = facility(w, Region.F_PARK);
+        // an origin of content.ini's at a kind of facility (the hospital, the railway station...): street of the dead
+        // out on the street there, the rest in the buildings round about
+        int street = 300;
+        Data.Origin og = o.equals("done") ? null : Data.origin(o);
+        if (at == null && og != null && og.facility >= 0) {
+            at = facility(w, og.facility);
+            street = og.street;
+            if (at == null) {
+                // this map has none: the capital's centre
+                float[] q = landNear(w, r.city().cx * 16f, r.city().cy * 16f, 400, 9);
+                originX = q[0];
+                originY = q[1];
+                int ind = Math.min(n, street);
+                pack(w, q[0], q[1], ind, 8, 9);
+                if (n > ind) spreadIndoors(w, r.sectorOfPx(q[0], q[1]), n - ind, 2);
+                o = "done";
+            }
+        }
         if (at != null && o.equals("prison")) {
             originX = at.x;
             originY = at.y;
@@ -390,7 +415,7 @@ public final class Setup {
             }
             // the first on the street, as people (the first 1,500 of a big start); the rest are already inside
             // the buildings of the streets round about
-            int ind = Math.min(n, o.equals("lab") && n > 300 ? 1500 : 300);
+            int ind = Math.min(n, o.equals("lab") && n > 300 ? 1500 : street);
             pack(w, at.x, at.y, ind, 7, 5);
             if (n > ind) spreadIndoors(w, r.sectorOfPx(at.x, at.y), n - ind, n > 2000 ? 4 : 2);
         } else if (o.equals("crash") || o.equals("countryside")) {
@@ -496,6 +521,43 @@ public final class Setup {
                 y += (m / 2 - y) * 0.04f;
             }
             w.strat.addHorde(x, y, sc.hordeSize);
+        }
+    }
+
+    /**
+     * What the editor adds to a scenario (none of the built-in ones has any): more outbreak points, forces and
+     * defences put down, the rules sheet, and the strain of the dead.
+     */
+    static void extras(World w, Content.Scenario sc) {
+        Region r = w.r;
+        float m = r.px();
+        try {
+            for (int[] kv : Script.rules(sc.rules)) w.rules.set(kv[0], kv[1]);
+            java.util.List<float[]> pts = Script.points(sc.points);
+            for (int k = 0; k < pts.size(); k++) {
+                float[] p = pts.get(k);
+                float[] q = landNear(w, p[0] * m, p[1] * m, 400, 9);
+                int n = (int) p[2], ind = Math.min(n, 400);
+                pack(w, q[0], q[1], ind, 8, 61 + k);
+                if (n > ind) w.sec.zIn[w.sec.touch(r.sectorOfPx(q[0], q[1]))] += n - ind;
+            }
+            for (String[] p : Script.place(sc.place)) {
+                float x = Float.parseFloat(p[2]) * m, y = Float.parseFloat(p[3]) * m;
+                if (p[0].equals("squad")) {
+                    Squads.Squad s = Tools.placeTemplate(w, p[1], x, y);
+                    if (s != null) s.player = true;
+                } else Tools.placeDefence(w, Integer.parseInt(p[1]), x, y);
+            }
+        } catch (java.io.IOException e) {
+            // (checked when the scenario was read: nothing gets here)
+        }
+        if (sc.strain > 0) {
+            // the dead at the start are of this strain, and it is the country's newest
+            int st = Math.min(3, sc.strain);
+            w.strat.strain = Math.max(w.strat.strain, st);
+            for (int s = 0; s < w.sec.n; s++) if (w.sec.zIn[s] > 0) w.ecology.strain[s] = (byte) st;
+            Ents e = w.e;
+            for (int i = 0; i < e.top; i++) if (e.loc[i] == Ents.FREE && e.kind[i] == Ents.ZOMBIE) w.ecology.strain[r.sectorOfPx(e.x[i], e.y[i])] = (byte) st;
         }
     }
 

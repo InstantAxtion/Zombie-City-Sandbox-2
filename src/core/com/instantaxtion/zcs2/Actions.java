@@ -13,11 +13,25 @@ public final class Actions {
             DEPLOY = 17, ARTILLERY = 18, REQUEST_ARMY = 19, CAMERA = 20, STRATEGIC = 21, JOY = 22, FIRE = 23, MAX_IND = 24,
             WATCH = 25, ADD_PLAYER = 26, SWITCH_PLAYER = 27, GENERAL = 28, PRECINCT_CORDON = 29, PRECINCT_EVAC = 30,
             DEFENCE = 31, BUILD = 32, VEH_ORDER = 33, DRIVE = 34, POSSESS = 35, STANCE = 36, SQ_ORDER = 37, MOUNT = 38,
-            POSTURE = 39, RULE = 40, CLEAR = 41, TEMPLATE = 42, MASS = 43, SURV = 44;
+            POSTURE = 39, RULE = 40, CLEAR = 41, TEMPLATE = 42, MASS = 43, SURV = 44, SEND = 45, MESSAGE = 46;
 
     public static Object exec(World w, int kind, float[] f, int[] i, String s) {
         w.director.record(kind, f, i, s);
         Director.Event e = new Director.Event();
+        e.kind = kind;
+        e.f = f == null ? new float[0] : f;
+        e.i = i == null ? new int[0] : i;
+        e.s = s == null ? "" : s;
+        return apply(w, e);
+    }
+
+    /**
+     * Carries out an input of a scenario's script (Script): the same apply, but not recorded, because a replay
+     * rebuilds the scenario and its script does it again at the same step.
+     */
+    public static Object scripted(World w, int kind, float[] f, int[] i, String s) {
+        Director.Event e = new Director.Event();
+        e.tick = w.tick;
         e.kind = kind;
         e.f = f == null ? new float[0] : f;
         e.i = i == null ? new int[0] : i;
@@ -209,6 +223,25 @@ public final class Actions {
             case TEMPLATE: return Tools.placeTemplate(w, e.s, f[0], f[1]);
             case MASS: return Tools.paintMass(w, f[0], f[1], i[0], i[1]);
             case SURV: return i.length > 0 ? w.surv.act(i[0], f, i) : Boolean.FALSE;
+            case SEND: {
+                // the nearest army formation that can go (a scenario's trigger, or the player): sent to (x, y)
+                Forces.Formation best = null;
+                float bd = Float.MAX_VALUE;
+                for (Forces.Formation fm : w.forces.formations) {
+                    if (!fm.alive || fm.faction != Ents.SOLDIER || fm.state == Forces.BROKEN) continue;
+                    float dx = fm.hq.x - f[0], dy = fm.hq.y - f[1], d = dx * dx + dy * dy;
+                    if (d < bd) {
+                        bd = d;
+                        best = fm;
+                    }
+                }
+                if (best == null || !w.forces.order(best, f[0], f[1])) return null;
+                best.player = true;
+                best.task = -1;
+                w.news.radio("Command: " + best.name + " is on its way", f[0], f[1], News.COMMAND);
+                return best;
+            }
+            case MESSAGE: w.news.headline(e.s, f.length >= 2 ? f[0] : -1, f.length >= 2 ? f[1] : -1); return null;
             default:
                 return null;
         }

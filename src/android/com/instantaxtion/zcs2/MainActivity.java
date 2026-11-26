@@ -96,6 +96,13 @@ public class MainActivity extends Activity implements GLGameView.Fallback {
         platform.stopAudio();
     }
 
+    /** A file picked for the game (a content.ini to import) comes back here. */
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, android.content.Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        platform.onPicked(requestCode, resultCode, data);
+    }
+
     @Override
     protected void onResume() {
         super.onResume();

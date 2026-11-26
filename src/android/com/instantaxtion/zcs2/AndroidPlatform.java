@@ -175,6 +175,74 @@ final class AndroidPlatform implements Platform {
         });
     }
 
+    /** The request code of a file picked for the game, and who's waiting for it. */
+    static final int PICK_FILE = 4711;
+    private FileAnswer picking;
+
+    /** Android's own file picker (ACTION_GET_CONTENT): any file, read through the content resolver when it comes back. */
+    public void pickFile(final String title, final FileAnswer answer) {
+        act.runOnUiThread(new Runnable() {
+            public void run() {
+                try {
+                    picking = answer;
+                    Intent get = new Intent(Intent.ACTION_GET_CONTENT);
+                    get.setType("*/*");
+                    get.addCategory(Intent.CATEGORY_OPENABLE);
+                    act.startActivityForResult(Intent.createChooser(get, title), PICK_FILE);
+                } catch (Throwable e) {
+                    picking = null;
+                    Toast.makeText(act, "There's no app here to pick a file with", Toast.LENGTH_SHORT).show();
+                }
+            }
+        });
+    }
+
+    /** MainActivity hands the picker's answer here. */
+    void onPicked(int requestCode, int resultCode, Intent data) {
+        if (requestCode != PICK_FILE) return;
+        final FileAnswer a = picking;
+        picking = null;
+        if (a == null || resultCode != Activity.RESULT_OK || data == null || data.getData() == null) return;
+        final Uri uri = data.getData();
+        new Thread(new Runnable() {
+            public void run() {
+                try {
+                    InputStream in = act.getContentResolver().openInputStream(uri);
+                    java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream();
+                    byte[] buf = new byte[8192];
+                    int k;
+                    while ((k = in.read(buf)) > 0 && bo.size() < (8 << 20)) bo.write(buf, 0, k);
+                    in.close();
+                    String name = uri.getLastPathSegment();
+                    a.file(name == null ? "content.ini" : name, bo.toByteArray());
+                } catch (Throwable e) {
+                    act.runOnUiThread(new Runnable() {
+                        public void run() {
+                            Toast.makeText(act, "Couldn't read that file", Toast.LENGTH_SHORT).show();
+                        }
+                    });
+                }
+            }
+        }, "pick").start();
+    }
+
+    /** The share sheet (ACTION_SEND) with the file's text. */
+    public void shareText(final String fileName, final String text) {
+        act.runOnUiThread(new Runnable() {
+            public void run() {
+                try {
+                    Intent send = new Intent(Intent.ACTION_SEND);
+                    send.setType("text/plain");
+                    send.putExtra(Intent.EXTRA_SUBJECT, "Zombie City 2: " + fileName);
+                    send.putExtra(Intent.EXTRA_TEXT, text);
+                    act.startActivity(Intent.createChooser(send, "Share " + fileName));
+                } catch (Throwable e) {
+                    Toast.makeText(act, "Couldn't share it", Toast.LENGTH_SHORT).show();
+                }
+            }
+        });
+    }
+
     public void askText(final String title, final String current, final TextAnswer answer) {
         act.runOnUiThread(new Runnable() {
             public void run() {

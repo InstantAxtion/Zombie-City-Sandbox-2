@@ -77,6 +77,16 @@ public final class Content {
         /** Day of the year it starts (-1 = the default, 1 September). */
         public int season = -1;
         public boolean custom;
+        /**
+         * The editor's additions (all empty in the built-in scenarios). points: more outbreak points, "x,y,n; ..." as
+         * fractions of the map's side and how many of the dead; place: forces and defences put down at the start,
+         * "squad:swat@0.4,0.5; defence:2@0.41,0.5" (a [squad] id or a Defences kind); rules: the rules sheet,
+         * "key:value, ..." (Rules.*); strain: the strain of the dead at the start (0-3); goals: the scenario's own
+         * win and lose conditions (Script); triggers: "condition -> action" lines (Script), trigger.1, trigger.2...
+         */
+        public String points = "", place = "", rules = "", goals = "";
+        public int strain;
+        public final List<String> triggers = new ArrayList<String>();
 
         /** The scenario as a content.ini section (for custom scenarios and replays). */
         public String toIni() {
@@ -92,6 +102,12 @@ public final class Content {
             b.append("hordeSize = ").append(hordeSize).append("\n");
             if (season >= 0) b.append("season = ").append(season).append("\n");
             if (role.length() > 0) b.append("role = ").append(role).append("\n");
+            if (points.length() > 0) b.append("points = ").append(points).append("\n");
+            if (place.length() > 0) b.append("place = ").append(place).append("\n");
+            if (rules.length() > 0) b.append("rules = ").append(rules).append("\n");
+            if (strain > 0) b.append("strain = ").append(strain).append("\n");
+            if (goals.length() > 0) b.append("goals = ").append(goals).append("\n");
+            for (int k = 0; k < triggers.size(); k++) b.append("trigger.").append(k + 1).append(" = ").append(triggers.get(k).replace('\n', ' ')).append("\n");
             b.append("desc = ").append(desc.replace('\n', ' ')).append("\n");
             return b.toString();
         }
@@ -118,34 +134,80 @@ public final class Content {
     public long rulesHash;
 
     public static Content load(InputStream in) throws IOException {
+        return load(in, true);
+    }
+
+    /** Reads a content.ini; install = false only checks it (its data sections aren't put in use: an import being checked). */
+    public static Content load(InputStream in, boolean install) throws IOException {
         BufferedReader r = new BufferedReader(new InputStreamReader(in, "UTF-8"));
         List<String[]> heads = new ArrayList<String[]>();
         List<Map<String, String>> bodies = new ArrayList<Map<String, String>>();
+        List<Integer> lines = new ArrayList<Integer>();
         Map<String, String> cur = null;
         String line;
         long h = 1469598103934665603L;
+        boolean inData = false;
+        int lineNo = 0;
         while ((line = r.readLine()) != null) {
+            lineNo++;
             line = line.trim();
             if (line.length() == 0 || line.startsWith("#")) continue;
-            for (int i = 0; i < line.length(); i++) h = (h ^ line.charAt(i)) * 1099511628211L;
-            if (line.startsWith("[") && line.endsWith("]")) {
-                String[] p = line.substring(1, line.length() - 1).trim().split("\\s+");
-                if (p.length != 2) throw new IOException("bad section: " + line);
+            boolean head = line.startsWith("[") && line.endsWith("]");
+            String[] p = null;
+            if (head) {
+                p = line.substring(1, line.length() - 1).trim().split("\\s+");
+                if (p.length != 2) throw new IOException("line " + lineNo + ": a section is [kind id], not " + line);
+                inData = Data.isKind(p[0]);
+            }
+            // (the data sections, names, buildings' looks, presets, origins and outside help, are kept out of the
+            // fingerprint: moving them out of the code changed nothing a save holds)
+            if (!inData) for (int i = 0; i < line.length(); i++) h = (h ^ line.charAt(i)) * 1099511628211L;
+            if (head) {
                 heads.add(p);
                 cur = new LinkedHashMap<String, String>();
                 bodies.add(cur);
+                lines.add(lineNo);
                 continue;
             }
             int eq = line.indexOf('=');
-            if (eq < 0 || cur == null) throw new IOException("bad line: " + line);
+            if (eq < 0) throw new IOException("line " + lineNo + ": expected key = value, not \"" + line + "\"");
+            if (cur == null) throw new IOException("line " + lineNo + ": a value before the first [section]");
             cur.put(line.substring(0, eq).trim(), line.substring(eq + 1).trim());
         }
         Content c = new Content();
         c.rulesHash = h;
+        c.installs = install;
+        try {
+            c.build(heads, bodies, lines);
+        } catch (NumberFormatException e) {
+            throw new IOException(c.where + ": a number was expected (" + e.getMessage() + ")");
+        } catch (IOException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            throw new IOException(c.where + ": " + e);
+        }
+        return c;
+    }
+
+    /** Where the loader is (a section and its line), for its error messages. */
+    private String where = "content.ini";
+    private boolean installs = true;
+
+    private void at(int line, String kind, String id) {
+        where = "line " + line + " [" + kind + " " + id + "]";
+    }
+
+    private void build(List<String[]> heads, List<Map<String, String>> bodies, List<Integer> lines) throws IOException {
+        Content c = this;
         // weapons first, everything else refers to them
-        for (int i = 0; i < heads.size(); i++) if (heads.get(i)[0].equals("weapon")) c.addWeapon(heads.get(i)[1], bodies.get(i));
+        for (int i = 0; i < heads.size(); i++)
+            if (heads.get(i)[0].equals("weapon")) {
+                at(lines.get(i), "weapon", heads.get(i)[1]);
+                c.addWeapon(heads.get(i)[1], bodies.get(i));
+            }
         for (int i = 0; i < heads.size(); i++) {
             String kind = heads.get(i)[0], id = heads.get(i)[1];
+            at(lines.get(i), kind, id);
             Map<String, String> b = bodies.get(i);
             if (kind.equals("unit")) c.addUnit(id, b);
             else if (kind.equals("zombie")) c.addZombie(id, b);
@@ -156,19 +218,43 @@ public final class Content {
                     String k = en.getKey();
                     float v = ruleValue(en.getValue());
                     if (k.endsWith(NATIONAL)) c.nationalRules.put(k.substring(0, k.length() - NATIONAL.length()), v);
-                    else if (k.indexOf('@') >= 0) throw new IOException("bad rule key: " + k);
+                    else if (k.indexOf('@') >= 0) throw new IOException(where + ": a rule's key can only end in @national, not " + k);
                     else c.rules.put(k, v);
                 }
-            } else if (!kind.equals("weapon") && !kind.equals("squad") && !kind.equals("formation"))
-                throw new IOException("unknown section kind: " + kind);
+            } else if (Data.isKind(kind)) c.data.add(kind, id, b, where);
+            else if (!kind.equals("weapon") && !kind.equals("squad") && !kind.equals("formation"))
+                throw new IOException(where + ": unknown kind of section \"" + kind + "\" (weapon, unit, zombie, vehicle, squad, formation, "
+                        + "scenario, rules, names, building, preset, origin, outside)");
         }
-        for (int i = 0; i < heads.size(); i++) if (heads.get(i)[0].equals("squad")) c.addSquad(heads.get(i)[1], bodies.get(i));
-        for (int i = 0; i < heads.size(); i++) if (heads.get(i)[0].equals("formation")) c.addFormation(heads.get(i)[1], bodies.get(i));
+        for (int i = 0; i < heads.size(); i++)
+            if (heads.get(i)[0].equals("squad")) {
+                at(lines.get(i), "squad", heads.get(i)[1]);
+                c.addSquad(heads.get(i)[1], bodies.get(i));
+            }
+        for (int i = 0; i < heads.size(); i++)
+            if (heads.get(i)[0].equals("formation")) {
+                at(lines.get(i), "formation", heads.get(i)[1]);
+                c.addFormation(heads.get(i)[1], bodies.get(i));
+            }
+        // a scenario's triggers, goals, points, placings and rules (the editor's), read once to find mistakes
+        for (int i = 0; i < heads.size(); i++)
+            if (heads.get(i)[0].equals("scenario")) {
+                at(lines.get(i), "scenario", heads.get(i)[1]);
+                String bad = Script.check(c, c.scenario(heads.get(i)[1]));
+                if (bad != null) throw new IOException(where + ": " + bad);
+            }
+        where = "content.ini";
         for (String need : new String[]{"civilian", "patrol", "rifleman"}) if (c.unit(need) == null) throw new IOException("content needs unit " + need);
         if (c.ztype("walker") == null) throw new IOException("content needs zombie walker");
         for (String need : new String[]{"patrol_car", "army_truck", "humvee"}) if (c.vtype(need) == null) throw new IOException("content needs vehicle " + need);
-        return c;
+        c.data.check();
+        // the tables the map makers and the names read (they have no Content of their own): each kind this file has
+        // replaces the one in use, so a mod without them keeps the built-in ones
+        if (installs) Data.install(c.data);
     }
+
+    /** This file's data sections (names, buildings, presets, origins, outside help). */
+    public final Data data = new Data();
 
     private static float f(Map<String, String> b, String k, float def) {
         String v = b.get(k);
@@ -300,6 +386,12 @@ public final class Content {
         sc.hordeSize = (int) f(b, "hordeSize", 800);
         sc.season = (int) f(b, "season", -1);
         sc.role = s(b, "role", "");
+        sc.points = s(b, "points", "");
+        sc.place = s(b, "place", "");
+        sc.rules = s(b, "rules", "");
+        sc.strain = (int) f(b, "strain", 0);
+        sc.goals = s(b, "goals", "");
+        for (Map.Entry<String, String> en : b.entrySet()) if (en.getKey().startsWith("trigger")) sc.triggers.add(en.getValue());
         sc.index = scenarios.size();
         scenarios.add(sc);
         scById.put(id, sc);
@@ -316,7 +408,7 @@ public final class Content {
             if (part.length() == 0) continue;
             String[] p = part.split("\\*");
             Unit u = unit(p[0].trim());
-            if (u == null) throw new IOException("squad " + id + ": no unit " + p[0]);
+            if (u == null) throw new IOException(where + ": no unit called \"" + p[0].trim() + "\"");
             int n = p.length > 1 ? Integer.parseInt(p[1].trim()) : 1;
             for (int k = 0; k < n; k++) us.add(u);
         }
@@ -341,7 +433,7 @@ public final class Content {
             if (part.length() == 0) continue;
             String[] p = part.split("\\*");
             SquadT st = squadById.get(p[0].trim());
-            if (st == null) throw new IOException("formation " + id + ": no squad " + p[0]);
+            if (st == null) throw new IOException(where + ": no squad called \"" + p[0].trim() + "\"");
             int n = p.length > 1 ? Integer.parseInt(p[1].trim()) : 1;
             for (int k = 0; k < n; k++) sq.add(st);
         }

@@ -77,12 +77,20 @@ one person.
   as an officer.
 - **Director mode.** Every game records what the player did and where the camera looked; save a replay from the
   pause menu (a few kilobytes) and it rebuilds the whole outbreak from its start, exactly, and you can take over
-  when it ends. A timelapse plays the country back hour by hour.
+  when it ends. A timelapse plays the country back hour by hour. Under a replay, a scrubber goes to any moment
+  (snapshots kept as it plays make going back quick, and it still comes out exactly the same), with back an hour,
+  pause, step and speed; camera keyframes make a smooth path the view glides along, saved with the replay as a
+  director's cut.
 - **Shared worlds.** A challenge code (map size, terrain, seed, scenario, role), shown on the New Game screen
   and in the pause menu, can be typed in to play the same game. Your best for each code (fewest lives lost,
   fastest containment) is kept and shown.
-- **Modding.** Make your own scenarios in the editor (where it starts, how many, hordes, goal, days, season,
-  role). Put a `content.ini` in the app's files and it replaces the built-in one.
+- **Modding.** Make your own scenarios in the editor, on any map (a national one from a challenge code too):
+  where it starts and how many, more outbreak points, squads and defences put down on the map, the rules sheet,
+  the strain, goals of your own (survive N days, keep a town above N%, kill all the dead, keep losses under N), and
+  triggers ("after 3 hours, a horde of 2,000 here"; "when the capital has 1,000 dead, an air strike"; "when the
+  power station is lost, a storm"; a formation sent; a message), which fire the same way in every replay.
+  Settings, Mods imports a `content.ini` from the phone (checked first: a mistake is shown with its line), shares
+  the one in use, or goes back to the built-in one.
 - **Readable at every scale.** Everything on the map is sized for the phone's screen (people, vehicles, unit
   symbols, labels with outlines), crowds glow where they're thick, and labels don't pile on top of each other. Tap
   anyone or anything: names, ranks, ammunition, orders, a formation's strength
@@ -145,7 +153,8 @@ size, printing the numbers; `STRAT=days` then fast-forwards, `OVERLAP=1` counts 
 interface driven by scripted taps; `UiShot dir 1080 2400 2.75` shoots a phone in portrait, `UiShot dir 2400 1080
 2.75` sideways, and `UiShot dir 1080 2400 2.75 director` walks the roles, campaigns, editor, layers, the hand-over
 to the general, the timelapse and replays; `UiShot dir 1080 2400 2.75 survival` the survivor's card, Kit, a
-building, a car and companions).
+building, a car and companions; `director14` the editor's tabs, a scripted game, the replay's scrubber, camera
+keyframes and path, a director's cut and a content.ini import).
 
 `tools/balance.sh 5000,50000,100000,250000 8 2304 30 4` plays each outbreak size on many seeds in fast-forward
 and prints the spread of outcomes (days to contain or fall, share of the country lost, losses); every run goes to
@@ -171,7 +180,24 @@ Replays copied into the app's files as `.zcr` appear in the replay list.
 
 Every person, weapon, vehicle, zombie type, squad, formation, scenario and the simulation's balance rules are
 defined in [`assets/content.ini`](assets/content.ini), not in code. Add a section to add a type. A scenario can
-set its role (`role = officer`), its season (`season = 355`), and start anywhere (`origin = xy:0.4,0.6`).
+set its role (`role = officer`), its season (`season = 355`), and start anywhere (`origin = xy:0.4,0.6`), and
+carry what the editor makes: `points` (more outbreak points), `place` (squads and defences), `rules`, `strain`,
+`goals = days:7; keep:0:50; cleared; losses:5000` and triggers, one a line:
+
+```
+trigger.1 = time:180 -> horde:0.40,0.62,2000
+trigger.2 = dead:0:1000 -> strike:0.5,0.5
+trigger.3 = lost:12 -> weather:4
+trigger.4 = falls:3 -> send:0.45,0.5
+trigger.5 = time:30 -> message:Reports of the dead in the hills
+```
+
+The data the map makers use is there too: `[names]` (places, people, callsigns), `[building]` (each kind's name,
+roof colours on today's and national maps, pitched or flat, lit at night), `[preset]` (a map preset's terrain
+and the numbers that shape it; add one with index 4 on), `[origin]` (where an outbreak can start: a built-in start,
+or any kind of facility) and `[outside]` (the formations national mobilisation sends). These are kept out of the
+rules' fingerprint, and the built-in file makes exactly the maps the code made before. A `content.ini` without one
+of them keeps the built-in one. Mistakes are reported with the line and section.
 
 ## Layout
 

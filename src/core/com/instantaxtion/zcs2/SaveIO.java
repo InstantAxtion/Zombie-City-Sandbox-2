@@ -280,6 +280,7 @@ public final class SaveIO {
         World w = new World(c, r, seed, threads, sparse);
         if (sparse) w.act.read(in);
         w.scenario = scen.length() == 0 ? null : c.scenario(scen);
+        Script.attach(w); // (a scenario with triggers or goals has a module for them)
         w.mode = mode;
         byte[][] generated = null;
         if (ver >= 8) {

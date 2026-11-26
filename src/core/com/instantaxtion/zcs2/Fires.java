@@ -388,7 +388,7 @@ public final class Fires extends Module {
 
     /** One building of a kind, as a sentence says it: "apartment block", "office block", "house". */
     static String building(int kind) {
-        String n = Region.BNAMES[kind].toLowerCase();
+        String n = Data.buildingName(kind).toLowerCase();
         if (n.equals("apartments")) return "apartment block";
         if (n.equals("offices")) return "office block";
         return n;
