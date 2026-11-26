@@ -28,6 +28,15 @@ final class Texts {
     };
 
     static final String[] NOTES = {
+            "1.4  Legible",
+            // ((1.4) Legibility: why things happened, said where you can see it. Kept together for an easy merge.)
+            "- The numbers panel (the chart button under the ?): kills by side, kills a minute, the most of the dead at once, open calls, help from outside, a sparkline of the dead and the top three fighters. Police and soldiers are counted two ways, out in squads and in all, and the top bar, the panel, the report and its key agree.",
+            "- Callouts on the map where things happen: Officer down, Barricade broken, Bridge blown, Horde sighted, a town fallen. They fade, the important ones first, and never land on a label.",
+            "- Every fighter keeps their last ten seconds: what they were doing, the dead round them, who was with them, ammunition and health. Their card shows it as a strip, and when they fall it says why (\"out of ammo, surrounded by 6, fell back too late\"), on the card and in the report's fallen.",
+            "- A town that falls or is given up says why: it lost its police, the phones were down, a horde arrived, no army was sent, the evacuation failed. See it on the town's card and in the report.",
+            "- The after-action report tells the story: the decisive moments, a map of how it ended, every town the dead reached (held or lost, when, what it cost, why) and every formation (held or broke, and why).",
+            "- Fast-forward slows to 1x for big events (a horde near a town, a facility lost, a new strain, a blackout) and offers to take you there. Settings: Slow down for big events.",
+            "- What the simulation knew, now drawn: safe points for the survivor (and on the Forces layer), drones orbiting, marksmen on their perches, the precinct's cordon and how long its calls have waited, and what each fighter is doing on their card.",
             "1.3  A country that makes sense, and a look that reads",
             "- Wars at the scale of a country: a small outbreak is put down within a day; a big one is a war of weeks that can be won or lost. Bites indoors, turning and fights by the numbers are paced over hours, and ammunition comes from depots and escorted convoys.",
             "- Things come down again: the alert is lowered a step at a time, curfews, shelter orders, evacuations and quarantines are lifted, outside units go home, people return to their towns, and a town clear of the dead is declared safe with what it cost.",

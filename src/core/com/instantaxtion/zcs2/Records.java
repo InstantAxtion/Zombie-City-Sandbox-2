@@ -173,7 +173,7 @@ public final class Records extends Module {
         calloutSeq++;
     }
 
-    private void alert(String text, float x, float y, int kind) {
+    void alert(String text, float x, float y, int kind) {
         alerts[(int) (alertSeq % alerts.length)] = new Alert(text, x, y, kind, alertSeq);
         alertSeq++;
     }
