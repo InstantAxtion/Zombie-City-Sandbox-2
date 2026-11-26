@@ -778,6 +778,43 @@ public final class SaveIO {
         }
     }
 
+    /** Module saves: float[] as runs of their bits (0f is none), booleans and bytes as small runs. */
+    static void floatRuns(DataOutputStream o, float[] f) throws IOException {
+        int[] d = new int[f.length];
+        for (int i = 0; i < f.length; i++) d[i] = Float.floatToRawIntBits(f[i]);
+        runs(o, d, d.length, false);
+    }
+
+    static void readFloatRuns(DataInputStream in, float[] f) throws IOException {
+        int[] d = new int[f.length];
+        readRuns(in, d, false);
+        for (int i = 0; i < f.length; i++) f[i] = Float.intBitsToFloat(d[i]);
+    }
+
+    static void boolRuns(DataOutputStream o, boolean[] b) throws IOException {
+        int[] d = new int[b.length];
+        for (int i = 0; i < b.length; i++) d[i] = b[i] ? 1 : 0;
+        runs(o, d, d.length, true);
+    }
+
+    static void readBoolRuns(DataInputStream in, boolean[] b) throws IOException {
+        int[] d = new int[b.length];
+        readRuns(in, d, true);
+        for (int i = 0; i < b.length; i++) b[i] = d[i] != 0;
+    }
+
+    static void byteRuns(DataOutputStream o, byte[] b) throws IOException {
+        int[] d = new int[b.length];
+        for (int i = 0; i < b.length; i++) d[i] = b[i];
+        runs(o, d, d.length, true);
+    }
+
+    static void readByteRuns(DataInputStream in, byte[] b) throws IOException {
+        int[] d = new int[b.length];
+        readRuns(in, d, true);
+        for (int i = 0; i < b.length; i++) b[i] = (byte) d[i];
+    }
+
     /** Reads what runs() wrote into a (zeros where it says none; values past a's end are read and dropped). */
     static void readRuns(DataInputStream in, int[] a, boolean small) throws IOException {
         int n = Overlay.readVar(in), i = 0;

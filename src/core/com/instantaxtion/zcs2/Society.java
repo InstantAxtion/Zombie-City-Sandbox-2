@@ -615,11 +615,10 @@ public final class Society extends Module {
     @Override
     public void save(DataOutputStream o) throws IOException {
         Sectors sec = w.sec;
-        o.writeInt(sec.n);
-        for (int s = 0; s < sec.n; s++) {
-            o.writeFloat(holdT[s]);
-            o.writeBoolean(sec.holdout[s]);
-        }
+        // (sparse: -1, then the arrays in runs; older saves wrote the sector count and every sector in full)
+        o.writeInt(-1);
+        SaveIO.floatRuns(o, holdT);
+        SaveIO.boolRuns(o, sec.holdout);
         o.writeInt(militia.length);
         for (int i = 0; i < militia.length; i++) {
             o.writeInt(militia[i]);
@@ -666,6 +665,10 @@ public final class Society extends Module {
     public void load(DataInputStream in) throws IOException {
         Sectors sec = w.sec;
         int n = in.readInt();
+        if (n < 0) {
+            SaveIO.readFloatRuns(in, holdT);
+            SaveIO.readBoolRuns(in, sec.holdout);
+        }
         for (int s = 0; s < n; s++) {
             float t = in.readFloat();
             boolean h = in.readBoolean();

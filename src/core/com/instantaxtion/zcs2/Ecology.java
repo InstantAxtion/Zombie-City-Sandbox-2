@@ -338,14 +338,12 @@ public final class Ecology extends Module {
 
     @Override
     public void save(DataOutputStream o) throws IOException {
-        int n = w.sec.n;
-        o.writeInt(n);
-        for (int s = 0; s < n; s++) {
-            o.writeFloat(hunger[s]);
-            o.writeFloat(nestT[s]);
-            o.writeBoolean(nest[s]);
-            o.writeByte(strain[s]);
-        }
+        // (sparse: -1, then each array in runs; older saves wrote the sector count and every sector in full)
+        o.writeInt(-1);
+        SaveIO.floatRuns(o, hunger);
+        SaveIO.floatRuns(o, nestT);
+        SaveIO.boolRuns(o, nest);
+        SaveIO.byteRuns(o, strain);
         o.writeInt(hordeStrain.size());
         java.util.List<Integer> keys = new java.util.ArrayList<Integer>(hordeStrain.keySet());
         java.util.Collections.sort(keys);
@@ -364,6 +362,12 @@ public final class Ecology extends Module {
     @Override
     public void load(DataInputStream in) throws IOException {
         int n = in.readInt();
+        if (n < 0) {
+            SaveIO.readFloatRuns(in, hunger);
+            SaveIO.readFloatRuns(in, nestT);
+            SaveIO.readBoolRuns(in, nest);
+            SaveIO.readByteRuns(in, strain);
+        }
         for (int s = 0; s < n; s++) {
             float hu = in.readFloat(), nt = in.readFloat();
             boolean ne = in.readBoolean();

@@ -182,16 +182,16 @@ public final class Director extends Module {
         o.writeFloat(lastCamY1);
         o.writeBoolean(lastDetail);
         o.writeDouble(nextSample);
-        o.writeInt(lapseTime.size());
+        // (sparse: -1 - the hours kept, each hour's pictures in runs, then the heatmaps in runs; older saves wrote the
+        // count, then every cell in full)
+        o.writeInt(-1 - lapseTime.size());
         for (int k = 0; k < lapseTime.size(); k++) {
             o.writeFloat(lapseTime.get(k));
-            o.write(lapseDead.get(k));
-            o.write(lapsePeople.get(k));
+            SaveIO.byteRuns(o, lapseDead.get(k));
+            SaveIO.byteRuns(o, lapsePeople.get(k));
         }
-        for (int s = 0; s < peak.length; s++) {
-            o.writeFloat(peak[s]);
-            o.writeFloat(deaths[s]);
-        }
+        SaveIO.floatRuns(o, peak);
+        SaveIO.floatRuns(o, deaths);
     }
 
     @Override
@@ -210,18 +210,29 @@ public final class Director extends Module {
         lapseDead.clear();
         lapsePeople.clear();
         n = in.readInt();
+        boolean sparse = n < 0;
+        if (sparse) n = -1 - n;
         for (int k = 0; k < n; k++) {
             lapseTime.add(in.readFloat());
             byte[] a = new byte[lapseN], b = new byte[lapseN];
-            in.readFully(a);
-            in.readFully(b);
+            if (sparse) {
+                SaveIO.readByteRuns(in, a);
+                SaveIO.readByteRuns(in, b);
+            } else {
+                in.readFully(a);
+                in.readFully(b);
+            }
             lapseDead.add(a);
             lapsePeople.add(b);
         }
-        for (int s = 0; s < peak.length; s++) {
-            peak[s] = in.readFloat();
-            deaths[s] = in.readFloat();
-        }
+        if (sparse) {
+            SaveIO.readFloatRuns(in, peak);
+            SaveIO.readFloatRuns(in, deaths);
+        } else
+            for (int s = 0; s < peak.length; s++) {
+                peak[s] = in.readFloat();
+                deaths[s] = in.readFloat();
+            }
     }
 
     static void writeEvent(DataOutputStream o, Event e) throws IOException {
