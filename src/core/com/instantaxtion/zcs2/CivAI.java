@@ -221,7 +221,7 @@ final class CivAI {
         int cell = w.sp.cellOf(x, y);
         int[] L = w.sp.lList;
         int n = 0;
-        for (int j = w.sp.lStart[cell]; j < w.sp.lStart[cell + 1] && n < 6; j++) {
+        for (int j = w.sp.lStart[cell]; j < w.sp.lEnd[cell] && n < 6; j++) {
             int o = L[j];
             if (o == i) continue;
             float ddx = x - e.x[o], ddy = y - e.y[o], d2 = ddx * ddx + ddy * ddy;

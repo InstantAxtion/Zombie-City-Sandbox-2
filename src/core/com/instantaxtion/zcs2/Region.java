@@ -85,7 +85,17 @@ public final class Region {
     public final int preset;
     public String name;
     public final byte[] tile;
-    public final int[] bldAt;
+    /** The building on each tile, stored as index + 1 (0 = none) in 16 bits: up to 65,534 buildings. */
+    private final char[] bldAt;
+
+    /** The building on tile index i (ty * W + tx), or -1. */
+    public int building(int i) {
+        return bldAt[i] - 1;
+    }
+
+    void clearBuilding(int i) {
+        bldAt[i] = 0;
+    }
     public final List<Settlement> settlements = new ArrayList<Settlement>();
     public final List<Facility> facilities = new ArrayList<Facility>();
     public final RoadGraph roads = new RoadGraph();
@@ -111,8 +121,7 @@ public final class Region {
         this.seed = seed;
         this.preset = preset;
         tile = new byte[w * h];
-        bldAt = new int[w * h];
-        Arrays.fill(bldAt, -1);
+        bldAt = new char[w * h];
         navW = w / NAV;
         navH = h / NAV;
         nav = new byte[navW * navH];
@@ -167,6 +176,7 @@ public final class Region {
             bres = Arrays.copyOf(bres, n);
             broof = Arrays.copyOf(broof, n);
         }
+        if (bCount >= 65534) throw new IllegalStateException("too many buildings");
         int i = bCount++;
         bx[i] = x;
         by[i] = y;
@@ -181,7 +191,7 @@ public final class Region {
             for (int tx = x; tx < x + w; tx++)
                 if (in(tx, ty)) {
                     tile[ty * W + tx] = Tile.BUILDING;
-                    bldAt[ty * W + tx] = i;
+                    bldAt[ty * W + tx] = (char) (i + 1);
                 }
         return i;
     }
@@ -190,9 +200,9 @@ public final class Region {
     public void destroyBuilding(int i) {
         for (int ty = by[i]; ty < by[i] + bh[i]; ty++)
             for (int tx = bx[i]; tx < bx[i] + bw[i]; tx++)
-                if (in(tx, ty) && bldAt[ty * W + tx] == i) {
+                if (in(tx, ty) && bldAt[ty * W + tx] == i + 1) {
                     tile[ty * W + tx] = Tile.RUBBLE;
-                    bldAt[ty * W + tx] = -1;
+                    bldAt[ty * W + tx] = 0;
                 }
         bfloors[i] = 0;
         rebuildNav(bx[i] - 2, by[i] - 2, bx[i] + bw[i] + 2, by[i] + bh[i] + 2);

@@ -10,9 +10,13 @@ import java.util.Arrays;
 public final class Spatial {
     public static final int CELL = 64;
     public final int cw, ch;
-    public final int[] zStart, lStart;
+    /** Each cell's range in zList / lList is [zStart[c], zEnd[c]) (empty cells: start == end). */
+    public final int[] zStart, zEnd, lStart, lEnd;
     public int[] zList = new int[1024], lList = new int[1024];
-    private final int[] zCnt, lCnt;
+    /** Cells with anyone in them since the last build: only these are cleared and summed (a country has
+     *  hundreds of thousands of cells, nearly all empty). */
+    private int[] touched = new int[1024];
+    private int touchedN;
     public int zCount, lCount, civCount;
     /** Per sector: zombies, civilians, police, soldiers on the map (rebuilt each step). */
     public final int[] secZ, secCiv, secCop, secSol;
@@ -20,10 +24,10 @@ public final class Spatial {
     public Spatial(Region r) {
         cw = r.px() / CELL + 1;
         ch = cw;
-        zStart = new int[cw * ch + 1];
-        lStart = new int[cw * ch + 1];
-        zCnt = new int[cw * ch];
-        lCnt = new int[cw * ch];
+        zStart = new int[cw * ch];
+        zEnd = new int[cw * ch];
+        lStart = new int[cw * ch];
+        lEnd = new int[cw * ch];
         int ns = r.secW * r.secH;
         secZ = new int[ns];
         secCiv = new int[ns];
@@ -44,40 +48,52 @@ public final class Spatial {
     }
 
     public void build(Ents e) {
-        Arrays.fill(zCnt, 0);
-        Arrays.fill(lCnt, 0);
+        // empty the cells used last time
+        for (int k = 0; k < touchedN; k++) {
+            int c = touched[k];
+            zStart[c] = zEnd[c] = lStart[c] = lEnd[c] = 0;
+        }
+        touchedN = 0;
         Arrays.fill(secZ, 0);
         Arrays.fill(secCiv, 0);
         Arrays.fill(secCop, 0);
         Arrays.fill(secSol, 0);
+        // count (in zEnd / lEnd), noting each cell the first time it's used
         int nz = 0, nl = 0, nc = 0;
         for (int i = 0; i < e.top; i++) {
             if (e.loc[i] != Ents.FREE) continue;
             int c = cellOf(e.x[i], e.y[i]);
+            if (zEnd[c] == 0 && lEnd[c] == 0) {
+                if (touchedN == touched.length) touched = Arrays.copyOf(touched, touchedN * 2);
+                touched[touchedN++] = c;
+            }
             int s = r.sectorOfPx(e.x[i], e.y[i]);
             switch (e.kind[i]) {
-                case Ents.ZOMBIE: zCnt[c]++; nz++; secZ[s]++; break;
-                case Ents.CIV: lCnt[c]++; nl++; secCiv[s]++; nc++; break;
-                case Ents.COP: lCnt[c]++; nl++; secCop[s]++; break;
-                default: lCnt[c]++; nl++; secSol[s]++;
+                case Ents.ZOMBIE: zEnd[c]++; nz++; secZ[s]++; break;
+                case Ents.CIV: lEnd[c]++; nl++; secCiv[s]++; nc++; break;
+                case Ents.COP: lEnd[c]++; nl++; secCop[s]++; break;
+                default: lEnd[c]++; nl++; secSol[s]++;
             }
         }
         if (zList.length < nz) zList = new int[nz * 2];
         if (lList.length < nl) lList = new int[nl * 2];
-        int n = cw * ch;
-        zStart[0] = 0;
-        lStart[0] = 0;
-        for (int c = 0; c < n; c++) {
-            zStart[c + 1] = zStart[c] + zCnt[c];
-            lStart[c + 1] = lStart[c] + lCnt[c];
-            zCnt[c] = zStart[c];
-            lCnt[c] = lStart[c];
+        // give each used cell its range; zEnd / lEnd become the fill cursors
+        int zp = 0, lp = 0;
+        for (int k = 0; k < touchedN; k++) {
+            int c = touched[k];
+            zStart[c] = zp;
+            zp += zEnd[c];
+            zEnd[c] = zStart[c];
+            lStart[c] = lp;
+            lp += lEnd[c];
+            lEnd[c] = lStart[c];
         }
+        // fill, in entity order (so each cell lists its people in the same order as before)
         for (int i = 0; i < e.top; i++) {
             if (e.loc[i] != Ents.FREE) continue;
             int c = cellOf(e.x[i], e.y[i]);
-            if (e.kind[i] == Ents.ZOMBIE) zList[zCnt[c]++] = i;
-            else lList[lCnt[c]++] = i;
+            if (e.kind[i] == Ents.ZOMBIE) zList[zEnd[c]++] = i;
+            else lList[lEnd[c]++] = i;
         }
         zCount = nz;
         lCount = nl;
@@ -90,15 +106,15 @@ public final class Spatial {
 
     /** The nearest zombie within maxR of (x, y), or -1. */
     public int nearestZombie(Ents e, float x, float y, float maxR) {
-        return nearest(e, x, y, maxR, zStart, zList, -1, 0);
+        return nearest(e, x, y, maxR, zStart, zEnd, zList, -1, 0);
     }
 
     /** The nearest living person within maxR (not 'self'); kindMask bit k set = skip kind k. */
     public int nearestLiving(Ents e, float x, float y, float maxR, int self, int skipMask) {
-        return nearest(e, x, y, maxR, lStart, lList, self, skipMask);
+        return nearest(e, x, y, maxR, lStart, lEnd, lList, self, skipMask);
     }
 
-    private int nearest(Ents e, float x, float y, float maxR, int[] start, int[] list, int self, int skipMask) {
+    private int nearest(Ents e, float x, float y, float maxR, int[] start, int[] end, int[] list, int self, int skipMask) {
         int cx = (int) (x / CELL), cy = (int) (y / CELL);
         int rings = (int) (maxR / CELL) + 1;
         int best = -1;
@@ -114,7 +130,7 @@ public final class Spatial {
                 for (int xx = cx - k; xx <= cx + k; xx += edgeRow ? 1 : 2 * k) {
                     if (xx >= 0 && xx < cw) {
                         int c = yy * cw + xx;
-                        for (int j = start[c]; j < start[c + 1]; j++) {
+                        for (int j = start[c]; j < end[c]; j++) {
                             int o = list[j];
                             if (o == self || ((skipMask >> e.kind[o]) & 1) != 0) continue;
                             float dx = e.x[o] - x, dy = e.y[o] - y, d = dx * dx + dy * dy;
@@ -133,14 +149,14 @@ public final class Spatial {
 
     /** How many zombies are within rad of (x, y) (stops counting at cap). */
     public int zombiesNear(Ents e, float x, float y, float rad, int cap) {
-        return countNear(e, x, y, rad, cap, zStart, zList);
+        return countNear(e, x, y, rad, cap, zStart, zEnd, zList);
     }
 
     public int livingNear(Ents e, float x, float y, float rad, int cap) {
-        return countNear(e, x, y, rad, cap, lStart, lList);
+        return countNear(e, x, y, rad, cap, lStart, lEnd, lList);
     }
 
-    private int countNear(Ents e, float x, float y, float rad, int cap, int[] start, int[] list) {
+    private int countNear(Ents e, float x, float y, float rad, int cap, int[] start, int[] end, int[] list) {
         int x0 = Math.max(0, (int) ((x - rad) / CELL)), x1 = Math.min(cw - 1, (int) ((x + rad) / CELL));
         int y0 = Math.max(0, (int) ((y - rad) / CELL)), y1 = Math.min(ch - 1, (int) ((y + rad) / CELL));
         float r2 = rad * rad;
@@ -148,7 +164,7 @@ public final class Spatial {
         for (int cy = y0; cy <= y1; cy++)
             for (int cx = x0; cx <= x1; cx++) {
                 int c = cy * cw + cx;
-                for (int j = start[c]; j < start[c + 1]; j++) {
+                for (int j = start[c]; j < end[c]; j++) {
                     int o = list[j];
                     float dx = e.x[o] - x, dy = e.y[o] - y;
                     if (dx * dx + dy * dy < r2 && ++n >= cap) return n;
@@ -166,7 +182,7 @@ public final class Spatial {
         for (int cy = y0; cy <= y1; cy++)
             for (int cx = x0; cx <= x1; cx++) {
                 int c = cy * cw + cx;
-                for (int j = zStart[c]; j < zStart[c + 1]; j++) {
+                for (int j = zStart[c]; j < zEnd[c]; j++) {
                     int o = zList[j];
                     float dx = e.x[o] - x, dy = e.y[o] - y;
                     if (dx * dx + dy * dy < r2) {

@@ -97,7 +97,7 @@ public final class Fires extends Module {
         for (int dy = -2; dy <= 2; dy++)
             for (int dx = -2; dx <= 2; dx++) {
                 if (!w.r.in(tx + dx, ty + dy)) continue;
-                int b = w.r.bldAt[(ty + dy) * w.r.W + tx + dx];
+                int b = w.r.building((ty + dy) * w.r.W + tx + dx);
                 if (b >= 0) {
                     if (Rng.unit(w.seed, w.tick, b * 3L + 1) < chance) ignite(b, 0.25f);
                     return;
@@ -115,7 +115,7 @@ public final class Fires extends Module {
         for (int dy = -r0; dy <= r0; dy += 2)
             for (int dx = -r0; dx <= r0; dx += 2) {
                 if (!w.r.in(tx + dx, ty + dy)) continue;
-                int b = w.r.bldAt[(ty + dy) * w.r.W + tx + dx];
+                int b = w.r.building((ty + dy) * w.r.W + tx + dx);
                 if (b < 0 || b == last || heat[b] > 0) continue;
                 last = b;
                 if (Rng.unit(w.seed, w.tick, b * 7L + 2) < chance) ignite(b, 0.4f);
@@ -214,7 +214,7 @@ public final class Fires extends Module {
             float cy = r.by[b] + r.bh[b] / 2f + (float) Math.sin(ang) * (r.bh[b] / 2f + d);
             int tx = (int) cx, ty = (int) cy;
             if (!r.in(tx, ty)) continue;
-            int o = r.bldAt[ty * r.W + tx];
+            int o = r.building(ty * r.W + tx);
             if (o >= 0 && o != b && heat[o] <= 0) {
                 ignite(o, 0.15f);
                 return;

@@ -133,7 +133,7 @@ final class Combat {
         for (int cy = cy0; cy <= cy1; cy++)
             for (int cx = cx0; cx <= cx1; cx++) {
                 int c = cy * w.sp.cw + cx;
-                for (int j = w.sp.zStart[c]; j < w.sp.zStart[c + 1]; j++) {
+                for (int j = w.sp.zStart[c]; j < w.sp.zEnd[c]; j++) {
                     int o = w.sp.zList[j];
                     if (e.loc[o] != Ents.FREE) continue;
                     float dx = e.x[o] - x, dy = e.y[o] - y, d = (float) Math.sqrt(dx * dx + dy * dy);
@@ -142,7 +142,7 @@ final class Combat {
                     e.hp[o] -= h;
                     if (e.hp[o] <= 0) killZombie(o, killer, faction, CAUSE_BLAST);
                 }
-                for (int j = w.sp.lStart[c]; j < w.sp.lStart[c + 1]; j++) {
+                for (int j = w.sp.lStart[c]; j < w.sp.lEnd[c]; j++) {
                     int o = w.sp.lList[j];
                     if (e.loc[o] != Ents.FREE) continue;
                     float dx = e.x[o] - x, dy = e.y[o] - y, d = (float) Math.sqrt(dx * dx + dy * dy);
@@ -161,7 +161,7 @@ final class Combat {
             for (int ty = ty0; ty <= ty1; ty++)
                 for (int tx = tx0; tx <= tx1; tx++) {
                     if (!w.r.in(tx, ty)) continue;
-                    int b = w.r.bldAt[ty * w.r.W + tx];
+                    int b = w.r.building(ty * w.r.W + tx);
                     if (b >= 0) {
                         int s = w.r.sectorOfPx(w.doorX[b] >= 0 ? w.doorX[b] : x, w.doorY[b] >= 0 ? w.doorY[b] : y);
                         int lost = Math.min(w.sec.popIn[s], w.r.bres[b]);

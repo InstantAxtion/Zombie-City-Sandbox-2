@@ -10,7 +10,8 @@ public final class NavPath {
     private final Region r;
     private final int w, h;
     private final float[] g;
-    private final int[] prev, stamp, closed;
+    /** stamp: cur = seen in this search, cur + 1 = closed in this search (one array instead of two). */
+    private final int[] prev, stamp;
     private int cur;
     private int[] heap = new int[1024];
     private float[] key = new float[1024];
@@ -24,7 +25,6 @@ public final class NavPath {
         g = new float[w * h];
         prev = new int[w * h];
         stamp = new int[w * h];
-        closed = new int[w * h];
     }
 
     /** Waypoints (x0, y0, x1, y1, ...) in px from a to b, or null. budget = most cells to search. */
@@ -39,7 +39,11 @@ public final class NavPath {
             if (start < 0) return null;
         }
         if (r.lineOfSight(ax, ay, bx, by) && straightWalkable(ax, ay, bx, by)) return new float[]{bx, by};
-        cur++;
+        cur += 2;
+        if (cur > Integer.MAX_VALUE - 4) {
+            java.util.Arrays.fill(stamp, 0);
+            cur = 2;
+        }
         hn = 0;
         g[start] = 0;
         prev[start] = -1;
@@ -50,8 +54,8 @@ public final class NavPath {
         float bestH = Float.MAX_VALUE;
         while (hn > 0 && n < budget) {
             int c = pop();
-            if (closed[c] == cur) continue;
-            closed[c] = cur;
+            if (stamp[c] == cur + 1) continue;
+            stamp[c] = cur + 1;
             n++;
             if (c == goal) {
                 found = c;
@@ -69,7 +73,7 @@ public final class NavPath {
                     int nx = cx + dx, ny = cy + dy;
                     if (!in(nx, ny)) continue;
                     int ni = ny * w + nx;
-                    if (r.nav[ni] == 0 || closed[ni] == cur) continue;
+                    if (r.nav[ni] == 0 || stamp[ni] == cur + 1) continue;
                     if (dx != 0 && dy != 0 && (r.nav[cy * w + nx] == 0 || r.nav[ny * w + cx] == 0)) continue;
                     float step = (dx != 0 && dy != 0) ? 1.414f : 1f;
                     if (r.nav[ni] == 2) step *= 0.9f; // a slight liking for streets

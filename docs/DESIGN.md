@@ -136,9 +136,33 @@ every sector once a game hour as log-scale bytes (about 10 KB an hour on the def
   counts. Balance was tuned against probes on several scenarios.
 - *Instrumentation from day one.* `Audit` and state hashes are part of the game, not a side tool.
 
+## The whole society
+
+Systems added as modules, each saved with the game and run in fast-forward too:
+
+- `Infrastructure`, `Logistics`: water, phones, food, medicine and fuel that can fail; convoys of goods by truck,
+  freight train, cargo plane and ship, which the dead can destroy and blown bridges reroute; evacuation trains.
+- `Command`, `Media`, `Society`: mayors, police chiefs, governors, the president and the general deciding from a
+  reported picture that lags and under-counts (worse with the phones down); approval and replacement; news,
+  online panic and rumours that change behaviour; the hidden bitten, families crossing town, holdouts,
+  militias, looting, refugee camps, survivor settlements.
+- `Ecology`, `Fires`, `Navy`, `Engineers`: hunger, nests, local strains that spread, hordes that follow roads and
+  valleys and split; fires that spread downwind and fire brigades; destroyers, the coast guard, jets from the air
+  base, airlifts; forward bases with field hospitals, and barricades across cordon streets.
+- `Roles`, `Director`: the eight roles; recorded actions, exact replays, the timelapse and heatmaps.
+
+They interact: hunger brings looting, looters and dry towns start fires, fire crews without mains water are weaker,
+phones down slow the calls and the officials' picture, rumours move people onto the roads where the dead are.
+
+## Balance over many runs
+
+`desktop/src/.../Balance.java` (and `tools/balance.sh`) plays outbreak sizes over many seeds in fast-forward and
+reports percentiles; a test runs a small batch on every `./test.sh` and checks broad bands. The rules it tunes are
+in `content.ini [rules]`.
+
 ## What's next
 
-- Fire brigades and fires; paramedics.
-- Trains on the railways; the navy at sea; airlifts.
+- Running the GPU renderer on real phones (it has a self-check and a Canvas fallback, but hasn't met a device).
+- Troops and freight that actually exercise the trains, planes and ships more (they only run when stocks are low).
 - Cooperative and asynchronous play beyond challenge codes.
-- GPU rendering (OpenGL ES) for more individuals on screen at once.
+- Several countries; the sea as a place.

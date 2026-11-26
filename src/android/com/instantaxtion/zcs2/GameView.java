@@ -5,16 +5,19 @@ import android.graphics.Canvas;
 import android.view.MotionEvent;
 import android.view.View;
 
-/** The game's one view: draws a frame, asks for the next, and passes touches on. All on the UI thread. */
+/**
+ * The game drawn with Android's Canvas (hardware accelerated by the view system): draws a frame, asks for the
+ * next, and passes touches on, all on the UI thread. The fallback when the GPU renderer can't be used.
+ */
 final class GameView extends View {
     final Game game;
     private final AndroidGfx gfx = new AndroidGfx();
     private long last;
     private boolean running = true;
 
-    GameView(Context ctx, Platform pf) {
+    GameView(Context ctx, Game game) {
         super(ctx);
-        game = new Game(pf);
+        this.game = game;
         setFocusable(true);
         setKeepScreenOn(true);
     }

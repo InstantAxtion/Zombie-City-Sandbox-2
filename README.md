@@ -89,6 +89,15 @@ size, printing the numbers; `STRAT=days` then fast-forwards), `Shot` (the world 
 interface driven by scripted taps; `UiShot dir 540 1170 1.5 director` walks the roles, campaigns, editor,
 layers, timelapse and replays).
 
+`tools/balance.sh 5000,50000,100000,250000 8 2304 30 4` plays each outbreak size on many seeds in fast-forward
+and prints the spread of outcomes (days to contain or fall, share of the country lost, losses); every run goes to
+`build/balance.csv`. On the combined game at the time of writing: 5,000 dead are put down within hours;
+50,000-100,000 are a fight of days to weeks; 250,000 is a long war that is won in about half of the runs.
+
+The game draws with the GPU (OpenGL ES 2.0) by default. On its first frame it draws a test pattern and reads it
+back; if that fails, or GL reports an error, it switches to the Canvas renderer for good and says so. Settings
+has "Renderer (next start)" to choose. The GPU renderer has only been compiled, not yet run on a real phone.
+
 ## Changing the game: content.ini
 
 Every person, weapon, vehicle, zombie type, squad, formation, scenario and the simulation's balance rules are

@@ -14,7 +14,7 @@ public final class Flow {
     private final Region r;
     private final int w, h;
     final short[] dist;
-    final int[] stamp;
+    final short[] stamp; // which build each cell's distance belongs to (16 bits: reset when it wraps)
     int cur;
     private int[] q, q2;
     /** Cells searched in the last build (for the probe). */
@@ -25,7 +25,7 @@ public final class Flow {
         w = r.navW;
         h = r.navH;
         dist = new short[w * h];
-        stamp = new int[w * h];
+        stamp = new short[w * h];
         q = new int[4096];
         q2 = new int[4096];
     }
@@ -43,8 +43,18 @@ public final class Flow {
         return stamp[i] == cur ? dist[i] : INF;
     }
 
-    public void build(World wd) {
+    /** The next build's stamp. */
+    int nextStamp() {
         cur++;
+        if (cur >= Short.MAX_VALUE) {
+            Arrays.fill(stamp, (short) 0);
+            cur = 1;
+        }
+        return cur;
+    }
+
+    public void build(World wd) {
+        nextStamp();
         Ents e = wd.e;
         // sources by starting distance: the living at 0, noises further out the quieter they are
         int[][] levels = new int[MAXD + 1][];
@@ -68,7 +78,7 @@ public final class Flow {
                 int c = src[k];
                 if (stamp[c] == cur && dist[c] <= d) continue;
                 if (r.nav[c] == 0) continue;
-                stamp[c] = cur;
+                stamp[c] = (short) cur;
                 dist[c] = (short) d;
                 if (qn == q.length) q = Arrays.copyOf(q, qn * 2);
                 q[qn++] = c;
@@ -89,7 +99,7 @@ public final class Flow {
                         if (r.nav[ni] == 0 || (stamp[ni] == cur && dist[ni] <= d + 1)) continue;
                         // no cutting corners between two blocked cells
                         if (dx != 0 && dy != 0 && (r.nav[cy * w + nx] == 0 || r.nav[ny * w + cx] == 0)) continue;
-                        stamp[ni] = cur;
+                        stamp[ni] = (short) cur;
                         dist[ni] = (short) (d + 1);
                         if (qn2 == q2.length) q2 = Arrays.copyOf(q2, qn2 * 2);
                         q2[qn2++] = ni;

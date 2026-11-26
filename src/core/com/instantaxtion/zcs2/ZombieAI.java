@@ -102,7 +102,7 @@ final class ZombieAI {
         float px = 0, py = 0;
         int cell = w.sp.cellOf(x, y);
         int[] Z = w.sp.zList;
-        int n = 0, start = w.sp.zStart[cell], end = w.sp.zStart[cell + 1];
+        int n = 0, start = w.sp.zStart[cell], end = w.sp.zEnd[cell];
         int stride = Math.max(1, (end - start) / 8);
         for (int j = start; j < end && n < 8; j += stride) {
             int o = Z[j];

@@ -94,14 +94,14 @@ public final class Military {
         if (w.gov.level >= 3 && guardT <= 0 && guardsArrived < 10 && dead > 300) {
             arrive("guard_brigade", "National Guard");
             guardsArrived++;
-            guardT = 300;
+            guardT = w.c.rule("mobiliseEvery", 240) * 1.25f;
         }
         // national mobilisation: a new formation every four game hours for as long as it takes
         if (w.gov.level >= 4 && regularT <= 0 && regularsArrived < 60 && dead > 1500) {
             String[] kinds = {"infantry", "armour", "infantry", "artillery"};
             arrive(kinds[regularsArrived % kinds.length], "Army");
             regularsArrived++;
-            regularT = 240;
+            regularT = w.c.rule("mobiliseEvery", 240);
         }
         if (!w.strategic) retaskArmour();
         if (bridgeT <= 0) {

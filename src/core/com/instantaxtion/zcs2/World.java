@@ -330,7 +330,20 @@ public final class World {
         e.y[i] = ny;
         e.vx[i] = vx;
         e.vy[i] = vy;
-        if (vx * vx + vy * vy > 4) e.face[i] = (float) Math.atan2(vy, vx);
+        if (vx * vx + vy * vy > 4) e.face[i] = fastAtan2(vy, vx);
+    }
+
+    /** atan2 to within about 0.005 radians, much cheaper than Math.atan2 (faces are only drawn, never decided on). */
+    static float fastAtan2(float y, float x) {
+        float ax = Math.abs(x), ay = Math.abs(y);
+        if (ax < 1e-9f && ay < 1e-9f) return 0;
+        float a = Math.min(ax, ay) / Math.max(ax, ay);
+        float s = a * a;
+        float r = ((-0.0464964749f * s + 0.15931422f) * s - 0.327622764f) * s * a + a;
+        if (ay > ax) r = 1.57079637f - r;
+        if (x < 0) r = 3.14159274f - r;
+        if (y < 0) r = -r;
+        return r;
     }
 
     private void applyIntents() {

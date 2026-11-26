@@ -86,7 +86,7 @@ public final class SaveIO {
             if (r.bfloors[b] != 0) continue;
             for (int ty = r.by[b]; ty < r.by[b] + r.bh[b]; ty++)
                 for (int tx = r.bx[b]; tx < r.bx[b] + r.bw[b]; tx++)
-                    if (r.in(tx, ty) && r.bldAt[ty * r.W + tx] == b) r.bldAt[ty * r.W + tx] = -1;
+                    if (r.in(tx, ty) && r.building(ty * r.W + tx) == b) r.clearBuilding(ty * r.W + tx);
         }
         boolean[] alive = readBools(in);
         System.arraycopy(alive, 0, r.roads.ealive, 0, Math.min(alive.length, r.roads.edgeCount));
@@ -542,11 +542,11 @@ public final class SaveIO {
     private static void readFlow(DataInputStream in, Flow f) throws IOException {
         short[] d = new short[f.dist.length];
         readShorts(in, d);
-        f.cur++;
+        f.nextStamp();
         for (int i = 0; i < d.length; i++)
             if (d[i] != Flow.INF) {
                 f.dist[i] = d[i];
-                f.stamp[i] = f.cur;
+                f.stamp[i] = (short) f.cur;
             }
     }
 

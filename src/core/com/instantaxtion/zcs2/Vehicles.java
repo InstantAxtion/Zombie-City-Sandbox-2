@@ -31,13 +31,17 @@ public final class Vehicles {
     // a grid for "which vehicle is near here"
     private static final int GC = 128;
     private int gw;
-    private int[] gStart, gList = new int[64], gCnt;
+    private int[] gStart, gList = new int[64], gEnd, gTouched = new int[64];
+    private int gTouchedN;
+    /** Ground vehicles per 512 px sector: a small table that answers "no car near here" for most of the dead. */
+    private final int[] secCars;
 
     Vehicles(World w) {
         this.w = w;
         gw = w.r.px() / GC + 1;
-        gStart = new int[gw * gw + 1];
-        gCnt = new int[gw * gw];
+        secCars = new int[w.r.secW * w.r.secH];
+        gStart = new int[gw * gw];
+        gEnd = new int[gw * gw];
     }
 
     public Content.VType type(int v) {
@@ -128,6 +132,20 @@ public final class Vehicles {
 
     /** The nearest vehicle within rad (read-only; safe in the parallel phase). */
     public int near(float px, float py, float rad) {
+        if (gTouchedN == 0) return -1;
+        // any car in the sectors this search could reach? (cells are 128 px, the search covers one cell round)
+        float cs = Region.SECT * Tile.SIZE;
+        int sw = w.r.secW, sh = w.r.secH;
+        int sx0 = Math.max(0, (int) (((int) (px / GC) - 1) * GC / cs)), sx1 = Math.min(sw - 1, (int) (((int) (px / GC) + 2) * GC / cs));
+        int sy0 = Math.max(0, (int) (((int) (py / GC) - 1) * GC / cs)), sy1 = Math.min(sh - 1, (int) (((int) (py / GC) + 2) * GC / cs));
+        boolean any = false;
+        for (int sy = sy0; sy <= sy1 && !any; sy++)
+            for (int sx = sx0; sx <= sx1; sx++)
+                if (secCars[sy * sw + sx] > 0) {
+                    any = true;
+                    break;
+                }
+        if (!any) return -1;
         int cx = (int) (px / GC), cy = (int) (py / GC);
         int best = -1;
         float bd = rad * rad;
@@ -135,7 +153,7 @@ public final class Vehicles {
             for (int xx = cx - 1; xx <= cx + 1; xx++) {
                 if (xx < 0 || yy < 0 || xx >= gw || yy >= gw) continue;
                 int c = yy * gw + xx;
-                for (int j = gStart[c]; j < gStart[c + 1]; j++) {
+                for (int j = gStart[c]; j < gEnd[c]; j++) {
                     int v = gList[j];
                     float dx = x[v] - px, dy = y[v] - py, d = dx * dx + dy * dy;
                     if (d < bd) {
@@ -348,22 +366,33 @@ public final class Vehicles {
     }
 
     void rebuildGrid() {
-        Arrays.fill(gCnt, 0);
+        // only the cells used last time are cleared (a country's grid is mostly empty)
+        for (int k = 0; k < gTouchedN; k++) gStart[gTouched[k]] = gEnd[gTouched[k]] = 0;
+        gTouchedN = 0;
+        Arrays.fill(secCars, 0);
         int n = 0;
         for (int v = 0; v < top; v++) {
             if (state[v] == V_NONE || flying(v)) continue;
-            gCnt[cell(v)]++;
+            int c = cell(v);
+            if (gEnd[c] == 0) {
+                if (gTouchedN == gTouched.length) gTouched = Arrays.copyOf(gTouched, gTouchedN * 2);
+                gTouched[gTouchedN++] = c;
+            }
+            gEnd[c]++;
+            secCars[w.r.sectorOfPx(Math.max(0, x[v]), Math.max(0, y[v]))]++;
             n++;
         }
         if (gList.length < n) gList = new int[n * 2];
-        gStart[0] = 0;
-        for (int c = 0; c < gw * gw; c++) {
-            gStart[c + 1] = gStart[c] + gCnt[c];
-            gCnt[c] = gStart[c];
+        int p = 0;
+        for (int k = 0; k < gTouchedN; k++) {
+            int c = gTouched[k];
+            gStart[c] = p;
+            p += gEnd[c];
+            gEnd[c] = gStart[c];
         }
         for (int v = 0; v < top; v++) {
             if (state[v] == V_NONE || flying(v)) continue;
-            gList[gCnt[cell(v)]++] = v;
+            gList[gEnd[cell(v)]++] = v;
         }
     }
 
@@ -476,7 +505,7 @@ public final class Vehicles {
             for (int xx = cx - 1; xx <= cx + 1; xx++) {
                 if (xx < 0 || yy < 0 || xx >= gw || yy >= gw) continue;
                 int c = yy * gw + xx;
-                for (int j = gStart[c]; j < gStart[c + 1]; j++) {
+                for (int j = gStart[c]; j < gEnd[c]; j++) {
                     int o = gList[j];
                     if (o == v) continue;
                     float dx = x[o] - x[v], dy = y[o] - y[v];
@@ -505,7 +534,7 @@ public final class Vehicles {
             for (int xx = ccx - 1; xx <= ccx + 1; xx++) {
                 if (xx < 0 || yy < 0 || xx >= sp.cw || yy >= sp.ch) continue;
                 int c = yy * sp.cw + xx;
-                for (int j = sp.zStart[c]; j < sp.zStart[c + 1]; j++) {
+                for (int j = sp.zStart[c]; j < sp.zEnd[c]; j++) {
                     int z = sp.zList[j];
                     if (e.loc[z] != Ents.FREE) continue;
                     float dx = e.x[z] - frontX, dy = e.y[z] - frontY;
