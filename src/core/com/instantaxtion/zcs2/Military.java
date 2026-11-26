@@ -114,8 +114,16 @@ public final class Military {
     public Forces.Formation arrive(String formationId, String agency) {
         Content.FormationT t = w.c.formationT(formationId);
         if (t == null || w.r.entryNodes.isEmpty()) return null;
-        int entry = w.r.entryNodes.get(w.rng.nextInt(w.r.entryNodes.size()));
-        Forces.Formation f = w.forces.createFormation(t, w.r.roads.nx[entry], w.r.roads.ny[entry], true);
+        Forces.Formation f;
+        boolean train = !w.r.railEntries.isEmpty() && (guardsArrived + regularsArrived + wavesArrived) % 2 == 1;
+        if (train) {
+            // by train over the border
+            int re = w.r.railEntries.get(w.rng.nextInt(w.r.railEntries.size()));
+            f = w.forces.createFormation(t, w.r.rails.nx[re], w.r.rails.ny[re], true);
+        } else {
+            int entry = w.r.entryNodes.get(w.rng.nextInt(w.r.entryNodes.size()));
+            f = w.forces.createFormation(t, w.r.roads.nx[entry], w.r.roads.ny[entry], true);
+        }
         if (t.faction.equals("police")) {
             wavesArrived++;
             w.stats.outsidePolice += f.strength();

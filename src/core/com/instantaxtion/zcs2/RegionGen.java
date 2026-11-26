@@ -1075,11 +1075,55 @@ public final class RegionGen {
             if (!have) pairs.add(new int[]{first, i});
         }
         for (int[] p : pairs) railRoute(stations.get(p[0]), stations.get(p[1]));
+        // international lines: from the capital (and one other city) to the border, where troop trains and
+        // freight from abroad come in
+        int lines = 0;
+        for (int i = 0; i < n && lines < 2; i++) {
+            Region.Facility st = stations.get(i == 0 ? first : i);
+            if (i > 0 && (i == first || r.settlements.get(st.settlement).kind != Region.S_CITY)) continue;
+            float[] edge = landEdge(st.x / 16, st.y / 16, lines);
+            if (edge == null) continue;
+            Region.Facility border = new Region.Facility();
+            border.settlement = -1;
+            border.x = edge[0] * 16 + 8;
+            border.y = edge[1] * 16 + 8;
+            border.railNode = r.rails.addNode(border.x, border.y, -1);
+            int before = r.rails.edgeCount;
+            railRoute(st, border);
+            if (r.rails.edgeCount > before) {
+                r.railEntries.add(border.railNode);
+                lines++;
+            }
+        }
+    }
+
+    /** The nearest dry point on the map's edge to (x, y) in tiles; 'skip' avoids the side used before. */
+    private float[] landEdge(float x, float y, int skip) {
+        float[] best = null;
+        float bd = Float.MAX_VALUE;
+        for (int side = 0; side < 4; side++) {
+            for (int k = 8; k < W - 8; k += 6) {
+                int ex = side == 0 ? 3 : side == 1 ? W - 4 : k, ey = side == 2 ? 3 : side == 3 ? H - 4 : k;
+                int t = r.t(ex, ey);
+                if (Tile.water(t) || t == Tile.ROCK) continue;
+                float dx = ex - x, dy = ey - y, d = dx * dx + dy * dy;
+                if (skip > 0 && !r.railEntries.isEmpty()) {
+                    int prev = r.railEntries.get(0);
+                    float px = r.rails.nx[prev] / 16 - ex, py = r.rails.ny[prev] / 16 - ey;
+                    if (px * px + py * py < W * W / 9f) continue;
+                }
+                if (d < bd) {
+                    bd = d;
+                    best = new float[]{ex, ey};
+                }
+            }
+        }
+        return best;
     }
 
     private void railRoute(Region.Facility fa, Region.Facility fb) {
         int cw = W / HC, ch = H / HC;
-        Region.Settlement sa = r.settlements.get(fa.settlement), sb = r.settlements.get(fb.settlement);
+        Region.Settlement sa = fa.settlement >= 0 ? r.settlements.get(fa.settlement) : null, sb = fb.settlement >= 0 ? r.settlements.get(fb.settlement) : null;
         int sx = clamp((int) (fa.x / 16 / HC), 0, cw - 1), sy = clamp((int) (fa.y / 16 / HC), 0, ch - 1);
         int ex = clamp((int) (fb.x / 16 / HC), 0, cw - 1), ey = clamp((int) (fb.y / 16 / HC), 0, ch - 1);
         float[] g = new float[cw * ch];

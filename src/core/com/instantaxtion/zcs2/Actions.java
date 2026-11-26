@@ -11,7 +11,7 @@ public final class Actions {
     public static final int PAINT = 1, HORDE = 2, SQUAD = 3, VEHICLE = 4, ERASE = 5, STRIKE = 6, BRIDGE = 7, ORDER = 8,
             RELEASE = 9, HOME = 10, FORM_ORDER = 11, FORM_RELEASE = 12, CURFEW = 13, EVAC = 14, LEVEL = 15, QUARANTINE = 16,
             DEPLOY = 17, ARTILLERY = 18, REQUEST_ARMY = 19, CAMERA = 20, STRATEGIC = 21, JOY = 22, FIRE = 23, MAX_IND = 24,
-            WATCH = 25;
+            WATCH = 25, ADD_PLAYER = 26, SWITCH_PLAYER = 27;
 
     public static Object exec(World w, int kind, float[] f, int[] i, String s) {
         w.director.record(kind, f, i, s);
@@ -127,6 +127,8 @@ public final class Actions {
                 return null;
             case FIRE: w.strat.playerFire = i[0] != 0; return null;
             case MAX_IND: w.maxIndividuals = i[0]; return null;
+            case ADD_PLAYER: return w.roles.addPlayer(i[0], f[0], f[1]);
+            case SWITCH_PLAYER: w.roles.switchTo(i[0]); return null;
             case WATCH:
                 if (w.mode != World.MODE_SANDBOX) {
                     w.mode = World.MODE_SANDBOX;
@@ -198,6 +200,15 @@ public final class Actions {
 
     public static void releaseFormation(World w, Forces.Formation f) {
         if (f != null) exec(w, FORM_RELEASE, null, new int[]{f.id}, null);
+    }
+
+    public static boolean addPlayer(World w, int role, float x, float y) {
+        Object r = exec(w, ADD_PLAYER, new float[]{x, y}, new int[]{role}, null);
+        return r instanceof Boolean && (Boolean) r;
+    }
+
+    public static void switchPlayer(World w, int k) {
+        exec(w, SWITCH_PLAYER, null, new int[]{k}, null);
     }
 
     public static void curfew(World w, boolean on) {

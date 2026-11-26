@@ -126,7 +126,7 @@ public final class Engineers extends Module {
             if (done) continue;
             boolean have = false;
             for (Forces.Formation f : w.forces.formations) {
-                if (!f.alive || f.state == Forces.MOVING || f.state == Forces.AIRLIFT || engineers(f) <= 0) continue;
+                if (!f.alive || Forces.travelling(f) || engineers(f) <= 0) continue;
                 float dx = f.hq.x - p.x, dy = f.hq.y - p.y;
                 if (dx * dx + dy * dy < 6000f * 6000f) have = true;
             }
@@ -160,6 +160,7 @@ public final class Engineers extends Module {
         if (x1 < 0) return false;
         r.rebuildNav(x0 - 1, y0 - 1, x1 + 1, y1 + 1);
         w.sec.connectivity();
+        w.r.closeBarricadedRoads();
         return true;
     }
 

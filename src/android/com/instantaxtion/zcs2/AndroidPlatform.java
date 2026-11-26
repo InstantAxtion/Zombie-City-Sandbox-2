@@ -160,7 +160,7 @@ final class AndroidPlatform implements Platform {
                         .setView(edit)
                         .setPositiveButton("OK", new android.content.DialogInterface.OnClickListener() {
                             public void onClick(android.content.DialogInterface d, int which) {
-                                answer.answer(edit.getText().toString());
+                                if (answer != null) answer.answer(edit.getText().toString());
                             }
                         })
                         .setNeutralButton("Copy", new android.content.DialogInterface.OnClickListener() {

@@ -25,6 +25,10 @@ public final class Roles extends Module {
             "One person in it all. Move with the stick; you shoot by yourself when armed."};
 
     public int role = GOD;
+    /** Pass-and-play: up to four players share the game, each in a role; role/target above are the one playing now. */
+    public static final int MAX_PLAYERS = 4;
+    public int players = 1, current;
+    public final int[] pRole = new int[MAX_PLAYERS], pTarget = new int[MAX_PLAYERS];
     /** The role's piece of the world: a city (incident), a police station (precinct), a squad (squad leader). */
     public int target = -1;
     public boolean[] quarantine;
@@ -55,6 +59,79 @@ public final class Roles extends Module {
         if (role == GOD) return World.MODE_SANDBOX;
         if (role == SURVIVOR || role == OFFICER) return World.MODE_SURVIVOR;
         return World.MODE_COMMANDER;
+    }
+
+    /** Does any player hold this role (for this city, station or squad; -1 = any)? The AI stands aside there. */
+    public boolean holds(int r, int t) {
+        sync();
+        for (int k = 0; k < players; k++) if (pRole[k] == r && (t < 0 || pTarget[k] == t)) return true;
+        return false;
+    }
+
+    private void sync() {
+        pRole[current] = role;
+        pTarget[current] = target;
+    }
+
+    /** Roles another player can take on (one person in the street is for the first player only). */
+    public static boolean shareable(int r) {
+        return r == PRESIDENT || r == MILITARY || r == INCIDENT || r == PRECINCT || r == SQUAD;
+    }
+
+    /** Another player joins in a role, its piece of the world chosen near (ox, oy). */
+    public boolean addPlayer(int r, float ox, float oy) {
+        if (players >= MAX_PLAYERS || !shareable(r)) return false;
+        sync();
+        int savedRole = role, savedTarget = target, savedMode = w.mode, savedStrikes = w.mil.strikesLeft;
+        assign(r, ox, oy);
+        pRole[players] = role;
+        pTarget[players] = target;
+        players++;
+        role = savedRole;
+        target = savedTarget;
+        w.mode = savedMode;
+        if (r == PRESIDENT || r == MILITARY) w.mil.strikesLeft = Math.max(savedStrikes, 6);
+        else w.mil.strikesLeft = savedStrikes;
+        w.gov.playerDecides = holds(PRESIDENT, -1);
+        w.news.radio("Player " + players + " joins as " + labelOf(players - 1), ox, oy, News.COMMAND);
+        return true;
+    }
+
+    /** Hands the game to player k. */
+    public void switchTo(int k) {
+        if (k < 0 || k >= players || k == current) return;
+        sync();
+        current = k;
+        role = pRole[k];
+        target = pTarget[k];
+        // the first player's mode stays the world's (a person in the street ends the game when they die)
+        if (k == 0 || modeFor(role) != World.MODE_SURVIVOR) w.mode = k == 0 ? modeFor(role) : (w.mode == World.MODE_SANDBOX && role == GOD ? World.MODE_SANDBOX : World.MODE_COMMANDER);
+    }
+
+    public String labelOf(int k) {
+        sync();
+        int sr = role, st = target;
+        role = pRole[k];
+        target = pTarget[k];
+        String l = label();
+        role = sr;
+        target = st;
+        return l;
+    }
+
+    /** Where player k's part of the world is (for the camera on a hand-over). */
+    public float[] focusOf(int k) {
+        sync();
+        int r = pRole[k], t = pTarget[k];
+        if (r == INCIDENT && t >= 0) return new float[]{w.r.settlements.get(t).cx * 16f, w.r.settlements.get(t).cy * 16f, 0.25f};
+        if (r == PRECINCT && t >= 0) return new float[]{w.r.facilities.get(t).x, w.r.facilities.get(t).y, 0.5f};
+        if (r == SQUAD && t >= 0 && t < w.sq.list.size() && w.sq.get(t).alive) {
+            float[] p = w.sq.where(w.sq.get(t));
+            return new float[]{p[0], p[1], 0.8f};
+        }
+        if (k == 0 && w.playerEnt >= 0 && w.e.loc[w.playerEnt] == Ents.FREE) return new float[]{w.e.x[w.playerEnt], w.e.y[w.playerEnt], 1.2f};
+        Region.Settlement c = w.r.city();
+        return new float[]{c.cx * 16f, c.cy * 16f, 0.08f};
     }
 
     public boolean commandsFormations() {
@@ -102,6 +179,7 @@ public final class Roles extends Module {
     /** Gives the player their role at the start of a game (after the scenario is in place). */
     public void assign(int r, float ox, float oy) {
         role = r;
+        target = -1;
         w.mode = modeFor(r);
         w.gov.playerDecides = r == PRESIDENT;
         if (w.mode == World.MODE_COMMANDER && (r == PRESIDENT || r == MILITARY)) w.mil.strikesLeft = 6;
@@ -315,6 +393,13 @@ public final class Roles extends Module {
         o.writeBoolean(hadDead);
         o.writeFloat(heldFor);
         o.writeInt(coastStart);
+        sync();
+        o.writeInt(players);
+        o.writeInt(current);
+        for (int k = 0; k < MAX_PLAYERS; k++) {
+            o.writeInt(pRole[k]);
+            o.writeInt(pTarget[k]);
+        }
     }
 
     @Override
@@ -331,6 +416,19 @@ public final class Roles extends Module {
         hadDead = in.readBoolean();
         heldFor = in.readFloat();
         coastStart = in.readInt();
+        if (in.available() > 0) {
+            players = in.readInt();
+            current = in.readInt();
+            for (int k = 0; k < MAX_PLAYERS; k++) {
+                pRole[k] = in.readInt();
+                pTarget[k] = in.readInt();
+            }
+        } else {
+            players = 1;
+            current = 0;
+            pRole[0] = role;
+            pTarget[0] = target;
+        }
     }
 
     @Override

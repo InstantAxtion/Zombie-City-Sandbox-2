@@ -2,7 +2,7 @@ package com.instantaxtion.zcs2;
 
 /** Help and patch notes (kept short). */
 final class Texts {
-    static final String VERSION = "1.1";
+    static final String VERSION = "1.2";
 
     static final String[] HELP = {
             "THE IDEA",
@@ -26,6 +26,13 @@ final class Texts {
     };
 
     static final String[] NOTES = {
+            "1.2  Together",
+            "- Pass-and-play: up to four players share a game, each in a role (President, Military commander, Incident commander, Precinct commander, Squad leader). Players in the pause menu; the P button hands over.",
+            "- Friends' results: share your result on a challenge as a code, add theirs, and see who did best on the report.",
+            "- Ships into the port and cargo planes into the airfields on a schedule; freight trains between cities with stations for long hauls of anything.",
+            "- Troop trains: formations travel by rail on long journeys, and some arrive by train over the border.",
+            "- Barricades close roads to vehicles: they stop and go round.",
+            "- Survivor settlements farm, trade food for ammunition by caravan, and defend themselves.",
             "1.1  Play at any level",
             "- Play as God, the President, the Military commander, an Incident commander, a Precinct commander, a Squad leader, a Police officer or a Survivor: each with its own powers.",
             "- Country-scale campaigns: hold the capital for 30 days, evacuate the coast, retake a state, protect the capital.",

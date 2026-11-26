@@ -15,8 +15,13 @@ import java.util.List;
  * and fight person by person. In strategic fast-forward, everything is numbers.
  */
 public final class Forces extends Module {
-    public static final int GARRISON = 0, MOVING = 1, HOLDING = 2, BROKEN = 3, AIRLIFT = 4;
-    public static final String[] STATES = {"In garrison", "On the move", "Holding", "Broken, falling back", "In the air"};
+    public static final int GARRISON = 0, MOVING = 1, HOLDING = 2, BROKEN = 3, AIRLIFT = 4, RAIL = 5;
+    public static final String[] STATES = {"In garrison", "On the move", "Holding", "Broken, falling back", "In the air", "On a troop train"};
+
+    /** Travelling: on the road, in the air or on a train (not fighting as numbers, not sending squads). */
+    public static boolean travelling(Formation f) {
+        return f.state == MOVING || f.state == AIRLIFT || f.state == RAIL;
+    }
 
     public static final class Formation {
         public int id;
@@ -253,6 +258,7 @@ public final class Forces extends Module {
     /** Sends a formation by road to (x, y), where it will hold. */
     public boolean order(Formation f, float x, float y) {
         if (!f.alive) return false;
+        if (byRail(f, x, y)) return true;
         RoadGraph g = w.r.roads;
         int a = g.nearestNode(f.hq.x, f.hq.y, 2000), b = g.nearestNode(x, y, 2000);
         if (a < 0 || b < 0) return false;
@@ -266,6 +272,64 @@ public final class Forces extends Module {
         // its squads come back to it first (they'll catch up)
         for (Squads.Squad s : w.sq.list) if (s.alive && s.home == f.hq.id && !s.player) w.sq.goHome(s);
         return true;
+    }
+
+    /** A long journey from near a railway to near another part of it goes by troop train. */
+    private boolean byRail(Formation f, float x, float y) {
+        RoadGraph rg = w.r.rails;
+        if (rg.nodeCount < 2 || rg.adjStart == null) return false;
+        float dx = x - f.hq.x, dy = y - f.hq.y;
+        float over = w.c.rule("troopTrainOver", 4000);
+        if (dx * dx + dy * dy < over * over) return false;
+        int a = rg.nearestNode(f.hq.x, f.hq.y, 700), b = rg.nearestNode(x, y, 2500);
+        if (a < 0 || b < 0 || a == b) return false;
+        int[] rt = rg.route(a, b);
+        if (rt == null || rt.length < 3) return false;
+        f.route = rt;
+        f.ri = 0;
+        f.gx = x;
+        f.gy = y;
+        f.hq.x = rg.nx[a];
+        f.hq.y = rg.ny[a];
+        f.state = RAIL;
+        for (Squads.Squad s : w.sq.list) if (s.alive && s.home == f.hq.id && !s.player) standDown(s);
+        w.news.radio("The " + f.name + " is boarding a troop train", f.hq.x, f.hq.y, News.COMMAND);
+        w.stats.troopTrains++;
+        return true;
+    }
+
+    /** Along the railway at train speed; at the end, on by road. A cut line (a blown bridge) puts them off early. */
+    private void rail(Formation f, float dt) {
+        RoadGraph g = w.r.rails;
+        float budget = w.c.rule("trainSpeed", 90) * dt;
+        boolean cut = false;
+        while (budget > 0 && f.route != null && f.ri < f.route.length - 1) {
+            int nn = f.route[f.ri + 1];
+            int e = g.edgeBetween(f.route[f.ri], nn);
+            if (e >= 0 && !g.ealive[e]) {
+                cut = true;
+                break;
+            }
+            float dx = g.nx[nn] - f.hq.x, dy = g.ny[nn] - f.hq.y, d = (float) Math.sqrt(dx * dx + dy * dy);
+            if (d <= budget) {
+                f.hq.x = g.nx[nn];
+                f.hq.y = g.ny[nn];
+                f.ri++;
+                budget -= d;
+            } else {
+                f.hq.x += dx / d * budget;
+                f.hq.y += dy / d * budget;
+                budget = 0;
+            }
+        }
+        if (cut || f.route == null || f.ri >= f.route.length - 1) {
+            f.route = null;
+            f.state = HOLDING;
+            w.news.radio("The " + f.name + (cut ? " is off the train early: the line is cut" : " has arrived by train"), f.hq.x, f.hq.y, News.COMMAND);
+            // the last stretch by road (close enough now that it won't take the train again)
+            float gx = f.gx, gy = f.gy;
+            if (!order(f, gx, gy)) f.state = HOLDING;
+        }
     }
 
     private void move(Formation f, float dt) {
@@ -336,13 +400,14 @@ public final class Forces extends Module {
         for (Formation f : formations) {
             if (!f.alive) continue;
             if (f.state == MOVING) move(f, dt);
+            else if (f.state == RAIL) rail(f, dt);
             if (f.strength() <= Math.max(4, f.start / 10)) {
                 if (f.strength() == 0) {
                     f.alive = false;
                     w.news.headline(f.name + " has been destroyed", f.hq.x, f.hq.y);
                     continue;
                 }
-                if (f.state != BROKEN && f.state != MOVING && f.state != AIRLIFT) {
+                if (f.state != BROKEN && !travelling(f)) {
                     f.state = BROKEN;
                     w.news.radio(f.name + " is broken and falling back", f.hq.x, f.hq.y, News.LOSS);
                 }
@@ -439,7 +504,7 @@ public final class Forces extends Module {
             if (f.pool == null || !w.strat.online(f.id)) continue;
             boolean hq = f.kind == Region.F_HQ;
             Formation fm = hq ? formationOf(f) : null;
-            if (fm != null && (fm.state == MOVING || fm.state == AIRLIFT || !fm.alive)) continue;
+            if (fm != null && (travelling(fm) || !fm.alive)) continue;
             int faction = hq ? fm.faction : f.kind == Region.F_POLICE || f.kind == Region.F_PRISON ? Ents.COP : Ents.SOLDIER;
             int armed = armedAt(f, faction);
             if (armed <= 0) continue;
@@ -486,7 +551,7 @@ public final class Forces extends Module {
         for (Strategic.Horde h : w.strat.hordes) {
             if (!h.alive) continue;
             for (Formation fm : formations) {
-                if (!fm.alive || fm.state == MOVING || fm.state == AIRLIFT) continue;
+                if (!fm.alive || travelling(fm)) continue;
                 float dx = h.x - fm.hq.x, dy = h.y - fm.hq.y;
                 if (dx * dx + dy * dy > 1500 * 1500) continue;
                 int armed = armedAt(fm.hq, fm.faction);
@@ -528,7 +593,7 @@ public final class Forces extends Module {
 
     /** Sends formations to the worst places, keeping one back for the capital. */
     private void command() {
-        if (w.roles.role == Roles.PRESIDENT || w.roles.role == Roles.MILITARY) {
+        if (w.roles.holds(Roles.PRESIDENT, -1) || w.roles.holds(Roles.MILITARY, -1)) {
             // the player commands; idle formations only defend where they stand
             return;
         }
@@ -688,7 +753,21 @@ public final class Forces extends Module {
             if (!f.alive) continue;
             float x = cam.toScreenX(f.hq.x), y = cam.toScreenY(f.hq.y);
             if (x < -40 || y < -40 || x > cam.sw + 40 || y > cam.sh + 40) continue;
-            if (f.state == MOVING && f.route != null) {
+            if (f.state == RAIL && f.route != null) {
+                // a troop train: carriages behind the engine, back along the line
+                RoadGraph rg = w.r.rails;
+                int back = Math.max(0, f.ri);
+                float px = f.hq.x, py = f.hq.y;
+                float bx = rg.nx[f.route[back]], by = rg.ny[f.route[back]];
+                float dx = px - bx, dy = py - by, dl = (float) Math.sqrt(dx * dx + dy * dy) + 0.01f;
+                float carz = Math.max(3, 26 * cam.zoom);
+                for (int k = 0; k < 6; k++) {
+                    float cx = cam.toScreenX(px - dx / dl * k * 34), cy = cam.toScreenY(py - dy / dl * k * 34);
+                    g.color(k == 0 ? 0xFF202020 : 0xFF4E5A3A);
+                    g.fillRect(cx - carz / 2, cy - carz / 3, carz, carz * 0.66f);
+                }
+            }
+            if ((f.state == MOVING || f.state == RAIL) && f.route != null) {
                 // an arrow to where it's going
                 float tx = cam.toScreenX(f.gx), ty = cam.toScreenY(f.gy);
                 float dx = tx - x, dy = ty - y, dl = (float) Math.sqrt(dx * dx + dy * dy);

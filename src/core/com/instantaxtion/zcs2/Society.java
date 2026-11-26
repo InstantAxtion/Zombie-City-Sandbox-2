@@ -25,6 +25,9 @@ public final class Society extends Module {
         public float x, y;
         public String name;
         public boolean fallen;
+        /** Stores (person-days of food, rounds), armed colonists, and the clock to the next trade. */
+        public float food, ammo, tradeT;
+        public int arms, trades;
     }
 
     private final float[] holdT;
@@ -88,6 +91,7 @@ public final class Society extends Module {
             looting();
             colonies();
         }
+        colonyLife(dt);
         for (int k = responders.size() - 1; k >= 0; k--) {
             int[] r = responders.get(k);
             r[1] -= (int) Math.ceil(dt);
@@ -419,6 +423,10 @@ public final class Society extends Module {
             c.x = sec.cx(best);
             c.y = sec.cy(best);
             c.name = Names.place(new Rng(w.seed + st * 977L), Region.S_HOLDOUT);
+            c.food = got * 5f;
+            c.arms = Math.max(4, got / 100);
+            c.ammo = c.arms * 60f;
+            c.tradeT = w.c.rule("tradeEvery", 720);
             colonies.add(c);
             w.news.headline("Survivors from " + s.name + " have founded a settlement in the country: " + c.name + " (" + got + ").", c.x, c.y);
         }
@@ -429,6 +437,82 @@ public final class Society extends Module {
                 w.news.headline(c.name + " has fallen.", c.x, c.y);
             }
         }
+    }
+
+    /**
+     * Life in the survivor settlements: they farm, eat, defend themselves with what they have, and trade their
+     * surplus food to the nearest working town for ammunition (caravans on the roads, which the dead can catch).
+     */
+    private void colonyLife(float dt) {
+        Sectors sec = w.sec;
+        float day = 1440f;
+        for (int k = 0; k < colonies.size(); k++) {
+            Colony c = colonies.get(k);
+            if (c.fallen) continue;
+            int people = sec.popIn[c.sector];
+            // farming and eating
+            c.food += people * (w.c.rule("colonyFarm", 1.25f) - 1f) * dt / day;
+            if (w.weather.temperature() < 0) c.food -= people * 0.2f * dt / day; // nothing grows in the frost
+            if (c.food < 0) {
+                // hungry: some leave for the towns
+                c.food = 0;
+                int leave = stoch(people * 0.002f * dt / 60f, k * 37L + 1);
+                sec.popIn[c.sector] -= Math.min(people, leave);
+            }
+            // the armed colonists hold their ground against the dead counted round them
+            int z = sec.zIn[c.sector];
+            if (z > 0 && c.arms > 0) {
+                float k2 = c.ammo > 0 ? 1f : 0.2f;
+                int killed = Math.min(z, stoch(c.arms * 0.04f * k2 * dt, k * 37L + 2));
+                sec.zIn[c.sector] -= killed;
+                c.ammo = Math.max(0, c.ammo - killed * 8);
+                w.stats.killsBySide[0] += killed;
+                int lost = Math.min(c.arms, stoch(Math.min(z, c.arms * 4) * 0.0003f * dt, k * 37L + 3));
+                c.arms -= lost;
+            }
+            // trade: surplus food out, ammunition back
+            c.tradeT -= dt;
+            if (c.tradeT <= 0) {
+                c.tradeT = w.c.rule("tradeEvery", 720);
+                float spare = c.food - people * 3f;
+                if (spare > 500) {
+                    Region.Facility store = tradePartner(c);
+                    if (store != null && w.logistics.trade(k, c.x, c.y, store, spare * 0.6f)) {
+                        c.food -= spare * 0.6f;
+                        c.trades++;
+                        if (c.trades <= 2) w.news.radio(c.name + " sends a caravan of food to trade in " + w.r.settlements.get(store.settlement).name, c.x, c.y, News.CALL);
+                    }
+                }
+            }
+        }
+    }
+
+    /** The food store of the nearest town that still works (and isn't overrun). */
+    private Region.Facility tradePartner(Colony c) {
+        Region.Facility best = null;
+        float bd = Float.MAX_VALUE;
+        for (Region.Settlement s : w.r.settlements) {
+            if (s.kind != Region.S_CITY && s.kind != Region.S_TOWN) continue;
+            int st = w.infra.store[s.id];
+            if (st < 0 || !w.strat.online(st) || w.stats.popBySettlement[s.id] < 200) continue;
+            if (w.stats.zBySettlement[s.id] > w.stats.popBySettlement[s.id] / 10) continue;
+            float dx = s.cx * 16f - c.x, dy = s.cy * 16f - c.y, d = dx * dx + dy * dy;
+            if (d < bd) {
+                bd = d;
+                best = w.r.facilities.get(st);
+            }
+        }
+        return best;
+    }
+
+    /** A caravan reached the town: the colony gets ammunition and a few more guns for its food. */
+    void traded(int colony, float food) {
+        if (colony < 0 || colony >= colonies.size()) return;
+        Colony c = colonies.get(colony);
+        float rounds = food * w.c.rule("tradeRounds", 0.08f);
+        c.ammo += rounds;
+        c.arms += (int) (rounds / 400);
+        w.stats.trades++;
     }
 
     // ------------------------------------------------------------------ drawing, saves
@@ -517,6 +601,11 @@ public final class Society extends Module {
             o.writeFloat(c.y);
             o.writeUTF(c.name);
             o.writeBoolean(c.fallen);
+            o.writeFloat(c.food);
+            o.writeFloat(c.ammo);
+            o.writeFloat(c.tradeT);
+            o.writeInt(c.arms);
+            o.writeInt(c.trades);
         }
         o.writeInt(responders.size());
         for (int[] r : responders) {
@@ -576,6 +665,11 @@ public final class Society extends Module {
             c.y = in.readFloat();
             c.name = in.readUTF();
             c.fallen = in.readBoolean();
+            c.food = in.readFloat();
+            c.ammo = in.readFloat();
+            c.tradeT = in.readFloat();
+            c.arms = in.readInt();
+            c.trades = in.readInt();
             colonies.add(c);
         }
         responders.clear();

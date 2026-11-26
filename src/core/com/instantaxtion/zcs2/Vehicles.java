@@ -471,6 +471,18 @@ public final class Vehicles {
         }
         if (ri[v] + 2 >= rt.length && len - along < 60) limit *= 0.5f;
         float fx = (float) Math.cos(head[v]), fy = (float) Math.sin(head[v]);
+        // a barricade across the road: stop at it, and find a way round (the road is closed to routing)
+        float ahead = t.length * 0.5f + 10;
+        if (w.r.tileAtPx(x[v] + fx * ahead, y[v] + fy * ahead) == Tile.BARRICADE) {
+            spd[v] = 0;
+            stuck[v] += dt;
+            if (stuck[v] > 1.5f) {
+                stuck[v] = 0;
+                w.r.closeBarricadedRoads();
+                if (!driveTo(v, destX[v], destY[v], 0) || throughBarricade(v)) arrive(v); // no way round: get out here
+            }
+            return;
+        }
         if (ghost[v] > 0) ghost[v] -= dt;
         else limit = Math.min(limit, traffic(v, fx, fy, t));
         limit = Math.min(limit, runDown(v, fx, fy, t, dt));
@@ -489,6 +501,17 @@ public final class Vehicles {
         y[v] = ny;
         fuel[v] -= spd[v] * dt / 400000f;
         if (fuel[v] < 0) fuel[v] = 0;
+    }
+
+    private boolean throughBarricade(int v) {
+        int[] rt = route[v];
+        if (rt == null) return false;
+        RoadGraph g = w.r.roads;
+        for (int k = 0; k + 1 < rt.length; k++) {
+            int e = g.edgeBetween(rt[k], rt[k + 1]);
+            if (e >= 0 && g.epen[e] >= 1e6f) return true;
+        }
+        return false;
     }
 
     private static float angle(float a) {

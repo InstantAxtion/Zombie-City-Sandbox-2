@@ -79,6 +79,8 @@ public final class Region {
     /** The railways, as a graph like the roads. */
     public final RoadGraph rails = new RoadGraph();
     public int waterCount, phoneCount;
+    /** Railway junctions on the border: where trains from abroad come in. */
+    public final List<Integer> railEntries = new ArrayList<Integer>();
 
     public final int W, H;
     public final long seed;
@@ -289,6 +291,25 @@ public final class Region {
         f.runtime = true;
         facilities.add(f);
         return f;
+    }
+
+    /** Roads crossed by a barricade are closed to routing (and opened again when it's gone). */
+    public void closeBarricadedRoads() {
+        RoadGraph g = roads;
+        for (int e = 0; e < g.edgeCount; e++) {
+            float ax = g.nx[g.ea[e]], ay = g.ny[g.ea[e]], bx = g.nx[g.eb[e]], by = g.ny[g.eb[e]];
+            float dx = bx - ax, dy = by - ay, len = (float) Math.sqrt(dx * dx + dy * dy);
+            int steps = (int) (len / 8) + 1;
+            boolean blocked = false;
+            for (int k = 0; k <= steps && !blocked; k++) {
+                float x = ax + dx * k / steps, y = ay + dy * k / steps;
+                // across the whole width of the road
+                float h = g.ehalf[e] * 0.8f, px = -dy / (len + 0.01f) * h, py = dx / (len + 0.01f) * h;
+                for (int j = -1; j <= 1 && !blocked; j++) if (tileAtPx(x + px * j, y + py * j) == Tile.BARRICADE) blocked = true;
+            }
+            if (blocked) g.epen[e] = Math.max(g.epen[e], 1e6f);
+            else if (g.epen[e] >= 1e6f) g.epen[e] = 0;
+        }
     }
 
     /** A checksum of the map, for tests and saves. */

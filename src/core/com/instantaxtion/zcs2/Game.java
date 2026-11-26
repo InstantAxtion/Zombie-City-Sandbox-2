@@ -11,7 +11,8 @@ import java.util.List;
  */
 public final class Game {
     static final int S_MENU = 0, S_NEW = 1, S_LOADING = 2, S_PLAY = 3, S_PAUSE = 4, S_SETTINGS = 5, S_REPORT = 6,
-            S_RADIO = 7, S_HELP = 8, S_NOTES = 9, S_SLOTS = 10, S_EDITOR = 11, S_TIMELAPSE = 12, S_REPLAYS = 13;
+            S_RADIO = 7, S_HELP = 8, S_NOTES = 9, S_SLOTS = 10, S_EDITOR = 11, S_TIMELAPSE = 12, S_REPLAYS = 13,
+            S_PLAYERS = 14, S_HANDOFF = 15;
     /** Game seconds per real second. From 60 up it's strategic fast-forward: an hour, six hours, a day a second. */
     static final int[] SPEEDS = {1, 2, 4, 8, 16, 60, 360, 1440};
     static final String[] SPEED_NAMES = {"1x", "2x", "4x", "8x", "16x", "1h/s", "6h/s", "1d/s"};
@@ -153,6 +154,8 @@ public final class Game {
             case S_EDITOR: dir.editor(g); break;
             case S_TIMELAPSE: dir.timelapse(g, dt); break;
             case S_REPLAYS: dir.replays(g); break;
+            case S_PLAYERS: play(g, 0); players(g); break;
+            case S_HANDOFF: handoff(g); break;
             default:
         }
         if (msg != null && msgT > 0) {
@@ -793,6 +796,11 @@ public final class Game {
         String whoCut = who;
         while (g.textWidth(whoCut, ui.dp(11), true) > ww - ui.dp(12) && whoCut.length() > 6) whoCut = whoCut.substring(0, whoCut.length() - 2);
         g.text(whoCut, m + ui.dp(7), y + m + ui.dp(14), ui.dp(11), Gfx.ALIGN_LEFT, true);
+        if (w.roles.players > 1 && replay == null) {
+            // pass-and-play: whose turn it is, and the hand-over
+            String pl = "P" + (w.roles.current + 1) + " ▸";
+            ui.button("handover", m + ww + ui.dp(6), y + m - ui.dp(2), ui.dp(54), ui.dp(24), pl, false, 11);
+        }
         if (view.overlay > WorldView.OV_INFECTION) view.legend(g, m, y + m + ui.dp(26), ui.dp(1));
         // the minimap
         if (settings.minimap && cam.zoom > 0.08f) minimap(g, W - ui.dp(112) - m, y + m, ui.dp(112));
@@ -1213,7 +1221,7 @@ public final class Game {
         float pw = Math.min(W - ui.dp(40), ui.dp(380));
         float x = (W - pw) / 2, bh = ui.dp(44), gap = ui.dp(8);
         String[][] items = {{"resume", "Resume"}, {"report", "Report"}, {"save", "Save"}, {"loadp", "Load"}, {"radio", "Radio log"},
-                {"timelapse", "Timelapse"}, {"savereplay", "Save replay"}, {"sharecode", "Challenge code"},
+                {"timelapse", "Timelapse"}, {"savereplay", "Save replay"}, {"sharecode", "Challenge code"}, {"players", "Players"},
                 {"settings", "Settings"}, {"shot", "Screenshot"}, {"hideui", "Hide buttons"}, {"tomenu", "Quit to the menu"}};
         int rows = (items.length + 1) / 2;
         float ph = rows * (bh + gap) + ui.dp(76);
@@ -1265,6 +1273,52 @@ public final class Game {
         }
         g.color(Ui.DIM);
         ui.wrap("More people in detail look better and cost more on a slow phone. The rest are still simulated, as counts.", m, y + ui.dp(20), W - m * 2, ui.dp(12), Ui.DIM, 3);
+    }
+
+    // ------------------------------------------------------------------ pass-and-play
+
+    private static final int[] SHARED_ROLES = {Roles.PRESIDENT, Roles.MILITARY, Roles.INCIDENT, Roles.PRECINCT, Roles.SQUAD};
+    private int handTo;
+
+    /** Who plays what: the players sharing this game, and adding one. */
+    private void players(Gfx g) {
+        int W = g.width(), H = g.height();
+        g.color(0xD0000000);
+        g.fillRect(0, 0, W, H);
+        float m = ui.dp(16), y = ui.dp(70), bw = W - m * 2;
+        ui.block(0, 0, W, H);
+        ui.button("back", m, ui.dp(14), ui.dp(70), ui.dp(34), "Back", false, 13);
+        ui.title("Players", m + ui.dp(84), ui.dp(38));
+        Roles ro = w.roles;
+        for (int k = 0; k < ro.players; k++) {
+            boolean now = k == ro.current;
+            ui.card("pl:" + k, m, y, bw, ui.dp(58), "Player " + (k + 1) + (now ? " (playing now)" : ""), ro.labelOf(k), now);
+            y += ui.dp(64);
+        }
+        y += ui.dp(8);
+        if (ro.players < Roles.MAX_PLAYERS) {
+            ui.wrap("Pass the phone round: each player takes a role and plays their part while the others wait. Add a player in a role; their city, station or squad is the one nearest the middle of the screen.",
+                    m, y + ui.dp(4), bw, ui.dp(12), Ui.DIM, 4);
+            y += ui.dp(66);
+            float cw = (bw - ui.dp(8)) / 2;
+            for (int i = 0; i < SHARED_ROLES.length; i++) {
+                ui.button("addpl:" + SHARED_ROLES[i], m + (i % 2) * (cw + ui.dp(8)), y + (i / 2) * ui.dp(48), cw, ui.dp(40), "+ " + Roles.NAMES[SHARED_ROLES[i]], false, 12);
+            }
+        }
+    }
+
+    /** The hand-over: the screen goes dark so the next player can take the phone. */
+    private void handoff(Gfx g) {
+        int W = g.width(), H = g.height();
+        g.color(0xFF0E1116);
+        g.fillRect(0, 0, W, H);
+        g.color(Ui.TEXT);
+        g.text("Pass to Player " + (handTo + 1), W / 2f, H * 0.38f, ui.dp(26), Gfx.ALIGN_CENTER, true);
+        g.color(Ui.DIM);
+        g.text(w.roles.labelOf(handTo), W / 2f, H * 0.38f + ui.dp(32), ui.dp(14), Gfx.ALIGN_CENTER, false);
+        float bw = Math.min(W - ui.dp(48), ui.dp(300));
+        ui.bigButton("takeover", (W - bw) / 2, H * 0.55f, bw, ui.dp(54), "I'm Player " + (handTo + 1) + ": go", Ui.ON);
+        ui.button("pl:back", (W - bw) / 2, H * 0.55f + ui.dp(66), bw, ui.dp(40), "Not yet", false);
     }
 
     private void textScreen(Gfx g, String title, String[] lines) {
@@ -1383,6 +1437,27 @@ public final class Game {
             g.color(Ui.GOOD);
             g.text(best, m, y + ui.dp(14), ui.dp(11.5f), Gfx.ALIGN_LEFT, true);
             y += ui.dp(16);
+        }
+        // friends' results for the same challenge
+        if (replay == null) {
+            float hb = (W - m * 2 - ui.dp(8)) / 2;
+            ui.button("shareresult", m, y + ui.dp(4), hb, ui.dp(34), "Share my result", false, 12);
+            ui.button("addresult", m + hb + ui.dp(8), y + ui.dp(4), hb, ui.dp(34), "Add a friend's result", false, 12);
+            y += ui.dp(44);
+            java.util.List<String[]> board = board(code);
+            if (!board.isEmpty()) {
+                g.color(Ui.ACCENT);
+                g.text("RESULTS ON THIS CHALLENGE", m, y + ui.dp(12), ui.dp(12), Gfx.ALIGN_LEFT, true);
+                y += ui.dp(18);
+                int place = 1;
+                for (String[] r : board) {
+                    g.color(r[0].equals(playerName()) ? Ui.GOOD : Ui.TEXT);
+                    g.text(place++ + ". " + r[0], m, y + ui.dp(12), ui.dp(12), Gfx.ALIGN_LEFT, false);
+                    g.text(WorldView.people(Integer.parseInt(r[1])) + " lost, " + duration(Integer.parseInt(r[2]) * 60f)
+                            + (r[3].equals("1") ? "" : " (not finished)"), W - m, y + ui.dp(12), ui.dp(12), Gfx.ALIGN_RIGHT, false);
+                    y += ui.dp(17);
+                }
+            }
         }
         if (w.roles.containedAt >= 0) {
             g.color(Ui.TEXT);
@@ -1526,6 +1601,79 @@ public final class Game {
         }
     }
 
+    // ------------------------------------------------------------------ results to compare with friends
+
+    String playerName() {
+        return pf.pref("playerName", "You");
+    }
+
+    /** This game's result as a code: the challenge, who, the lives lost, how long, finished or not, and a check. */
+    String resultCode() {
+        String name = playerName().replace("~", "-");
+        boolean done = w.roles.containedAt >= 0 || (w.ended && w.won);
+        int minutes = (int) ((w.roles.containedAt >= 0 ? w.roles.containedAt : w.time) / 60);
+        return resultCodeFor(challengeCodeOf(w), name, losses(), minutes, done);
+    }
+
+    static String resultCodeFor(String challenge, String name, int losses, int minutes, boolean done) {
+        String body = challenge + "~" + name + "~" + losses + "~" + minutes + "~" + (done ? 1 : 0);
+        return "ZC2R~" + body + "~" + check(body);
+    }
+
+    private static String check(String body) {
+        long h = 1469598103934665603L;
+        for (int i = 0; i < body.length(); i++) h = (h ^ body.charAt(i)) * 1099511628211L;
+        return Long.toString(Math.abs(h % 1679616L), 36);
+    }
+
+    /** Adds a friend's result code; false if it's mistyped or for another challenge. */
+    boolean addResult(String code) {
+        String[] p = code.trim().split("~");
+        if (p.length != 7 || !p[0].equals("ZC2R")) return false;
+        String body = p[1] + "~" + p[2] + "~" + p[3] + "~" + p[4] + "~" + p[5];
+        if (!check(body).equals(p[6])) return false;
+        try {
+            Integer.parseInt(p[3]);
+            Integer.parseInt(p[4]);
+        } catch (NumberFormatException e) {
+            return false;
+        }
+        String key = "friends." + p[1];
+        String list = pf.pref(key, "");
+        String entry = p[2] + "," + p[3] + "," + p[4] + "," + p[5];
+        // one entry per name: the newest
+        StringBuilder sb = new StringBuilder();
+        for (String e : list.split(";")) if (e.length() > 0 && !e.startsWith(p[2] + ",")) sb.append(e).append(';');
+        sb.append(entry);
+        pf.setPref(key, sb.toString());
+        return true;
+    }
+
+    /** Everyone's results on a challenge, you included (your best), best first: finished, then fewest lost, then fastest. */
+    java.util.List<String[]> board(String challenge) {
+        java.util.List<String[]> out = new java.util.ArrayList<String[]>();
+        for (String e : pf.pref("friends." + challenge, "").split(";")) {
+            String[] f = e.split(",");
+            if (f.length == 4) out.add(f);
+        }
+        String[] b = pf.pref("best." + challenge, "").split(",");
+        if (b.length == 2) {
+            try {
+                out.add(new String[]{playerName(), b[0], "" + (int) (Float.parseFloat(b[1]) / 60), "1"});
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        java.util.Collections.sort(out, new java.util.Comparator<String[]>() {
+            public int compare(String[] a, String[] c) {
+                if (!a[3].equals(c[3])) return c[3].compareTo(a[3]);
+                int la = Integer.parseInt(a[1]), lc = Integer.parseInt(c[1]);
+                if (la != lc) return la < lc ? -1 : 1;
+                return Integer.parseInt(a[2]) - Integer.parseInt(c[2]);
+            }
+        });
+        return out;
+    }
+
     String bestText(String code) {
         String[] v = pf.pref("best." + code, "").split(",");
         if (v.length != 2) return null;
@@ -1571,6 +1719,44 @@ public final class Game {
                     }
                 });
                 return;
+            case "players": back = S_PAUSE; screen = S_PLAYERS; return;
+            case "shareresult":
+                if (pf.pref("playerName", null) == null) {
+                    pf.askText("Your name (shown to friends with your result)", "", new Platform.TextAnswer() {
+                        public void answer(String text) {
+                            String n = text.trim().replace(",", " ").replace(";", " ").replace("~", "-");
+                            pf.setPref("playerName", n.length() == 0 ? "Player" : n.length() > 16 ? n.substring(0, 16) : n);
+                            pf.askText("Your result: send this code to a friend", resultCode(), null);
+                        }
+                    });
+                } else pf.askText("Your result: send this code to a friend", resultCode(), null);
+                return;
+            case "addresult":
+                pf.askText("A friend's result code", "", new Platform.TextAnswer() {
+                    public void answer(String text) {
+                        toast(addResult(text) ? "Result added" : "That code doesn't look right");
+                    }
+                });
+                return;
+            case "handover":
+                paused = true;
+                handTo = (w.roles.current + 1) % w.roles.players;
+                screen = S_HANDOFF;
+                return;
+            case "takeover": {
+                Actions.switchPlayer(w, handTo);
+                float[] p = w.roles.focusOf(handTo);
+                cam.follow = w.roles.current == 0 && w.playerEnt >= 0 ? w.playerEnt : -1;
+                cam.flyTo(p[0], p[1], p[2]);
+                inspSquad = null;
+                inspFormation = null;
+                closeInspector();
+                tool = w.roles.role == Roles.GOD ? "look" : "orders";
+                screen = S_PLAY;
+                paused = false;
+                return;
+            }
+            case "pl:back": screen = S_PLAY; return;
             case "sharecode":
                 pf.askText("This game's challenge code: share it", challengeCodeOf(w), new Platform.TextAnswer() {
                     public void answer(String text) {
@@ -1693,6 +1879,18 @@ public final class Game {
         } else if (id.startsWith("v:")) placeVehicle = id.substring(2);
         else if (id.startsWith("s:")) strikeMode = id.substring(2);
         else if (id.startsWith("set:")) setting(id.substring(4));
+        else if (id.startsWith("addpl:")) {
+            int r = Integer.parseInt(id.substring(6));
+            if (Actions.addPlayer(w, r, cam.cx, cam.cy)) toast("Player " + w.roles.players + ": " + Roles.NAMES[r]);
+            else toast("Can't add that player");
+        } else if (id.startsWith("pl:") && !id.equals("pl:back")) {
+            int k = Integer.parseInt(id.substring(3));
+            if (k != w.roles.current) {
+                handTo = k;
+                paused = true;
+                screen = S_HANDOFF;
+            }
+        }
         else if (id.startsWith("slot:")) {
             String n = id.substring(5);
             if (saving) {

@@ -352,8 +352,63 @@ final class GLGfx implements Gfx {
     public void fillPoly(float[] xy, int n) {
         if (n < 3) return;
         tex(white);
-        // a fan from the first point (the game's polygons are convex, or nearly)
-        for (int i = 1; i < n - 1; i++) tri(xy[0], xy[1], xy[i * 2], xy[i * 2 + 1], xy[i * 2 + 2], xy[i * 2 + 3]);
+        if (n == 3 || convex(xy, n)) {
+            for (int i = 1; i < n - 1; i++) tri(xy[0], xy[1], xy[i * 2], xy[i * 2 + 1], xy[i * 2 + 2], xy[i * 2 + 3]);
+            return;
+        }
+        // a concave shape (the lightning bolt): cut off one ear at a time
+        int[] idx = new int[n];
+        for (int i = 0; i < n; i++) idx[i] = i;
+        float area = 0;
+        for (int i = 0; i < n; i++) {
+            int j = (i + 1) % n;
+            area += xy[i * 2] * xy[j * 2 + 1] - xy[j * 2] * xy[i * 2 + 1];
+        }
+        float sign = area >= 0 ? 1 : -1;
+        int m = n, guard = 0;
+        while (m > 3 && guard++ < n * n) {
+            boolean cut = false;
+            for (int k = 0; k < m; k++) {
+                int a = idx[(k + m - 1) % m], b = idx[k], c = idx[(k + 1) % m];
+                float ax = xy[a * 2], ay = xy[a * 2 + 1], bx = xy[b * 2], by = xy[b * 2 + 1], cx = xy[c * 2], cy = xy[c * 2 + 1];
+                float cross = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+                if (cross * sign <= 0) continue; // a reflex corner: not an ear
+                boolean inside = false;
+                for (int q = 0; q < m && !inside; q++) {
+                    int p = idx[q];
+                    if (p == a || p == b || p == c) continue;
+                    inside = inTri(xy[p * 2], xy[p * 2 + 1], ax, ay, bx, by, cx, cy);
+                }
+                if (inside) continue;
+                tri(ax, ay, bx, by, cx, cy);
+                for (int q = k; q < m - 1; q++) idx[q] = idx[q + 1];
+                m--;
+                cut = true;
+                break;
+            }
+            if (!cut) break;
+        }
+        if (m >= 3) for (int i = 1; i < m - 1; i++)
+            tri(xy[idx[0] * 2], xy[idx[0] * 2 + 1], xy[idx[i] * 2], xy[idx[i] * 2 + 1], xy[idx[i + 1] * 2], xy[idx[i + 1] * 2 + 1]);
+    }
+
+    private static boolean convex(float[] xy, int n) {
+        int pos = 0, neg = 0;
+        for (int i = 0; i < n; i++) {
+            int j = (i + 1) % n, k = (i + 2) % n;
+            float cr = (xy[j * 2] - xy[i * 2]) * (xy[k * 2 + 1] - xy[j * 2 + 1]) - (xy[j * 2 + 1] - xy[i * 2 + 1]) * (xy[k * 2] - xy[j * 2]);
+            if (cr > 0) pos++;
+            else if (cr < 0) neg++;
+        }
+        return pos == 0 || neg == 0;
+    }
+
+    private static boolean inTri(float px, float py, float ax, float ay, float bx, float by, float cx, float cy) {
+        float d1 = (px - bx) * (ay - by) - (ax - bx) * (py - by);
+        float d2 = (px - cx) * (by - cy) - (bx - cx) * (py - cy);
+        float d3 = (px - ax) * (cy - ay) - (cx - ax) * (py - ay);
+        boolean neg = d1 < 0 || d2 < 0 || d3 < 0, pos = d1 > 0 || d2 > 0 || d3 > 0;
+        return !(neg && pos);
     }
 
     public void points(float[] xy, int n, float size) {

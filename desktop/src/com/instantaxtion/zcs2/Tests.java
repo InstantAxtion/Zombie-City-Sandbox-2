@@ -870,6 +870,134 @@ public final class Tests {
                 }
             }
         });
+        test("gaps: ships, planes and freight trains carry the country's supplies", new T() {
+            public void run() {
+                World w = Setup.newGame(content, 1536, RegionGen.COAST, 21, content.scenario("sandbox"), 2);
+                w.setStrategic(true);
+                for (int k = 0; k < 3 * 144; k++) w.step(); // three days
+                Logistics l = w.logistics;
+                boolean port = false;
+                for (Region.Facility f : w.r.facilities) if (f.kind == Region.F_PORT) port = true;
+                if (port) check(l.sent[Logistics.SHIP] > 0, "no ship came in: " + java.util.Arrays.toString(l.sent));
+                check(l.sent[Logistics.PLANE] > 0, "no cargo plane came in: " + java.util.Arrays.toString(l.sent));
+                check(l.sent[Logistics.TRAIN] > 0, "no freight train ran: " + java.util.Arrays.toString(l.sent));
+                check(l.delivered > 10, "only " + l.delivered + " deliveries");
+                check(Audit.check(w).isEmpty(), Audit.check(w));
+                w.shutdown();
+            }
+        });
+        test("gaps: troops come by train over the border and on to the capital", new T() {
+            public void run() {
+                World w = Setup.newGame(content, 2304, RegionGen.COAST, 7, content.scenario("sandbox"), 2);
+                check(!w.r.railEntries.isEmpty(), "no railway over the border");
+                int re = w.r.railEntries.get(0);
+                Forces.Formation f = w.forces.createFormation(w.c.formationT("infantry"), w.r.rails.nx[re], w.r.rails.ny[re], true);
+                Region.Settlement c = w.r.city();
+                check(w.forces.order(f, c.cx * 16f, c.cy * 16f), "no orders");
+                check(f.state == Forces.RAIL, "not on a train: " + Forces.STATES[f.state]);
+                w.setStrategic(true);
+                for (int k = 0; k < 144 && f.state == Forces.RAIL; k++) w.step();
+                check(f.state != Forces.RAIL, "still on the train after a day");
+                float dx = f.hq.x - c.cx * 16f, dy = f.hq.y - c.cy * 16f;
+                check(dx * dx + dy * dy < 4000f * 4000f, "got off far from the capital");
+                check(w.stats.troopTrains > 0, "not counted");
+                w.shutdown();
+            }
+        });
+        test("gaps: a barricade closes the road to vehicles", new T() {
+            public void run() {
+                World w = game(5, 1024, "sandbox", 1);
+                RoadGraph g = w.r.roads;
+                // a street in the city, walled across its middle
+                int e = -1;
+                Region.Settlement c = w.r.city();
+                for (int k = 0; k < g.edgeCount && e < 0; k++)
+                    if (g.ekind[k] == RoadGraph.STREET && g.nset[g.ea[k]] == c.id && g.elen[k] > 200) e = k;
+                check(e >= 0, "no street");
+                float mx = (g.nx[g.ea[e]] + g.nx[g.eb[e]]) / 2, my = (g.ny[g.ea[e]] + g.ny[g.eb[e]]) / 2;
+                int tx = (int) (mx / 16), ty = (int) (my / 16);
+                for (int d = -4; d <= 4; d++)
+                    for (int d2 = -4; d2 <= 4; d2++)
+                        if (Tile.roadish(w.r.t(tx + d, ty + d2))) w.r.set(tx + d, ty + d2, Tile.BARRICADE);
+                w.r.closeBarricadedRoads();
+                check(g.epen[e] >= 1e6f, "the road isn't closed");
+                int[] rt = g.route(g.ea[e], g.eb[e]);
+                check(rt == null || rt.length > 2, "a route still goes through the barricade");
+                // a car told to cross it never ends up on it
+                int v = w.veh.add(w.c.vtype("patrol_car"), g.nx[g.ea[e]], g.ny[g.ea[e]], 0, -1);
+                w.veh.driveTo(v, g.nx[g.eb[e]], g.ny[g.eb[e]], 0);
+                for (int k = 0; k < 20 * 60; k++) {
+                    w.step();
+                    check(w.r.tileAtPx(w.veh.x[v], w.veh.y[v]) != Tile.BARRICADE, "the car drove through the barricade");
+                }
+                w.shutdown();
+            }
+        });
+        test("gaps: survivor settlements farm, trade food for ammunition, and defend themselves", new T() {
+            public void run() {
+                World w = game(8, 1024, "sandbox", 1);
+                Region.Settlement c = w.r.city();
+                // a settlement out in the country, a few sectors from the city
+                int s = -1;
+                for (int k = 0; k < w.sec.n && s < 0; k++) {
+                    float dx = w.sec.cx(k) - c.cx * 16f, dy = w.sec.cy(k) - c.cy * 16f;
+                    if (w.sec.settlement[k] < 0 && w.sec.connect[k] != 0 && dx * dx + dy * dy > 4000f * 4000f && dx * dx + dy * dy < 6000f * 6000f
+                            && w.r.walkablePx(w.sec.cx(k), w.sec.cy(k))) s = k;
+                }
+                check(s >= 0, "no place for a settlement");
+                Society.Colony col = new Society.Colony();
+                col.sector = s;
+                col.start = 800;
+                col.x = w.sec.cx(s);
+                col.y = w.sec.cy(s);
+                col.name = "Test Holdout";
+                col.food = 20000;
+                col.arms = 10;
+                col.ammo = 0;
+                col.tradeT = 30;
+                w.sec.popIn[s] += 800;
+                w.society.colonies.add(col);
+                w.sec.zIn[s] += 40;
+                w.setStrategic(true);
+                for (int k = 0; k < 144; k++) w.step();
+                check(col.trades > 0, "no caravan set out");
+                check(w.stats.trades > 0 && col.ammo > 0, "the caravan brought nothing back");
+                check(w.sec.zIn[s] < 40, "the colonists didn't fight");
+                check(Audit.check(w).isEmpty(), Audit.check(w));
+                w.shutdown();
+            }
+        });
+        test("gaps: pass-and-play players, and friends' results", new T() {
+            public void run() throws Exception {
+                World w = Setup.newGame(content, 1024, RegionGen.COAST, 33, content.scenario("sandbox"), 1, Roles.GOD, 60000);
+                Region.Settlement c = w.r.city();
+                check(Actions.addPlayer(w, Roles.PRESIDENT, c.cx * 16f, c.cy * 16f), "no second player");
+                check(Actions.addPlayer(w, Roles.INCIDENT, c.cx * 16f, c.cy * 16f), "no third player");
+                check(!Actions.addPlayer(w, Roles.SURVIVOR, c.cx * 16f, c.cy * 16f), "a second person in the street");
+                check(w.roles.players == 3 && w.roles.holds(Roles.PRESIDENT, -1) && w.roles.holds(Roles.INCIDENT, c.id), "roles not held");
+                check(w.gov.playerDecides, "the AI president didn't stand aside");
+                Actions.switchPlayer(w, 2);
+                check(w.roles.role == Roles.INCIDENT && w.roles.target == c.id, "didn't hand over");
+                for (int k = 0; k < 400; k++) w.step();
+                ByteArrayOutputStream bo = new ByteArrayOutputStream();
+                SaveIO.save(w, bo);
+                World l = SaveIO.load(content, new ByteArrayInputStream(bo.toByteArray()), 1);
+                check(l.roles.players == 3 && l.roles.current == 2 && l.roles.role == Roles.INCIDENT, "players lost in the save");
+                Replay r = Replay.of(content, w, 1);
+                r.runTo(w.tick);
+                check(Audit.hash(r.w) == Audit.hash(w), "the replay of a shared game differs");
+                // results to compare
+                DesktopPlatform pf = new DesktopPlatform(new java.io.File("build/test-results-prefs"));
+                Game game = new Game(pf);
+                String code = Game.resultCodeFor("1024-0-33-sandbox-god", "Sam", 1200, 300, true);
+                check(game.addResult(code), "a good code was refused");
+                check(!game.addResult(code.replace("1200", "12")), "a doctored code was taken");
+                check(game.board("1024-0-33-sandbox-god").size() == 1, "the friend isn't on the board");
+                w.shutdown();
+                l.shutdown();
+                r.w.shutdown();
+            }
+        });
         test("perf: 20,000 of the dead", new T() {
             public void run() {
                 World w = game(2, 1024, "sandbox", 4);

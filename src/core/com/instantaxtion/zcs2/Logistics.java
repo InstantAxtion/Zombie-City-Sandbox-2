@@ -25,6 +25,8 @@ public final class Logistics extends Module {
         public float ammo, fuel, food, med, x, y, tx, ty;
         public int[] route;
         public boolean alive = true, back;
+        /** A trade caravan from a survivor settlement (its index), or -1. */
+        public int colony = -1;
 
         public int size() {
             if (refugees > 0) return Math.max(3, Math.min(14, refugees / 150));
@@ -35,9 +37,11 @@ public final class Logistics extends Module {
 
     public final List<Convoy> convoys = new ArrayList<Convoy>();
     private int[] onWay = new int[0];
-    private float requestT, trainT;
+    private float requestT, trainT, importT;
     private int nextId;
     public int lost, delivered;
+    /** Convoys sent, by mode (trucks, trains, planes, ships). */
+    public final int[] sent = new int[4];
 
     public Logistics(World w) {
         super(w);
@@ -63,6 +67,11 @@ public final class Logistics extends Module {
             requestT = 30;
             requests();
         }
+        importT -= dt;
+        if (importT <= 0) {
+            importT = w.c.rule("importEvery", 360);
+            imports();
+        }
         trainT -= dt;
         if (trainT <= 0) {
             trainT = 60;
@@ -73,6 +82,30 @@ public final class Logistics extends Module {
             if (c.alive) move(c, dt);
         }
         for (int k = convoys.size() - 1; k >= 0; k--) if (!convoys.get(k).alive) convoys.remove(k);
+    }
+
+    // ------------------------------------------------------------------ imports
+
+    /**
+     * The country's lifelines from abroad, on a schedule: ships into the port with food and fuel, cargo planes into
+     * the airfields with medicine and ammunition, topping them up to what they can hold. The ports and airfields
+     * then supply the cities (by train where there's a railway).
+     */
+    private void imports() {
+        for (Region.Facility f : w.r.facilities) {
+            if (!w.strat.online(f.id)) continue;
+            if (f.kind == Region.F_PORT) {
+                float food = w.c.rule("portFood", 400000), fuel = w.c.rule("portFuel", 800);
+                if (f.food < food * 0.95f) send(OUTSIDE, f, G_FOOD, food - f.food, SHIP);
+                if (f.fuel < fuel * 0.95f) send(OUTSIDE, f, G_FUEL, fuel - f.fuel, SHIP);
+            } else if (f.kind == Region.F_AIRPORT || f.kind == Region.F_AIRBASE) {
+                float med = w.c.rule("airMed", 3000), ammo = f.kind == Region.F_AIRBASE ? w.c.rule("airAmmo", 60000) : 0;
+                float food = f.kind == Region.F_AIRPORT ? w.c.rule("airFood", 100000) : 0;
+                if (f.med < med * 0.95f) send(OUTSIDE, f, G_MED, med - f.med, PLANE);
+                if (ammo > 0 && f.ammo < ammo * 0.95f) send(OUTSIDE, f, G_AMMO, ammo - f.ammo, PLANE);
+                if (food > 0 && f.food < food * 0.95f) send(OUTSIDE, f, G_FOOD, Math.min(30000, food - f.food), PLANE);
+            }
+        }
     }
 
     // ------------------------------------------------------------------ who needs what
@@ -126,7 +159,8 @@ public final class Logistics extends Module {
             Region.Facility f = r.facilities.get(st);
             int pop = w.stats.popBySettlement[s.id];
             if (pop < 50) continue;
-            if (f.food < pop * 3f) request(f, G_FOOD, pop * 5f - f.food);
+            float low = w.c.rule("foodRequestDays", 4), full = w.c.rule("foodFullDays", 7);
+            if (f.food < pop * low) request(f, G_FOOD, pop * full - f.food);
         }
     }
 
@@ -174,8 +208,30 @@ public final class Logistics extends Module {
         }
         float give = Math.min(need, stock(best, good) * 0.5f);
         int mode = TRUCK;
-        if (good == G_FOOD && station(best.settlement) != null && station(dst.settlement) != null && best.settlement != dst.settlement) mode = TRAIN;
+        // long hauls between two places with stations go by freight train, whatever the goods
+        float dx = best.x - dst.x, dy = best.y - dst.y;
+        Region.Facility headA = railHead(best), headB = station(dst.settlement);
+        if (headA != null && headB != null && headA != headB
+                && dx * dx + dy * dy > w.c.rule("trainOver", 2500) * w.c.rule("trainOver", 2500)) mode = TRAIN;
         send(best.id, dst, good, give, mode);
+    }
+
+    /** A railway station for goods leaving this facility: its own town's, or the nearest city's (a short haul to it). */
+    private Region.Facility railHead(Region.Facility f) {
+        Region.Facility s = station(f.settlement);
+        if (s != null) return s;
+        Region.Facility best = null;
+        float bd = w.c.rule("railHeadReach", 3500);
+        bd *= bd;
+        for (Region.Facility g : w.r.facilities) {
+            if (g.kind != Region.F_STATION || g.railNode < 0 || !w.strat.online(g.id)) continue;
+            float dx = g.x - f.x, dy = g.y - f.y, d = dx * dx + dy * dy;
+            if (d < bd) {
+                bd = d;
+                best = g;
+            }
+        }
+        return best;
     }
 
     private Region.Facility station(int settlement) {
@@ -206,7 +262,7 @@ public final class Logistics extends Module {
             c.x = r.roads.nx[a];
             c.y = r.roads.ny[a];
         } else if (mode == TRAIN) {
-            Region.Facility sa = station(src.settlement), sb = station(dst.settlement);
+            Region.Facility sa = railHead(src), sb = station(dst.settlement);
             c.route = r.rails.route(sa.railNode, sb.railNode);
             if (c.route == null) {
                 send(from, dst, good, amount, TRUCK);
@@ -226,6 +282,7 @@ public final class Logistics extends Module {
         put(c, good, amount);
         onWay[dst.id] |= good;
         convoys.add(c);
+        sent[mode]++;
         w.stats.supplyRuns++;
         if (w.stats.supplyRuns <= 2 || (mode == SHIP && Rng.unit(w.seed, c.id, 5) < 0.3f))
             w.news.radio(MODES[mode] + " with " + goodsName(c) + " heading for " + dst.name, c.x, c.y, News.UNIT);
@@ -449,6 +506,29 @@ public final class Logistics extends Module {
         f.food += c.food;
         f.med += c.med;
         delivered++;
+        if (c.colony >= 0) w.society.traded(c.colony, c.food);
+    }
+
+    /** A caravan of food from a survivor settlement at (x, y) to a town's store. */
+    public boolean trade(int colony, float x, float y, Region.Facility store, float food) {
+        Region r = w.r;
+        int a = r.roads.nearestNode(x, y, 3000), b = r.roads.nearestNode(store.x, store.y, 1500);
+        if (a < 0 || b < 0) return false;
+        int[] rt = r.roads.route(a, b);
+        if (rt == null) return false;
+        Convoy c = new Convoy();
+        c.id = nextId++;
+        c.mode = TRUCK;
+        c.from = OUTSIDE;
+        c.to = store.id;
+        c.goods = 0; // not a request: doesn't block the town's own supply
+        c.colony = colony;
+        c.route = rt;
+        c.x = r.roads.nx[a];
+        c.y = r.roads.ny[a];
+        c.food = food;
+        convoys.add(c);
+        return true;
     }
 
     private void settle(int st, int healthy, int infected) {
@@ -592,6 +672,7 @@ public final class Logistics extends Module {
     public void save(DataOutputStream o) throws IOException {
         o.writeFloat(requestT);
         o.writeFloat(trainT);
+        o.writeFloat(importT);
         o.writeInt(nextId);
         o.writeInt(lost);
         o.writeInt(delivered);
@@ -619,13 +700,16 @@ public final class Logistics extends Module {
             o.writeInt(c.route == null ? -1 : c.route.length);
             if (c.route != null) for (int v : c.route) o.writeInt(v);
             o.writeBoolean(c.alive);
+            o.writeInt(c.colony);
         }
+        for (int m = 0; m < 4; m++) o.writeInt(sent[m]);
     }
 
     @Override
     public void load(DataInputStream in) throws IOException {
         requestT = in.readFloat();
         trainT = in.readFloat();
+        importT = in.readFloat();
         nextId = in.readInt();
         lost = in.readInt();
         delivered = in.readInt();
@@ -658,7 +742,9 @@ public final class Logistics extends Module {
                 for (int i = 0; i < rl; i++) c.route[i] = in.readInt();
             }
             c.alive = in.readBoolean();
+            c.colony = in.readInt();
             convoys.add(c);
         }
+        if (in.available() > 0) for (int m = 0; m < 4; m++) sent[m] = in.readInt();
     }
 }

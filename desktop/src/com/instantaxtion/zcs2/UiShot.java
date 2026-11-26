@@ -30,6 +30,10 @@ public final class UiShot {
             directorShots(pf);
             return;
         }
+        if (a.length > 4 && a[4].equals("coop")) {
+            coop();
+            return;
+        }
         if (a.length > 4) {
             modeShots(a[4]);
             return;
@@ -216,6 +220,46 @@ public final class UiShot {
         frames(60);
         shot("d15-replay");
         System.out.println("ok director: " + game.world().clock() + ", replay " + (game.replay != null ? game.replay.events.size() + " events" : "over"));
+        game.world().shutdown();
+        System.exit(0);
+    }
+
+    /** Pass-and-play: add players, hand over, and a friend's result on the report. */
+    static void coop() throws Exception {
+        tap("new");
+        frames(2);
+        tap("start");
+        waitPlay();
+        frames(30);
+        tap("pause");
+        frames(1);
+        tap("players");
+        frames(1);
+        tap("addpl:" + Roles.PRESIDENT);
+        frames(1);
+        tap("addpl:" + Roles.INCIDENT);
+        frames(2);
+        shot("c1-players");
+        tap("back");
+        frames(1);
+        tap("resume");
+        frames(5);
+        shot("c2-hud");
+        tap("handover");
+        frames(2);
+        shot("c3-handoff");
+        tap("takeover");
+        frames(40);
+        shot("c4-player2");
+        ((DesktopPlatform) game.pf).answers.add(Game.resultCodeFor(Game.challengeCodeOf(game.world()), "Robin", 4200, 900, true));
+        tap("pause");
+        frames(1);
+        tap("report");
+        frames(1);
+        tap("addresult");
+        frames(2);
+        shot("c5-report");
+        System.out.println("ok coop: player " + (game.world().roles.current + 1) + " of " + game.world().roles.players);
         game.world().shutdown();
         System.exit(0);
     }

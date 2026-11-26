@@ -118,6 +118,7 @@ public final class SaveIO {
         readEffects(in, w.fx);
         readFlow(in, w.flow);
         readModules(in, w);
+        w.r.closeBarricadedRoads();
         if (in.readInt() != MAGIC) throw new IOException("save is damaged");
         w.veh.rebuildGrid();
         w.sp.build(w.e);
@@ -476,7 +477,7 @@ public final class SaveIO {
     private static void stats(DataOutputStream o, Stats s) throws IOException {
         int[] v = {s.civDeaths, s.zombieKills, s.zombiesMade, s.risen, s.infectedTotal, s.shots, s.vehiclesLost, s.facilitiesLost,
                 s.buildingsLost, s.airStrikes, s.bridgesBlown, s.supplyRuns, s.outsidePolice, s.outsideSoldiers, s.peakZombies,
-                s.startPolice, s.startSoldiers, s.startCivilians};
+                s.startPolice, s.startSoldiers, s.startCivilians, s.rotted, s.artillery, s.troopTrains, s.trades};
         ints(o, v, v.length);
         ints(o, s.killsBySide, 3);
         ints(o, s.armedDeaths, 4);
@@ -496,12 +497,13 @@ public final class SaveIO {
     }
 
     private static void readStats(DataInputStream in, Stats s) throws IOException {
-        int[] v = new int[18];
+        int[] v = new int[22];
         readInts(in, v);
         s.civDeaths = v[0]; s.zombieKills = v[1]; s.zombiesMade = v[2]; s.risen = v[3]; s.infectedTotal = v[4]; s.shots = v[5];
         s.vehiclesLost = v[6]; s.facilitiesLost = v[7]; s.buildingsLost = v[8]; s.airStrikes = v[9]; s.bridgesBlown = v[10];
         s.supplyRuns = v[11]; s.outsidePolice = v[12]; s.outsideSoldiers = v[13]; s.peakZombies = v[14];
         s.startPolice = v[15]; s.startSoldiers = v[16]; s.startCivilians = v[17];
+        s.rotted = v[18]; s.artillery = v[19]; s.troopTrains = v[20]; s.trades = v[21];
         readInts(in, s.killsBySide);
         readInts(in, s.armedDeaths);
         readInts(in, s.zBySettlement);

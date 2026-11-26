@@ -160,9 +160,16 @@ phones down slow the calls and the officials' picture, rumours move people onto 
 reports percentiles; a test runs a small batch on every `./test.sh` and checks broad bands. The rules it tunes are
 in `content.ini [rules]`.
 
+## Playing together
+
+Pass-and-play: up to four players share one game, each in a role (Roles.players, pRole, pTarget); the AI stands
+aside wherever any player holds the job (Roles.holds). Adding a player and handing over are recorded actions, so
+a replay of a shared game is still exact. Results on a challenge are shared as a checked code
+(`ZC2R~challenge~name~lost~minutes~finished~check`) and compared on the report.
+
 ## What's next
 
 - Running the GPU renderer on real phones (it has a self-check and a Canvas fallback, but hasn't met a device).
-- Troops and freight that actually exercise the trains, planes and ships more (they only run when stocks are low).
-- Cooperative and asynchronous play beyond challenge codes.
+- Online play: co-op is pass-and-play on one phone and results are compared by code; playing together over the
+  internet would need a server.
 - Several countries; the sea as a place.

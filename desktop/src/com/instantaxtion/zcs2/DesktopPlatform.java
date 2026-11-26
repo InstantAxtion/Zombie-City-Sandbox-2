@@ -38,11 +38,17 @@ public final class DesktopPlatform implements Platform {
     /** Scripted answers for tests (taken first); else a dialog when there's a screen. */
     public final java.util.ArrayDeque<String> answers = new java.util.ArrayDeque<String>();
 
+    /** The text last offered in a dialog (for tests: e.g. a result code to share). */
+    public String lastShown;
+
     public void askText(String title, String current, TextAnswer answer) {
+        lastShown = current;
         if (!answers.isEmpty()) {
-            answer.answer(answers.poll());
+            String a = answers.poll();
+            if (answer != null) answer.answer(a);
             return;
         }
+        if (answer == null) return;
         if (java.awt.GraphicsEnvironment.isHeadless()) return;
         String s = javax.swing.JOptionPane.showInputDialog(null, title, current);
         if (s != null) answer.answer(s);
