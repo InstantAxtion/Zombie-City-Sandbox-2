@@ -17,6 +17,8 @@ public final class Tile {
     private static final boolean[] SIGHT_BLOCK = new boolean[KINDS];
     private static final boolean[] ROADISH = new boolean[KINDS];
     private static final float[] SLOW = new float[KINDS];
+    /** What the dead can wear down by pressing on it (barricades, fences, walls): its default hit points, 0 = never. */
+    private static final float[] SMASH_HP = new float[KINDS];
     /** The colour of each kind on the region map (one pixel per tile). */
     public static final int[] MAP_COLOR = new int[KINDS];
 
@@ -33,6 +35,9 @@ public final class Tile {
         SLOW[SAND] = 0.8f;
         SLOW[RUBBLE] = 0.7f;
         SLOW[TREE] = 0.8f;
+        SMASH_HP[BARRICADE] = 120;
+        SMASH_HP[FENCE] = 60;
+        SMASH_HP[WALL] = 400;
         int[] c = MAP_COLOR;
         c[GRASS] = 0xFF6E8F4E;
         c[FARM] = 0xFF9C9A55;
@@ -75,6 +80,16 @@ public final class Tile {
 
     public static float slow(int t) {
         return SLOW[t];
+    }
+
+    /** True if the dead can break this down (it turns to rubble when its hit points are gone). */
+    public static boolean smashable(int t) {
+        return SMASH_HP[t] > 0;
+    }
+
+    /** The hit points of a smashable tile when no rule overrides them (0 if it can't be smashed). */
+    public static float smashHp(int t) {
+        return SMASH_HP[t];
     }
 
     public static boolean water(int t) {

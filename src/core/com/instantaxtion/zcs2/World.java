@@ -52,6 +52,8 @@ public final class World {
     public final Roles roles;
     public final Director director;
     public final Recovery recovery;
+    /** What the dead do beyond chasing and biting (smashing, feeding, alphas, lunges), and its state. */
+    public final Undead undead;
     /** Systems plugged in (updated, saved and drawn in this order). */
     public final List<Module> modules = new ArrayList<Module>();
     /** Strategic fast-forward: everything as numbers, ten game seconds a step. */
@@ -138,6 +140,8 @@ public final class World {
         modules.add(roles);
         recovery = new Recovery(this);
         modules.add(recovery);
+        undead = new Undead(this);
+        modules.add(undead);
         director = new Director(this);
         modules.add(director);
         zai = new ZombieAI(this);
@@ -236,6 +240,7 @@ public final class World {
         if (tick % 10 == 1) flow.build(this);
         sq.update();
         aai.prepare();
+        undead.prepare();
         par.run(thinkJob, e.top);
         applyIntents();
         par.run(moveJob, e.top);

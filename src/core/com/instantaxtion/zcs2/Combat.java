@@ -17,7 +17,11 @@ final class Combat {
     void apply(int i, int intent, int arg) {
         Ents e = w.e;
         switch (intent) {
-            case ZombieAI.I_BITE: bite(i, arg); break;
+            case ZombieAI.I_BITE: bite(i, arg, 1f); break;
+            case ZombieAI.I_SLAM: slam(i, arg); break;
+            case ZombieAI.I_SMASH: w.undead.smash(i, arg); break;
+            case ZombieAI.I_SHOVE: shove(i, arg); break;
+            case ZombieAI.I_ROAR: w.undead.roar(i); break;
             case I_SHOOT: shoot(i, arg, false); break;
             case ArmedAI.I_GRENADE: shoot(i, arg, true); break;
             case ZombieAI.I_CLAW: w.veh.claw(arg, i); e.aimT[i] = 1.2f; break;
@@ -36,17 +40,21 @@ final class Combat {
         return 1f - 0.42f * t;
     }
 
-    private void bite(int z, int v) {
+    /** z bites v (mult: a lunge or a charge lands harder); true if it reached them. */
+    private boolean bite(int z, int v, float mult) {
         Ents e = w.e;
-        if (v < 0 || e.loc[v] != Ents.FREE || e.kind[v] == Ents.ZOMBIE) return;
+        if (v < 0 || e.loc[v] != Ents.FREE || e.kind[v] == Ents.ZOMBIE) return false;
         float dx = e.x[v] - e.x[z], dy = e.y[v] - e.y[z];
         Content.ZType zt = w.ztypeOf(z);
-        if (dx * dx + dy * dy > (zt.radius + 12) * (zt.radius + 12)) return;
+        if (dx * dx + dy * dy > (zt.radius + 12) * (zt.radius + 12)) return false;
         Content.Unit u = w.unitOf(v);
-        float dmg = zt.bite * (1 - u.armor) * (0.8f + w.rng.nextFloat() * 0.4f);
+        float dmg = zt.bite * mult * (1 - u.armor) * (0.8f + w.rng.nextFloat() * 0.4f);
         if (u.armor > 0 && w.rng.chance(0.35f)) dmg *= 0.5f;
         e.hp[v] -= dmg;
         e.aimT[z] = 1.0f + w.rng.nextFloat() * 0.4f;
+        // in a frenzy they bite again sooner
+        Undead ud = w.undead;
+        if (ud.has(z) && w.time < ud.frenzyUntil[z]) e.aimT[z] *= 0.7f;
         if (dmg > 3 && (e.flags[v] & Ents.F_INFECTED) == 0 && w.rng.chance(zt.infect * u.infect)) {
             e.flags[v] |= Ents.F_INFECTED;
             if (e.kind[v] == Ents.CIV && w.stats.resident(v)) {
@@ -57,10 +65,64 @@ final class Combat {
             w.stats.infectedTotal++;
         }
         w.fx.blood(e.x[v], e.y[v], 2);
-        if (w.rng.chance(0.3f)) w.fx.sound(e.kind[v] == Ents.CIV ? "scream" : "hurt", e.x[v], e.y[v]);
-        w.fx.noise(e.x[v], e.y[v], 14, 3);
+        if (w.rng.chance(0.3f)) {
+            // a scream carries: the dead further off hear it and come
+            boolean civ = e.kind[v] == Ents.CIV;
+            w.fx.sound(civ ? "scream" : "hurt", e.x[v], e.y[v]);
+            w.fx.noise(e.x[v], e.y[v], civ ? 26 : 20, 4);
+        } else w.fx.noise(e.x[v], e.y[v], 14, 3);
         w.sec.hot[w.r.sectorOfPx(e.x[v], e.y[v])] = 25;
         if (e.hp[v] <= 0) kill(v, CAUSE_BITE, z);
+        return true;
+    }
+
+    /** A lunge or a charge lands: a harder bite, and the living are knocked back (far, by a charging brute). */
+    private void slam(int z, int v) {
+        Ents e = w.e;
+        Content.ZType zt = w.ztypeOf(z);
+        if (!bite(z, v, zt.charge ? 1.3f : 1.5f)) return;
+        if (e.loc[v] != Ents.FREE) return;
+        float dx = e.x[v] - e.x[z], dy = e.y[v] - e.y[z], d = (float) Math.sqrt(dx * dx + dy * dy) + 0.01f;
+        float push = zt.charge ? 22 + zt.radius : 6;
+        for (float k = push; k >= 4; k -= 6) {
+            float nx = e.x[v] + dx / d * k, ny = e.y[v] + dy / d * k;
+            if (nx > 1 && ny > 1 && nx < w.r.px() - 1 && ny < w.r.px() - 1 && w.r.walkablePx(nx, ny)) {
+                e.x[v] = nx;
+                e.y[v] = ny;
+                break;
+            }
+        }
+        // knocked off their feet for a moment
+        e.vx[v] = e.vy[v] = 0;
+        if (e.aimT[v] < 0.8f) e.aimT[v] = 0.8f;
+        if (zt.charge) w.fx.sound("hurt", e.x[v], e.y[v]);
+    }
+
+    /** One of the big dead shoves a vehicle aside, denting it (enough of it wrecks it, and drags people out). */
+    private void shove(int z, int v) {
+        Ents e = w.e;
+        Vehicles vh = w.veh;
+        if (v < 0 || v >= vh.top || vh.state[v] == Vehicles.V_NONE || vh.flying(v)) return;
+        Content.ZType zt = w.ztypeOf(z);
+        float dx = vh.x[v] - e.x[z], dy = vh.y[v] - e.y[z], d = (float) Math.sqrt(dx * dx + dy * dy) + 0.01f;
+        if (d > zt.radius + 30) return;
+        e.aimT[z] = 1.4f;
+        Content.VType t = vh.type(v);
+        // the heavier the vehicle, the less it moves
+        float move = Math.min(14, zt.smashPower * 0.5f) * (1 - t.armor * 0.8f);
+        float nx = vh.x[v] + dx / d * move, ny = vh.y[v] + dy / d * move;
+        if (move > 0.5f && nx > 1 && ny > 1 && nx < w.r.px() - 1 && ny < w.r.px() - 1 && w.r.walkablePx(nx, ny)) {
+            vh.x[v] = nx;
+            vh.y[v] = ny;
+        }
+        vh.spd[v] *= 0.3f;
+        w.fx.add(Effects.SPARK, vh.x[v], vh.y[v], 0, 0, 0.15f);
+        w.fx.noise(vh.x[v], vh.y[v], 18, 2);
+        if (!vh.usable(v)) return;
+        // a dent for each blow, then the usual clawing (which wrecks it once it's gone)
+        float dent = zt.smashPower * 1.2f * (1 - t.armor);
+        vh.hp[v] = Math.max(0.01f, vh.hp[v] - dent);
+        vh.claw(v, z);
     }
 
     /** A shot (or grenade) from i at zombie t. */
@@ -263,6 +325,8 @@ final class Combat {
             w.disp.unitDown(e.x[v], e.y[v]);
         }
         if (v == w.playerEnt) w.strat.playerDied(cause);
+        // the dead stop to feed on the bitten (slower to rise for it, or eaten past rising)
+        if (rises && cause == CAUSE_BITE && killer >= 0) w.undead.feast(v, killer);
     }
 
     /** Bodies rise or are cleared; the infected turn. Every step, one pass. */
@@ -270,8 +334,13 @@ final class Combat {
         Ents e = w.e;
         float dt = World.DT;
         int bodyCount = 0;
+        Undead ud = w.undead;
         for (int i = 0; i < e.top; i++) {
             byte l = e.loc[i];
+            if (l == Ents.FREE && e.kind[i] == Ents.ZOMBIE) {
+                ud.eat(i, dt);
+                continue;
+            }
             if (l == Ents.BODY) {
                 bodyCount++;
                 e.timer[i] -= dt;
