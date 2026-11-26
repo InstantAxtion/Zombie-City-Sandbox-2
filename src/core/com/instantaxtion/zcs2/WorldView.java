@@ -853,13 +853,13 @@ public final class WorldView {
             int x0 = Math.max(0, (int) (cam.x0() / cs) - 1), y0 = Math.max(0, (int) (cam.y0() / cs) - 1);
             int x1 = Math.min(sec.sw - 1, (int) (cam.x1() / cs) + 1), y1 = Math.min(sec.sh - 1, (int) (cam.y1() / cs) + 1);
             int step = (x1 - x0 + 1) * (y1 - y0 + 1) > 6000 ? 2 : 1;
-            float size = cs * z * 1.5f * step;
+            float size = cs * z * 2.6f * step;
             for (int sy = y0; sy <= y1; sy += step)
                 for (int sx = x0; sx <= x1; sx += step) {
                     int s = sy * sec.sw + sx;
                     int home = sec.home[s];
                     if (home < 60 || !w.strat.lit(s)) continue;
-                    float a = night * Math.min(0.55f, 0.12f + home / 9000f);
+                    float a = night * Math.min(0.4f, 0.07f + home / 14000f);
                     glow(g, glowWarm, cam.toScreenX((sx + 0.5f) * cs), cam.toScreenY((sy + 0.5f) * cs), size, a);
                 }
             return;
