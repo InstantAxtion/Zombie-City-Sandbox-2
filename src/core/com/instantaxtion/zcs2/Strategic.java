@@ -319,6 +319,8 @@ public final class Strategic {
         Sectors sec = w.sec;
         // (a horde passes through streets already overrun, a few holdouts among thousands of the dead)
         float overrun = w.c.rule("overrunRatio", 20);
+        // (a national map: the few people in a field neither stop a horde nor draw it; 0 on today's maps)
+        float arriveAt = w.rule("hordeArrivePeople", w.national ? 400 : 0);
         for (int k = 0; k < hordes.size(); k++) {
             Horde h = hordes.get(k);
             if (!h.alive) continue;
@@ -336,6 +338,9 @@ public final class Strategic {
             boolean marching = h.keepT > 0 && h.target >= 0 && s != h.target;
             int stl = sec.settlement[s];
             boolean town = stl >= 0 && (w.r.settlements.get(stl).kind == Region.S_CITY || w.r.settlements.get(stl).kind == Region.S_TOWN);
+            // (a national map has people in nearly every field: a horde walks on through the thinly lived-in
+            // countryside, taking some as it passes, and breaks up where it reaches a place with people in numbers)
+            if (!marching && !town && sec.popIn[s] > 0 && sec.popIn[s] < arriveAt && sec.hot[s] <= 0 && !sec.cam[s]) marching = true;
             if (marching && !town && sec.popIn[s] > 0 && sec.hot[s] <= 0 && !sec.cam[s]) {
                 int bitten = Math.min(sec.popIn[s], (int) (sec.popIn[s] * 0.02f * dt));
                 sec.popIn[sec.touch(s)] -= bitten;
@@ -370,6 +375,7 @@ public final class Strategic {
                         continue;
                     }
                     if (sec.popIn[t] == 0 && w.sp.secCiv[t] == 0) continue;
+                    if (sec.popIn[t] < arriveAt && w.sp.secCiv[t] == 0) continue; // (a national map: not the fields' few)
                     int dx = t % sec.sw - sx, dy = t / sec.sw - sy;
                     float d = (float) Math.sqrt(dx * dx + dy * dy);
                     if (d > sense) continue;
@@ -379,6 +385,18 @@ public final class Strategic {
                     if (a > best) {
                         best = a;
                         h.target = t;
+                    }
+                }
+                if (h.target < 0 && arriveAt > 0) {
+                    // a national map, nobody in numbers within reach: towards the nearest town's lights
+                    float bdd = Float.MAX_VALUE;
+                    for (Region.Settlement st : w.r.settlements) {
+                        if (st.kind != Region.S_CITY && st.kind != Region.S_TOWN) continue;
+                        float dd = dist(st.cx * 16f, st.cy * 16f, h.x, h.y);
+                        if (dd < bdd) {
+                            bdd = dd;
+                            h.target = w.r.sectorOfPx(st.cx * 16f, st.cy * 16f);
+                        }
                     }
                 }
                 if (h.target >= 0) {
