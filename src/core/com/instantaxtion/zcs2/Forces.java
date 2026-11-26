@@ -408,7 +408,10 @@ public final class Forces extends Module {
             if (w.sec.zIn[s] + w.sp.secZ[s] > 60) {
                 f.state = HOLDING;
                 f.route = null;
-                w.news.radio("contact:" + f.id, f.name + ": contact on the road" + placeName(f.hq.x, f.hq.y) + ", deploying", f.hq.x, f.hq.y, News.COMMAND, 720);
+                // (a national map: moving from street to street of the city it's fighting for is the fight, not news)
+                boolean inItsTown = f.job == JOB_TOWN && f.task >= 0 && w.sec.settlement[s] == f.task && w.rule("formationRefront", 0) > 0;
+                if (!inItsTown)
+                    w.news.radio("contact:" + f.id, f.name + ": contact on the road" + placeName(f.hq.x, f.hq.y) + ", deploying", f.hq.x, f.hq.y, News.COMMAND, 720);
                 return;
             }
         }
@@ -590,7 +593,10 @@ public final class Forces extends Module {
         w.stats.artillery++;
         int st = sec.settlement[best];
         String where = st >= 0 ? " round " + w.r.settlements.get(st).name : " in open country";
-        w.news.count("guns:" + f.id, f.name + ": fire mission on a mass of the dead" + where + "|" + f.name + ": %d more fire mission{s}" + where, 1, tx, ty);
+        // (a national map has a dozen batteries in one city's fight: one report for all of them there)
+        if (w.national)
+            w.news.count("guns:" + where, "Artillery: fire mission on a mass of the dead" + where + "|Artillery: %d more fire mission{s}" + where, 1, tx, ty);
+        else w.news.count("guns:" + f.id, f.name + ": fire mission on a mass of the dead" + where + "|" + f.name + ": %d more fire mission{s}" + where, 1, tx, ty);
     }
 
     /** Shells landing on a street where people are still sheltering kill some of them: said out loud, not hidden. */
@@ -764,8 +770,10 @@ public final class Forces extends Module {
             j.name = s.name;
             jobs.add(j);
         }
+        // (a national map: a horde still waiting far off isn't worth tying up formations for days, while a city burns)
+        boolean waiting = w.rule("interceptWaiting", 1) > 0;
         for (Strategic.Horde h : w.strat.hordes) {
-            if (!h.alive || h.count < 400) continue;
+            if (!h.alive || h.count < 400 || !waiting && h.waitT > 0) continue;
             Job j = new Job();
             j.kind = JOB_HORDE;
             j.id = h.id;
@@ -951,7 +959,8 @@ public final class Forces extends Module {
         Region.Settlement s = w.r.settlementAt(x, y);
         if (s != null) return " at " + s.name;
         Region.Settlement best = null;
-        float bd = 3000f * 3000f;
+        // (a national map: as far as 15 km, in km and a compass direction past 1.5 km)
+        float bd = w.national ? 60000f * 60000f : 3000f * 3000f;
         for (Region.Settlement t : w.r.settlements) {
             if (t.kind != Region.S_CITY && t.kind != Region.S_TOWN && t.kind != Region.S_VILLAGE) continue;
             float dx = t.cx * 16f - x, dy = t.cy * 16f - y, d = dx * dx + dy * dy;
@@ -960,7 +969,13 @@ public final class Forces extends Module {
                 best = t;
             }
         }
-        return best == null ? "" : " near " + best.name;
+        if (best == null) return "";
+        float km = (float) Math.sqrt(bd) / 4000f;
+        if (!w.national || km < 1.5f) return " near " + best.name;
+        double ang = Math.atan2(y - best.cy * 16f, x - best.cx * 16f);
+        String[] dirs = {"east", "south-east", "south", "south-west", "west", "north-west", "north", "north-east"};
+        int o = ((int) Math.round(ang / (Math.PI / 4)) + 8) % 8;
+        return " " + Math.round(km) + " km " + dirs[o] + " of " + best.name;
     }
 
     /** Has the player, as this city's incident commander, asked for the army (a formation sent there at their request)? */

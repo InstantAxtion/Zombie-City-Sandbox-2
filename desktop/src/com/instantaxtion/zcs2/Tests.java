@@ -737,7 +737,7 @@ public final class Tests {
                         // P9b: mechanics that are off (or as before) on today's maps, and balance numbers on national maps
                         "hordeArrivePeople", 0f, "overrunRatio", 20f, "wanderOver", 0f, "refugeeCarShare", 0f, "reachScale", 1f,
                         "formationRefront", 0f, "aggregateKill", 0.014f, "findHalf", 300f, "sweepBelow", 4000f, "sweepRate", 1f,
-                        "sweepPeakShare", 0f, "hiddenSpread", 1f, "maxFormations", 22f, "edgeHordeRing", 0f};
+                        "sweepPeakShare", 0f, "hiddenSpread", 1f, "maxFormations", 22f, "edgeHordeRing", 0f, "interceptWaiting", 1f};
                 // national only: today the code uses the type's own speed ([formation] speed, the destroyer's, the
                 // transport plane's), or has no such rule yet (tactical moves, evacuation per highway exit)
                 List<String> only = java.util.Arrays.asList("formationSpeed", "formationTactical", "warshipSpeed", "airliftSpeed", "evacPerHourPerExit");

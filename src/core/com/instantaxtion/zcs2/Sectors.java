@@ -291,8 +291,9 @@ public final class Sectors {
         float bite = w.c.rule("indoorBite", 0.003f), dens = w.rule("indoorDensity", 10000), turnTime = w.c.rule("turnTime", 180), clear = w.c.rule("clearRate", 0.015f);
         maxBite = w.c.rule("maxBitePerHour", 0.05f);
         float spillAt = w.rule("sectorSpill", 3000);
-        // (a national map: where the dead outnumber the few people left this many times, the rest move on; 0: off)
-        float wanderOver = w.rule("wanderOver", 0);
+        // (a national map: where the dead outnumber the few people left this many times, the rest move on, and in the
+        // fields, where a handful live (fewer than a horde stops for), they all do; 0: off)
+        float wanderOver = w.rule("wanderOver", 0), fieldFew = w.rule("hordeArrivePeople", 0);
         Ents e = w.e;
         Spatial sp = w.sp;
         int individuals = e.live;
@@ -386,6 +387,7 @@ public final class Sectors {
             if (zIn[s] > 0 && popIn[s] == 0 && hot[s] <= 0) migrate(s, dt, 0);
             else if (hot[s] <= 0 && overrun(s) && Rng.unit(w.seed, w.tick, s * 37L + 9) < dt / 240f)
                 w.strat.formHorde(s, (zIn[s] - (int) (popIn[s] * w.rule("overrunRatio", 20))) / 2);
+            else if (wanderOver > 0 && hot[s] <= 0 && settlement[s] < 0 && popIn[s] < fieldFew) migrate(s, dt, 0); // (nor in a field's few)
             else if (wanderOver > 0 && hot[s] <= 0 && zIn[s] > popIn[s] * wanderOver) migrate(s, dt, (int) (popIn[s] * wanderOver));
             else if (zIn[s] > spillAt && hot[s] <= 0) spill(s, dt, spillAt);
             if (hot[s] > 0) hot[s] -= dt;
