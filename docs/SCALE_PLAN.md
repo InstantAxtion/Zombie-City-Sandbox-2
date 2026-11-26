@@ -316,6 +316,7 @@ Every phase merges with `./test.sh` green and a working APK. National maps stay 
 - Done: add `Region.sect` (still 32) and building accessors.
 - Files: `Region.java`, `RegionGen.java` (its 15 direct `r.tile` writes go through a raw writer), `SaveIO.java` (writes the same bytes in the same order), and `Game.java` line 1016 (the land mask).
 - Verify: `checksum()` identical, every test green, perf test within 5%.
+- As built: `ChunkStore` holds per-page `byte[]` tiles and `short[]` buildings in exactly `Chunk.tile`/`Chunk.bld`'s layout and encoding (Region's own buildings stored as `-(id + 1)`, as Chunk stores national buildings; so Region now allows 32,768 of them). Page index is `cy * pw + cx`, which equals `Chunk.index` on a national map, and `store.attach(chunk)` makes a generated Chunk a page as it is (no copy). There is no separate `Chunk` page class: today's maps hold plain arrays, with no Chunk objects. `Region(w, h, seed, preset, sect, allPages)` with `allPages = false` leaves pages unresident and, until P2 pages it, gives no `nav`. `building(tx, ty)` returns Region ids or encoded chunk ids, and `bx(id)`...`bset(id)`, `doorX/doorY(id)` (px; World hands Region its door arrays) and `chunkOf(id)` read either kind.
 
 **P2. Active-area paging** (medium risk)
 - Done: `ActiveSet`; paged `nav`, `Flow`, `NavPath`, `Spatial` and the `Vehicles` grid, with clearing of touched cells only.

@@ -213,7 +213,7 @@ public final class SaveIO {
         o.writeLong(w.seed);
         o.writeUTF(w.scenario == null ? "" : w.scenario.id);
         o.writeInt(w.mode);
-        o.write(w.r.tile);
+        w.r.store.writeTiles(o);
         bytes(o, w.r.bfloors, w.r.bCount);
         bools(o, w.r.roads.ealive, w.r.roads.edgeCount);
         facilities(o, w);
@@ -264,14 +264,14 @@ public final class SaveIO {
         World w = new World(c, r, seed, threads);
         w.scenario = scen.length() == 0 ? null : c.scenario(scen);
         w.mode = mode;
-        in.readFully(r.tile);
+        r.store.readTiles(in);
         byte[] floors = readBytes(in);
         System.arraycopy(floors, 0, r.bfloors, 0, Math.min(floors.length, r.bCount));
         for (int b = 0; b < r.bCount; b++) {
             if (r.bfloors[b] != 0) continue;
             for (int ty = r.by[b]; ty < r.by[b] + r.bh[b]; ty++)
                 for (int tx = r.bx[b]; tx < r.bx[b] + r.bw[b]; tx++)
-                    if (r.in(tx, ty) && r.building(ty * r.W + tx) == b) r.clearBuilding(ty * r.W + tx);
+                    if (r.in(tx, ty) && r.building(tx, ty) == b) r.clearBuilding(tx, ty);
         }
         boolean[] alive = readBools(in);
         System.arraycopy(alive, 0, r.roads.ealive, 0, Math.min(alive.length, r.roads.edgeCount));

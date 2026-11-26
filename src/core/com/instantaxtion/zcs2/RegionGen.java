@@ -131,7 +131,7 @@ public final class RegionGen {
                     float f = n2.fbm(x / (70f * scale), y / (70f * scale), 4);
                     if (f > 0.2f) t = Tile.FOREST;
                 }
-                r.tile[y * W + x] = t;
+                r.raw(x, y, t);
             }
         }
     }
@@ -182,13 +182,12 @@ public final class RegionGen {
             if (hitWater) continue;
         }
         // sandy banks
-        byte[] t = r.tile;
         for (int y = 1; y < H - 1; y++)
             for (int x = 1; x < W - 1; x++) {
-                int i = y * W + x;
-                if (t[i] == Tile.GRASS || t[i] == Tile.FOREST) {
-                    if ((t[i - 1] == Tile.DEEP || t[i + 1] == Tile.DEEP || t[i - W] == Tile.DEEP || t[i + W] == Tile.DEEP))
-                        t[i] = Tile.SAND;
+                int t = r.t(x, y);
+                if (t == Tile.GRASS || t == Tile.FOREST) {
+                    if (r.t(x - 1, y) == Tile.DEEP || r.t(x + 1, y) == Tile.DEEP || r.t(x, y - 1) == Tile.DEEP || r.t(x, y + 1) == Tile.DEEP)
+                        r.raw(x, y, Tile.SAND);
                 }
             }
     }
@@ -200,9 +199,9 @@ public final class RegionGen {
                 if (!r.in(x, y)) continue;
                 float dx = x - cx, dy = y - cy;
                 if (dx * dx + dy * dy > rad * rad + 0.5f) continue;
-                int cur = r.tile[y * W + x];
+                int cur = r.t(x, y);
                 if (onlyLand && cur == Tile.DEEP) continue;
-                r.tile[y * W + x] = k;
+                r.raw(x, y, k);
             }
     }
 
@@ -327,8 +326,8 @@ public final class RegionGen {
                     if (!r.in(x, y)) continue;
                     float dx = x - s.cx, dy = y - s.cy;
                     if (dx * dx + dy * dy > rad * rad) continue;
-                    int t = r.tile[y * W + x];
-                    if (t == Tile.FOREST || t == Tile.ROCK || (t == Tile.SAND && s.kind != Region.S_NAVAL)) r.tile[y * W + x] = Tile.GRASS;
+                    int t = r.t(x, y);
+                    if (t == Tile.FOREST || t == Tile.ROCK || (t == Tile.SAND && s.kind != Region.S_NAVAL)) r.raw(x, y, Tile.GRASS);
                 }
         }
     }
@@ -500,12 +499,12 @@ public final class RegionGen {
     /** Paves one road tile; true if it had to be a bridge. */
     private boolean paveRoad(int x, int y) {
         if (!r.in(x, y)) return false;
-        int t = r.tile[y * W + x];
+        int t = r.t(x, y);
         if (Tile.water(t) || t == Tile.BRIDGE) {
-            r.tile[y * W + x] = Tile.BRIDGE;
+            r.raw(x, y, Tile.BRIDGE);
             return true;
         }
-        if (t != Tile.BUILDING) r.tile[y * W + x] = Tile.ROAD;
+        if (t != Tile.BUILDING) r.raw(x, y, Tile.ROAD);
         return false;
     }
 
@@ -1257,10 +1256,10 @@ public final class RegionGen {
             for (int dx = 0; dx <= 1; dx++) {
                 int tx = cx + dx, ty = cy + dy;
                 if (!r.in(tx, ty)) continue;
-                int t = r.tile[ty * W + tx];
+                int t = r.t(tx, ty);
                 if (t == Tile.BUILDING || t == Tile.FENCE || t == Tile.WALL || Tile.roadish(t) && t != Tile.BRIDGE) continue;
-                if (Tile.water(t) || t == Tile.BRIDGE) r.tile[ty * W + tx] = Tile.BRIDGE;
-                else r.tile[ty * W + tx] = Tile.RAIL;
+                if (Tile.water(t) || t == Tile.BRIDGE) r.raw(tx, ty, Tile.BRIDGE);
+                else r.raw(tx, ty, Tile.RAIL);
             }
     }
 
@@ -1583,10 +1582,10 @@ public final class RegionGen {
                 if (dx * dx + dy * dy > 5) continue;
                 int tx = cx + dx, ty = cy + dy;
                 if (!r.in(tx, ty)) continue;
-                int t = r.tile[ty * W + tx];
+                int t = r.t(tx, ty);
                 if (t == Tile.BUILDING || t == Tile.FENCE || t == Tile.WALL) continue;
-                if (Tile.water(t) || t == Tile.BRIDGE) r.tile[ty * W + tx] = Tile.BRIDGE;
-                else if (t != Tile.ROAD) r.tile[ty * W + tx] = Tile.HIGHWAY;
+                if (Tile.water(t) || t == Tile.BRIDGE) r.raw(tx, ty, Tile.BRIDGE);
+                else if (t != Tile.ROAD) r.raw(tx, ty, Tile.HIGHWAY);
             }
         highwayCells.add(new int[]{cx / HC, cy / HC});
     }

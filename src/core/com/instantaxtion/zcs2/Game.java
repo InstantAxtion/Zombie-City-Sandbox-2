@@ -1057,7 +1057,7 @@ public final class Game {
                     int land = 0, all = 0;
                     for (int k = 0; k < 16; k++) {
                         int tx = (int) ((cx + (k % 4 + 0.5f) / 4f) * w.r.W / n), ty = (int) ((cy + (k / 4 + 0.5f) / 4f) * w.r.H / n);
-                        byte t = w.r.tile[ty * w.r.W + tx];
+                        int t = w.r.t(tx, ty);
                         all++;
                         if (t != Tile.WATER && t != Tile.DEEP) land++;
                     }

@@ -72,14 +72,14 @@ public final class Fires extends Module {
 
     /** Sets a building alight (looting, the society systems...). */
     public void ignite(int b, float h) {
-        if (b < 0 || b >= heat.length || w.r.bfloors[b] <= 0) return;
+        if (b < 0 || b >= heat.length || w.r.bfloors(b) <= 0) return;
         if (heat[b] <= 0) {
             burning.add(b);
             started++;
-            if (w.r.bres[b] > 0 || w.r.bkind[b] >= Region.B_POLICE) {
+            if (w.r.bres(b) > 0 || w.r.bkind(b) >= Region.B_POLICE) {
                 if (w.time - news > 120) {
                     news = (float) w.time;
-                    w.news.radio("Fire reported: " + (vowel(building(w.r.bkind[b])) ? "an " : "a ") + building(w.r.bkind[b]) + " burning" + placeOf(b), w.doorX[b], w.doorY[b], News.CALL);
+                    w.news.radio("Fire reported: " + (vowel(building(w.r.bkind(b))) ? "an " : "a ") + building(w.r.bkind(b)) + " burning" + placeOf(b), w.r.doorX(b), w.r.doorY(b), News.CALL);
                 }
             }
         }
@@ -87,7 +87,7 @@ public final class Fires extends Module {
     }
 
     private String placeOf(int b) {
-        int st = w.r.bset[b];
+        int st = w.r.bset(b);
         return st >= 0 ? " in " + w.r.settlements.get(st).name : " in the countryside";
     }
 
@@ -97,7 +97,7 @@ public final class Fires extends Module {
         for (int dy = -2; dy <= 2; dy++)
             for (int dx = -2; dx <= 2; dx++) {
                 if (!w.r.in(tx + dx, ty + dy)) continue;
-                int b = w.r.building((ty + dy) * w.r.W + tx + dx);
+                int b = w.r.building(tx + dx, ty + dy);
                 if (b >= 0) {
                     if (Rng.unit(w.seed, w.tick, b * 3L + 1) < chance) ignite(b, 0.25f);
                     return;
@@ -115,7 +115,7 @@ public final class Fires extends Module {
         for (int dy = -r0; dy <= r0; dy += 2)
             for (int dx = -r0; dx <= r0; dx += 2) {
                 if (!w.r.in(tx + dx, ty + dy)) continue;
-                int b = w.r.building((ty + dy) * w.r.W + tx + dx);
+                int b = w.r.building(tx + dx, ty + dy);
                 if (b < 0 || b == last || heat[b] > 0) continue;
                 last = b;
                 if (Rng.unit(w.seed, w.tick, b * 7L + 2) < chance) ignite(b, 0.4f);
@@ -136,7 +136,7 @@ public final class Fires extends Module {
         for (int k = 0; k < n; k++) {
             int b = burning.get(k);
             if (heat[b] <= 0) continue;
-            float dx0 = w.doorX[b] >= 0 ? w.doorX[b] : (r.bx[b] + r.bw[b] / 2f) * 16, dy0 = w.doorY[b] >= 0 ? w.doorY[b] : (r.by[b] + r.bh[b] / 2f) * 16;
+            float dx0 = w.r.doorX(b) >= 0 ? w.r.doorX(b) : (r.bx(b) + r.bw(b) / 2f) * 16, dy0 = w.r.doorY(b) >= 0 ? w.r.doorY(b) : (r.by(b) + r.bh(b) / 2f) * 16;
             int s = r.sectorOfPx(dx0, dy0);
             // the crew on its way, or at work
             if (crews[b] == 0) dispatch(b, dx0, dy0);
@@ -153,7 +153,7 @@ public final class Fires extends Module {
                         recall(b);
                     } else {
                         // no water in the mains: the crews have only what the engines carry
-                        int bs = r.bset[b];
+                        int bs = r.bset(b);
                         float water = bs >= 0 && w.infra.waterOut(bs) ? 0.3f : 1f;
                         h -= crews[b] / 4f * crewRate * water * dt + grow * dt;
                     }
@@ -210,11 +210,11 @@ public final class Fires extends Module {
             // look a few tiles out, mostly downwind
             float ang = (float) Math.atan2(wy, wx) + (Rng.unit(w.seed, w.tick, b * 17L + a) - 0.5f) * 2.4f;
             float d = 2 + Rng.unit(w.seed, w.tick, b * 19L + a) * 3;
-            float cx = r.bx[b] + r.bw[b] / 2f + (float) Math.cos(ang) * (r.bw[b] / 2f + d);
-            float cy = r.by[b] + r.bh[b] / 2f + (float) Math.sin(ang) * (r.bh[b] / 2f + d);
+            float cx = r.bx(b) + r.bw(b) / 2f + (float) Math.cos(ang) * (r.bw(b) / 2f + d);
+            float cy = r.by(b) + r.bh(b) / 2f + (float) Math.sin(ang) * (r.bh(b) / 2f + d);
             int tx = (int) cx, ty = (int) cy;
             if (!r.in(tx, ty)) continue;
-            int o = r.building(ty * r.W + tx);
+            int o = r.building(tx, ty);
             if (o >= 0 && o != b && heat[o] <= 0) {
                 ignite(o, 0.15f);
                 return;
@@ -237,7 +237,7 @@ public final class Fires extends Module {
     /** It burned out: the building comes down, with the people still in it. */
     private void collapse(int b, int s) {
         Region r = w.r;
-        int lost = Math.min(w.sec.popIn[s], Math.max(0, r.bres[b] / 20));
+        int lost = Math.min(w.sec.popIn[s], Math.max(0, r.bres(b) / 20));
         w.sec.popIn[s] -= lost;
         w.stats.civDeaths += lost;
         w.stats.lossBy[4] += lost;
@@ -247,7 +247,7 @@ public final class Fires extends Module {
         collapsed++;
         w.stats.buildingsLost++;
         r.destroyBuilding(b);
-        if (lost > 50) w.news.radio("A burning " + building(r.bkind[b]) + " has collapsed" + placeOf(b) + " (" + News.num(lost) + " dead)", w.doorX[b], w.doorY[b], News.LOSS);
+        if (lost > 50) w.news.radio("A burning " + building(r.bkind(b)) + " has collapsed" + placeOf(b) + " (" + News.num(lost) + " dead)", w.r.doorX(b), w.r.doorY(b), News.LOSS);
     }
 
     /** The nearest station with a crew sends one (and, near the camera, an engine you can watch). */
@@ -343,10 +343,10 @@ public final class Fires extends Module {
             int b = burning.get(k0);
             float h = heat[b];
             if (h <= 0) continue;
-            float wx = (r.bx[b] + r.bw[b] / 2f) * 16, wy = (r.by[b] + r.bh[b] / 2f) * 16;
+            float wx = (r.bx(b) + r.bw(b) / 2f) * 16, wy = (r.by(b) + r.bh(b) / 2f) * 16;
             if (wx < x0 || wx > x1 || wy < y0 || wy > y1) continue;
             float sx = cam.toScreenX(wx), sy = cam.toScreenY(wy);
-            float size = Math.max((float) Math.sqrt(r.bw[b] * r.bh[b]) * 16 * z, 6 * dp);
+            float size = Math.max((float) Math.sqrt(r.bw(b) * r.bh(b)) * 16 * z, 6 * dp);
             float flick = 0.85f + 0.15f * (float) Math.sin(t * 11 + b * 1.7f) * (float) Math.sin(t * 7.3f + b);
             if (z < 0.2f) {
                 view.glow(g, view.glowFire, sx, sy, size * 2.6f * flick, 0.9f);

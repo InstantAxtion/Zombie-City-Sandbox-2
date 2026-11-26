@@ -247,7 +247,7 @@ public final class ChunkShot {
                 Chunk c = ChunkGen.generate(n, gx, gy);
                 for (int y = 0; y < 64; y++)
                     for (int x = 0; x < 64; x++) {
-                        r.tile[(cy * 64 + y) * r.W + cx * 64 + x] = c.tile[y * 64 + x];
+                        r.raw(cx * 64 + x, cy * 64 + y, c.tile[y * 64 + x]);
                         int v = c.bld[y * 64 + x];
                         if (v < 0 && !nats.contains(-v - 1)) nats.add(-v - 1);
                     }

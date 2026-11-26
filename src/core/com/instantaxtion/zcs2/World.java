@@ -155,11 +155,12 @@ public final class World {
     private void doors() {
         doorX = new float[r.bCount];
         doorY = new float[r.bCount];
+        r.setDoors(doorX, doorY);
         int ns = r.secW * r.secH;
         List<List<Integer>> per = new ArrayList<List<Integer>>(ns);
         for (int s = 0; s < ns; s++) per.add(new ArrayList<Integer>());
         for (int b = 0; b < r.bCount; b++) {
-            int x0 = r.bx[b], y0 = r.by[b], x1 = x0 + r.bw[b] - 1, y1 = y0 + r.bh[b] - 1;
+            int x0 = r.bx(b), y0 = r.by(b), x1 = x0 + r.bw(b) - 1, y1 = y0 + r.bh(b) - 1;
             float best = -1;
             int mx = (x0 + x1) / 2, my = (y0 + y1) / 2;
             // try the middle of each side, nearest to a road first

@@ -645,7 +645,7 @@ final class AudioDirector {
                         if (bs == null) continue;
                         for (int b : bs) {
                             if (b < 0 || b >= heat.length || heat[b] <= 0) continue;
-                            float g = gainAt((r.bx[b] + r.bw[b] * 0.5f) * Tile.SIZE, (r.by[b] + r.bh[b] * 0.5f) * Tile.SIZE, 1900);
+                            float g = gainAt((r.bx(b) + r.bw(b) * 0.5f) * Tile.SIZE, (r.by(b) + r.bh(b) * 0.5f) * Tile.SIZE, 1900);
                             fireLevel += heat[b] * g;
                             fpan += panOut * heat[b] * g;
                         }
