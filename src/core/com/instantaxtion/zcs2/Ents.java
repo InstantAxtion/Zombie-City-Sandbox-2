@@ -25,6 +25,8 @@ public final class Ents {
     private int[] freeList;
     private int freeN;
     private int nextUid = 1;
+    /** Sparse active set (null when every chunk is active): told wherever someone is put down on the map. */
+    ActiveSet act;
 
     public Ents(int capacity) {
         alloc(capacity);
@@ -77,6 +79,7 @@ public final class Ents {
         intentArg[i] = -1;
         uid[i] = nextUid++;
         live++;
+        if (act != null) act.touchPx(px, py);
         return i;
     }
 
@@ -95,6 +98,7 @@ public final class Ents {
         vehicle[i] = -1;
         x[i] = px;
         y[i] = py;
+        if (act != null) act.touchPx(px, py);
     }
 
     /** Someone dies where they stand (or in a vehicle, which leaves them at the vehicle). */
@@ -122,6 +126,7 @@ public final class Ents {
         target[i] = -1;
         state[i] = 0;
         timer[i] = 0;
+        if (act != null) act.touchPx(x[i], y[i]);
     }
 
     /** Frees the slot (an entity leaving the individual simulation: gone indoors, out of the region, or a body cleared). */

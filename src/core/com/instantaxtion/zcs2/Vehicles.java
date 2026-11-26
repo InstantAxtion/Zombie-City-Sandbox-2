@@ -7,7 +7,7 @@ import java.util.Arrays;
  * steering at a point a little ahead in their lane), queue behind each other, run the dead down, and get mobbed
  * when they stop among them. Aircraft fly straight, orbit over a fight, and come home to rearm.
  */
-public final class Vehicles {
+public final class Vehicles implements ActiveSet.Paged {
     public static final byte V_NONE = 0, V_PARKED = 1, V_DRIVE = 2, V_ARRIVED = 3, V_WRECK = 4, V_FLY = 5, V_ORBIT = 6,
             V_RTB = 7, V_STRIKE = 8, V_PARKING = 9, V_PULLIN = 10;
     public static final String[] STATE_NAMES = {"", "Parked", "Driving", "On scene", "Wrecked", "Flying", "Over the fight",
@@ -30,11 +30,19 @@ public final class Vehicles {
     public boolean[] siren = new boolean[64], returning = new boolean[64];
     private int nextUid = 1;
 
-    // a grid for "which vehicle is near here"
-    private static final int GC = 128;
-    private int gw;
+    // a grid for "which vehicle is near here", kept per active page (ActiveSet) as Spatial's is: 8x8 cells a page,
+    // plus the row and column past the map's last page; gcell(cx, cy) finds a cell (0 is the empty one)
+    private static final int GC = 128, GPS = ActiveSet.PX / GC;
+    private final int gw;
     private int[] gStart, gList = new int[64], gEnd, gTouched = new int[64];
     private int gTouchedN;
+    private final int[] slotOf;
+    private final int gpw, gex, gey, gedgeW, gOff;
+    private final boolean gdense;
+    /** Ground vehicles in transit move at this speed along their routes (25 km/h, px/s; a content rule in P9). */
+    static final float TRANSIT_SPEED = 1667f;
+    /** Vehicle-steps spent in transit so far (for tests and probes). */
+    public long transitSteps;
     /** Ground vehicles per 512 px sector: a small table that answers "no car near here" for most of the dead. */
     private final int[] secCars;
 
@@ -42,8 +50,45 @@ public final class Vehicles {
         this.w = w;
         gw = w.r.px() / GC + 1;
         secCars = new int[w.r.secW * w.r.secH];
-        gStart = new int[gw * gw];
-        gEnd = new int[gw * gw];
+        ActiveSet act = w.act;
+        slotOf = act.slotOf;
+        gpw = act.pw;
+        gdense = !act.sparse;
+        gex = Math.min(gw, act.pw * GPS);
+        gey = Math.min(gw, act.ph * GPS);
+        gedgeW = gw - gex;
+        gOff = 1 + gedgeW * gw + (gw - gey) * gex;
+        act.register(this);
+    }
+
+    @Override
+    public void slotsGrown(int cap) {
+        // every page active, always (today's maps): the old grid, row by row (1 + cy * gw + cx), never paged
+        int n = gdense ? 1 + gw * gw : gOff + cap * GPS * GPS;
+        gStart = gStart == null ? new int[n] : Arrays.copyOf(gStart, n);
+        gEnd = gEnd == null ? new int[n] : Arrays.copyOf(gEnd, n);
+    }
+
+    @Override
+    public void slotAssigned(int s, int p) {
+        if (gdense) return;
+        int a = gOff + s * GPS * GPS;
+        Arrays.fill(gStart, a, a + GPS * GPS, 0);
+        Arrays.fill(gEnd, a, a + GPS * GPS, 0);
+    }
+
+    /** Grid cell (cx, cy): an index into gStart / gEnd (0, always empty, off the grid or on a page that isn't active). */
+    private int gcell(int cx, int cy) {
+        if (cx < 0 || cy < 0 || cx >= gw || cy >= gw) return 0;
+        if (gdense) return 1 + cy * gw + cx;
+        if (cx < gex && cy < gey) {
+            int s = slotOf[(cy >> 3) * gpw + (cx >> 3)];
+            return s < 0 ? 0 : gOff + (s << 6 | (cy & 7) << 3 | (cx & 7));
+        }
+        if (cx >= gex) return 1 + (cx - gex) * gw + cy;
+        if (cy >= gey) return 1 + gedgeW * gw + (cy - gey) * gex + cx;
+        int s = gdense ? (cy >> 3) * gpw + (cx >> 3) : slotOf[(cy >> 3) * gpw + (cx >> 3)];
+        return s < 0 ? 0 : gOff + (s << 6 | (cy & 7) << 3 | (cx & 7));
     }
 
     public Content.VType type(int v) {
@@ -167,8 +212,7 @@ public final class Vehicles {
         float bd = rad * rad;
         for (int yy = cy - 1; yy <= cy + 1; yy++)
             for (int xx = cx - 1; xx <= cx + 1; xx++) {
-                if (xx < 0 || yy < 0 || xx >= gw || yy >= gw) continue;
-                int c = yy * gw + xx;
+                int c = gcell(xx, yy);
                 for (int j = gStart[c]; j < gEnd[c]; j++) {
                     int v = gList[j];
                     float dx = x[v] - px, dy = y[v] - py, d = dx * dx + dy * dy;
@@ -428,7 +472,11 @@ public final class Vehicles {
         for (int v = 0; v < top; v++) {
             switch (state[v]) {
                 case V_NONE: continue;
-                case V_DRIVE: drive(v, dt); break;
+                case V_DRIVE:
+                    // no active chunk under it: on along its route at road speed, with nothing to run into
+                    if (w.act.sparse && !w.act.activePx(x[v], y[v])) transit(v, dt);
+                    else drive(v, dt);
+                    break;
                 case V_PARKING: park(v, dt); break;
                 case V_PULLIN: pullIn(v, dt); break;
                 case V_FLY:
@@ -465,6 +513,7 @@ public final class Vehicles {
         for (int v = 0; v < top; v++) {
             if (state[v] == V_NONE || flying(v)) continue;
             int c = cell(v);
+            if (c == 0) continue; // on a page that isn't active (in transit): in no cell
             if (gEnd[c] == 0) {
                 if (gTouchedN == gTouched.length) gTouched = Arrays.copyOf(gTouched, gTouchedN * 2);
                 gTouched[gTouchedN++] = c;
@@ -483,13 +532,21 @@ public final class Vehicles {
         }
         for (int v = 0; v < top; v++) {
             if (state[v] == V_NONE || flying(v)) continue;
-            gList[gEnd[cell(v)]++] = v;
+            int c = cell(v);
+            if (c != 0) gList[gEnd[c]++] = v;
         }
     }
 
     private int cell(int v) {
-        int cx = Math.max(0, Math.min(gw - 1, (int) (x[v] / GC))), cy = Math.max(0, Math.min(gw - 1, (int) (y[v] / GC)));
-        return cy * gw + cx;
+        return gcell(cellX(v), cellY(v));
+    }
+
+    private int cellX(int v) {
+        return Math.max(0, Math.min(gw - 1, (int) (x[v] / GC)));
+    }
+
+    private int cellY(int v) {
+        return Math.max(0, Math.min(gw - 1, (int) (y[v] / GC)));
     }
 
     private void drive(int v, float dt) {
@@ -648,6 +705,49 @@ public final class Vehicles {
         if (fuel[v] < 0) fuel[v] = 0;
     }
 
+    /**
+     * A vehicle on a page that isn't active is in transit: it follows its route junction to junction at
+     * TRANSIT_SPEED, through nothing and nobody (none of that is simulated there), and drives normally again as soon
+     * as it is on an active page. Arriving, it makes the chunk it stops in active first (it is about to use it).
+     */
+    private void transit(int v, float dt) {
+        RoadGraph g = w.r.roads;
+        int[] rt = route[v];
+        timer[v] += dt;
+        transitSteps++;
+        float left = TRANSIT_SPEED * dt;
+        while (rt != null && ri[v] < rt.length - 1 && left > 0) {
+            int a = rt[ri[v]], b = rt[ri[v] + 1];
+            int e = g.edgeBetween(a, b);
+            if (e >= 0 && !g.ealive[e]) {
+                // the road is gone: find another way, from where it is
+                w.act.touchPx(x[v], y[v]);
+                if (!driveTo(v, destX[v], destY[v], 0)) arrive(v);
+                return;
+            }
+            float dx = g.nx[b] - x[v], dy = g.ny[b] - y[v], d = (float) Math.sqrt(dx * dx + dy * dy);
+            if (d > 0.01f) head[v] = (float) Math.atan2(dy, dx);
+            if (d <= left) {
+                x[v] = g.nx[b];
+                y[v] = g.ny[b];
+                ri[v]++;
+                seg[v] = 0;
+                left -= d;
+            } else {
+                x[v] += dx / d * left;
+                y[v] += dy / d * left;
+                left = 0;
+            }
+        }
+        spd[v] = TRANSIT_SPEED;
+        stuck[v] = wait[v] = ghost[v] = 0;
+        fuel[v] = Math.max(0, fuel[v] - (TRANSIT_SPEED * dt - left) / 400000f);
+        if (rt == null || ri[v] >= rt.length - 1) {
+            w.act.touchPx(x[v], y[v]);
+            arrive(v);
+        }
+    }
+
     private boolean throughBarricade(int v) {
         int[] rt = route[v];
         if (rt == null) return false;
@@ -671,8 +771,7 @@ public final class Vehicles {
         int cx = (int) (x[v] / GC), cy = (int) (y[v] / GC);
         for (int yy = cy - 1; yy <= cy + 1; yy++)
             for (int xx = cx - 1; xx <= cx + 1; xx++) {
-                if (xx < 0 || yy < 0 || xx >= gw || yy >= gw) continue;
-                int c = yy * gw + xx;
+                int c = gcell(xx, yy);
                 for (int j = gStart[c]; j < gEnd[c]; j++) {
                     int o = gList[j];
                     if (o == v) continue;
@@ -697,13 +796,12 @@ public final class Vehicles {
         Spatial sp = w.sp;
         float frontX = x[v] + fx * t.length * 0.5f, frontY = y[v] + fy * t.length * 0.5f;
         float limit = Float.MAX_VALUE;
-        int c0 = sp.cellOf(frontX, frontY);
-        int ccx = c0 % sp.cw, ccy = c0 / sp.cw;
+        int ccx = sp.cellX(frontX), ccy = sp.cellY(frontY);
         int around = 0;
         for (int yy = ccy - 1; yy <= ccy + 1; yy++)
             for (int xx = ccx - 1; xx <= ccx + 1; xx++) {
                 if (xx < 0 || yy < 0 || xx >= sp.cw || yy >= sp.ch) continue;
-                int c = yy * sp.cw + xx;
+                int c = sp.cell(xx, yy);
                 for (int j = sp.zStart[c]; j < sp.zEnd[c]; j++) {
                     int z = sp.zList[j];
                     if (e.loc[z] != Ents.FREE) continue;
@@ -851,8 +949,7 @@ public final class Vehicles {
         int cx = (int) (px / GC), cy = (int) (py / GC);
         for (int yy = cy - 1; yy <= cy + 1; yy++)
             for (int xx = cx - 1; xx <= cx + 1; xx++) {
-                if (xx < 0 || yy < 0 || xx >= gw || yy >= gw) continue;
-                int c = yy * gw + xx;
+                int c = gcell(xx, yy);
                 for (int j = gStart[c]; j < gEnd[c]; j++) {
                     int o = gList[j];
                     if (o == v || !onRoad(o)) continue;
@@ -1180,14 +1277,13 @@ public final class Vehicles {
         int n = 0;
         for (int k = 0; k < gTouchedN; k++) {
             int c = gTouched[k];
-            int cx = c % gw, cy = c / gw;
             for (int j = gStart[c]; j < gEnd[c]; j++) {
                 int a = gList[j];
                 if (!onRoad(a)) continue;
+                int cx = cellX(a), cy = cellY(a);
                 for (int yy = cy - 1; yy <= cy + 1; yy++)
                     for (int xx = cx - 1; xx <= cx + 1; xx++) {
-                        if (xx < 0 || yy < 0 || xx >= gw || yy >= gw) continue;
-                        int c2 = yy * gw + xx;
+                        int c2 = gcell(xx, yy);
                         for (int i = gStart[c2]; i < gEnd[c2]; i++) {
                             int b = gList[i];
                             if (b <= a || !onRoad(b)) continue;

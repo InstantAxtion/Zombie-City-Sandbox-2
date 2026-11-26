@@ -383,7 +383,7 @@ final class ArmedAI {
             int cy0 = Math.max(0, (int) ((y - rad) / Spatial.CELL)), cy1 = Math.min(w.sp.ch - 1, (int) ((y + rad) / Spatial.CELL));
             for (int cy = cy0; cy <= cy1; cy++)
                 for (int cx = cx0; cx <= cx1; cx++) {
-                    int c = cy * w.sp.cw + cx;
+                    int c = w.sp.cell(cx, cy);
                     for (int j = w.sp.lStart[c]; j < w.sp.lEnd[c]; j++) {
                         int o = w.sp.lList[j];
                         if (o == i || !e.armed(o)) continue;
@@ -841,7 +841,7 @@ final class ArmedAI {
         int n = 0;
         for (int cy = cy0; cy <= cy1; cy++)
             for (int cx = cx0; cx <= cx1; cx++) {
-                int c = cy * w.sp.cw + cx;
+                int c = w.sp.cell(cx, cy);
                 for (int j = w.sp.zStart[c]; j < w.sp.zEnd[c] && n < 40; j++) {
                     int o = w.sp.zList[j];
                     float dx = x - e.x[o], dy = y - e.y[o], d2 = dx * dx + dy * dy;
@@ -996,7 +996,7 @@ final class ArmedAI {
             int cy0 = Math.max(0, (int) ((y - rad) / Spatial.CELL)), cy1 = Math.min(w.sp.ch - 1, (int) ((y + rad) / Spatial.CELL));
             for (int cy = cy0; cy <= cy1; cy++)
                 for (int cx = cx0; cx <= cx1; cx++) {
-                    int c = cy * w.sp.cw + cx;
+                    int c = w.sp.cell(cx, cy);
                     for (int j = w.sp.lStart[c]; j < w.sp.lEnd[c]; j++) {
                         int o = w.sp.lList[j];
                         if (e.loc[o] != Ents.FREE || e.kind[o] != Ents.CIV || o == w.playerEnt) continue;

@@ -185,7 +185,7 @@ final class CivAI {
         int y0 = Math.max(0, (int) ((y - 150) / Spatial.CELL)), y1 = Math.min(sp.ch - 1, (int) ((y + 150) / Spatial.CELL));
         for (int cy = y0; cy <= y1 && seen < 40; cy++)
             for (int cx = x0; cx <= x1 && seen < 40; cx++) {
-                int c = cy * sp.cw + cx;
+                int c = sp.cell(cx, cy);
                 for (int j = sp.zStart[c]; j < sp.zEnd[c] && seen < 40; j++) {
                     int o = sp.zList[j];
                     float dx = x - e.x[o], dy = y - e.y[o], d2 = dx * dx + dy * dy;
