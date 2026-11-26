@@ -2264,7 +2264,20 @@ public final class WorldView {
             heat.draw(g, cam, 1);
         }
         // state borders from far out (their names come last, where there's room)
-        if (z < 0.2f && w.r.states.size() > 1) {
+        if (z < 0.2f && w.r.states.size() > 1 && w.national) {
+            float lw = 1.4f * dp;
+            float[] seg = stateBorders();
+            float bx0 = cam.x0(), by0 = cam.y0(), bx1 = cam.x1(), by1 = cam.y1();
+            for (int pass = 0; pass < 2; pass++) {
+                g.color(pass == 0 ? 0x80000000 : 0xB0F0E8D8);
+                float o = pass == 0 ? dp * 0.8f : 0;
+                for (int i = 0; i + 3 < seg.length; i += 4) {
+                    if (Math.max(seg[i], seg[i + 2]) < bx0 || Math.min(seg[i], seg[i + 2]) > bx1 || Math.max(seg[i + 1], seg[i + 3]) < by0 || Math.min(seg[i + 1], seg[i + 3]) > by1) continue;
+                    g.line(cam.toScreenX(seg[i]) + o, cam.toScreenY(seg[i + 1]) + o, cam.toScreenX(seg[i + 2]) + o, cam.toScreenY(seg[i + 3]) + o, pass == 0 ? lw * 1.8f : lw);
+                }
+            }
+            if (z < 0.08f) stateCentres();
+        } else if (z < 0.2f && w.r.states.size() > 1) {
             float lw = 1.4f * dp;
             for (int pass = 0; pass < 2; pass++) {
                 g.color(pass == 0 ? 0x80000000 : 0xB0F0E8D8);
@@ -2278,26 +2291,83 @@ public final class WorldView {
                         if (sy + 1 < sec.sh && w.roles.stateOfSector(s + sec.sw) != st) dashedLine(g, x + o, y + len + o, x + len + o, y + len + o, pass == 0 ? lw * 1.8f : lw, 5 * dp);
                     }
             }
-            if (z < 0.08f) {
-                if (stateX == null) {
-                    int ns = w.r.states.size();
-                    stateX = new float[ns];
-                    stateY = new float[ns];
-                    int[] cnt = new int[ns];
-                    for (int s = 0; s < sec.n; s++) {
-                        int st = w.roles.stateOfSector(s);
-                        if (st < 0 || !dryAt(sec.cx(s), sec.cy(s))) continue;
-                        stateX[st] += sec.cx(s);
-                        stateY[st] += sec.cy(s);
-                        cnt[st]++;
-                    }
-                    for (int k = 0; k < ns; k++) if (cnt[k] > 0) {
-                        stateX[k] /= cnt[k];
-                        stateY[k] /= cnt[k];
-                    }
-                }
-            }
+            if (z < 0.08f) stateCentres();
         }
+    }
+
+    private void stateCentres() {
+        if (stateX != null) return;
+        Sectors sec = w.sec;
+        int ns = w.r.states.size();
+        stateX = new float[ns];
+        stateY = new float[ns];
+        int[] cnt = new int[ns];
+        for (int s = 0; s < sec.n; s++) {
+            int st = w.roles.stateOfSector(s);
+            if (st < 0 || !dryAt(sec.cx(s), sec.cy(s))) continue;
+            stateX[st] += sec.cx(s);
+            stateY[st] += sec.cy(s);
+            cnt[st]++;
+        }
+        for (int k = 0; k < ns; k++) if (cnt[k] > 0) {
+            stateX[k] /= cnt[k];
+            stateY[k] /= cnt[k];
+        }
+    }
+
+    private float[] borderSeg;
+
+    /**
+     * National maps: the states' borders as lines, worked out once by marching squares over 1 km cells (each the
+     * state most of its 4x4 sectors belong to), so they run at angles instead of in 256 m steps, and a frame draws a
+     * few thousand segments instead of looking at every sector.
+     */
+    private float[] stateBorders() {
+        if (borderSeg != null) return borderSeg;
+        Sectors sec = w.sec;
+        int K = 4, cw = (sec.sw + K - 1) / K, ch = (sec.sh + K - 1) / K;
+        int[] cell = new int[cw * ch];
+        int ns = w.r.states.size();
+        int[] votes = new int[ns + 1];
+        for (int cy = 0; cy < ch; cy++)
+            for (int cx = 0; cx < cw; cx++) {
+                java.util.Arrays.fill(votes, 0);
+                for (int dy = 0; dy < K; dy++)
+                    for (int dx = 0; dx < K; dx++) {
+                        int sx = cx * K + dx, sy = cy * K + dy;
+                        if (sx >= sec.sw || sy >= sec.sh) continue;
+                        int st = w.roles.stateOfSector(sy * sec.sw + sx);
+                        votes[st < 0 || st >= ns ? ns : st]++;
+                    }
+                int best = ns;
+                for (int k = 0; k <= ns; k++) if (votes[k] > votes[best]) best = k;
+                cell[cy * cw + cx] = best;
+            }
+        float cpx = w.r.sect * Tile.SIZE * K;
+        float[] out = new float[1024];
+        int n = 0;
+        // marching squares over the cells' centres: midpoints of the sides whose ends differ, joined
+        for (int cy = 0; cy + 1 < ch; cy++)
+            for (int cx = 0; cx + 1 < cw; cx++) {
+                int a = cell[cy * cw + cx], b = cell[cy * cw + cx + 1], c = cell[(cy + 1) * cw + cx + 1], d = cell[(cy + 1) * cw + cx];
+                if (a == b && b == c && c == d) continue;
+                float x0 = (cx + 0.5f) * cpx, y0 = (cy + 0.5f) * cpx, h = cpx / 2;
+                float[] mx = new float[4], my = new float[4];
+                int m = 0;
+                if (a != b) { mx[m] = x0 + h; my[m++] = y0; }
+                if (b != c) { mx[m] = x0 + cpx; my[m++] = y0 + h; }
+                if (c != d) { mx[m] = x0 + h; my[m++] = y0 + cpx; }
+                if (d != a) { mx[m] = x0; my[m++] = y0 + h; }
+                if (n + 16 > out.length) out = java.util.Arrays.copyOf(out, out.length * 2);
+                if (m == 2) {
+                    out[n++] = mx[0]; out[n++] = my[0]; out[n++] = mx[1]; out[n++] = my[1];
+                } else
+                    for (int k = 0; k < m; k++) {
+                        out[n++] = mx[k]; out[n++] = my[k]; out[n++] = x0 + h; out[n++] = y0 + h;
+                    }
+            }
+        borderSeg = java.util.Arrays.copyOf(out, n);
+        return borderSeg;
     }
 
     /** The states' names, spaced out, from far out: the least important label, only where there's room. */
