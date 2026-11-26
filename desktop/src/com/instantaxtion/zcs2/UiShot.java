@@ -416,7 +416,7 @@ public final class UiShot {
         game.tool = "look";
         float[] centre = ScaleProbe.lifeSpot(w, "centre"), suburb = ScaleProbe.lifeSpot(w, "suburb");
         String[] names = {"l1-morning-centre", "l2-morning-suburb", "l3-rush-centre", "l4-rush-suburb"};
-        float[] hours = {9.5f, 9.6f, 17.5f, 17.6f};
+        float[] hours = {10.6f, 10.7f, 17.5f, 17.6f};
         for (int k = 0; k < 4; k++) {
             float[] at = k % 2 == 0 ? centre : suburb;
             toHour(w, hours[k]);

@@ -23,6 +23,8 @@ public final class Life extends Module {
 
     /** The street-level layer is on (rule life); the counts move with the day (rule lifeFlow). */
     public final boolean on, flowOn;
+    /** Tests and tools: the streets kept empty of the day's life for now (whatever was out folds back; saved). */
+    public boolean held;
     final Commute commute;
 
     // ---- per vehicle slot (Vehicles' indices): what it is to Life, checked against the vehicle's uid
@@ -140,7 +142,7 @@ public final class Life extends Module {
         Vehicles vh = w.veh;
         ensure(vh.top);
         boolean was = has;
-        has = !w.strategic && w.camDetail;
+        has = !w.strategic && w.camDetail && !held;
         if (!has) {
             if (was || anyLeft()) foldAll();
             return;
@@ -478,7 +480,7 @@ public final class Life extends Module {
                 if (sec.panic[s] > 0.2f && sec.popIn[s] > 50) panicky++;
             }
         if (panicky > 0 && cars < w.rule("lifeCarsMax", 110) * 1.3f) room = Math.max(room, Math.min(3, panicky));
-        int burst = cars < want * 0.5f ? 6 : 2;
+        int burst = cars < want * 0.5f ? 8 : 4;
         for (int k = 0; k < Math.min(room, burst); k++) spawnCar(k, cars < want * 0.5f, panicky > 0);
     }
 
@@ -547,14 +549,23 @@ public final class Life extends Module {
                 ty = Math.max(1, Math.min(px, y + uy / l * 4000));
             }
         }
-        // room for it at the junction?
-        float h0 = 0;
-        if (g.adjStart[a + 1] > g.adjStart[a]) {
-            int e0 = g.adjEdge[g.adjStart[a]];
-            int o = g.other(e0, a);
-            h0 = (float) Math.atan2(g.ny[o] - y, g.nx[o] - x);
-        }
-        if (!room(x, y, h0, ct.length * 0.5f + 6, ct.width * 0.5f + 6)) return;
+        // it pulls out into its lane along one of the junction's streets, short of the next junction (never in the
+        // middle of a crossing), heading on to it
+        int deg = g.adjStart[a + 1] - g.adjStart[a];
+        if (deg == 0) return;
+        int e0 = g.adjEdge[g.adjStart[a] + Rng.hashInt(w.seed, salt, 13, deg)];
+        if (!g.ealive[e0] || g.ekind[e0] == RoadGraph.HIGHWAY) return;
+        int o = g.other(e0, a);
+        float ux = g.nx[o] - x, uy = g.ny[o] - y, ul = (float) Math.sqrt(ux * ux + uy * uy);
+        if (ul < 140) return;
+        ux /= ul;
+        uy /= ul;
+        float lane = Math.min(g.ehalf[e0] * 0.45f, 14);
+        x = x + ux * ul * 0.62f - uy * lane;
+        y = y + uy * ul * 0.62f + ux * lane;
+        if (!anywhere && onScreen(x, y, -40)) return;
+        float h0 = (float) Math.atan2(uy, ux);
+        if (!room(x, y, h0, ct.length * 0.5f + 8, ct.width * 0.5f + 4)) return;
         int v = take(ct, x, y, h0, K_CAR);
         // who drives: someone of these streets; through traffic (not fleeing) is someone of where it is going, on
         // their way home, so watching a street doesn't drain it into the country round it
@@ -941,7 +952,7 @@ public final class Life extends Module {
         boolean night = w.hour() < 5.5f || w.hour() > 23.5f;
         for (int l = 0; l < lineSet.length; l++) {
             if (lineBox[l * 4 + 2] < ax0 || lineBox[l * 4] > ax1 || lineBox[l * 4 + 3] < ay0 || lineBox[l * 4 + 1] > ay1) continue;
-            if (w.time < lineNext[l] || night || w.gov.streetsClosed()) continue;
+            if (w.time < lineNext[l] || night || w.gov.streetsClosed() || buses >= w.rule("lifeBusesMax", 8)) continue;
             int live = 0;
             for (int v = 0; v < vh.top; v++) if (v < kind.length && kind[v] == K_BUS && line[v] == l && mine(v)) live++;
             if (live >= 2) continue;
@@ -1282,7 +1293,7 @@ public final class Life extends Module {
             if (night && police) want = Math.max(1, want - 1);
             int out = 0;
             for (int k = 0; k < pN; k++) if (pFac[k] == fi) out++;
-            if (out >= want) continue;
+            if (out >= want || pN >= w.rule("lifePatrolsMax", 8)) continue;
             // police: a patrol car; the army: a humvee if the base has one, else a truck
             Content.SquadT t = null;
             for (String id : police ? new String[]{"patrol"} : new String[]{"fireteam", "rifle"}) {
@@ -1412,6 +1423,7 @@ public final class Life extends Module {
         SaveIO.floatArr(o, facNext);
         SaveIO.floatArr(o, lineNext);
         o.writeInt(trampled);
+        o.writeBoolean(held);
         commute.save(o);
     }
 
@@ -1472,6 +1484,7 @@ public final class Life extends Module {
         float[] ln = SaveIO.readFloatArr(in);
         lineNext = ln == null ? new float[0] : ln;
         trampled = in.readInt();
+        held = in.readBoolean();
         commute.load(in);
         if (has) {
             // (what the second worked out from the camera, as it was when saved: the junctions in view)
