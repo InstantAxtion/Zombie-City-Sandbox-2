@@ -110,6 +110,8 @@ public final class Squads {
         float ly = e.loc[lead] == Ents.ABOARD && s.vehicle >= 0 ? w.veh.y[s.vehicle] : e.y[lead];
         float d = dist(lx, ly, x, y);
         boolean canRide = s.vehicle >= 0 && w.veh.usable(s.vehicle);
+        // not with the dead between us and the vehicle: fight first (unless already aboard)
+        if (canRide && aboardCount(s) == 0 && e.loc[lead] == Ents.FREE && deadNear(s, 90)) canRide = false;
         if (canRide && (d > 450 || aboardCount(s) > 0)) {
             if (aboardCount(s) == s.n) startRide(s);
             else {
@@ -131,7 +133,7 @@ public final class Squads {
     private void startRide(Squad s) {
         // stop short of the dead: dismount where it's still quiet
         float tx = s.gx, ty = s.gy;
-        if (w.veh.driveTo(s.vehicle, tx, ty, s.order == O_RETURN || s.order == O_IDLE ? 0 : 140)) s.mode = M_RIDE;
+        if (w.veh.driveTo(s.vehicle, tx, ty, s.order == O_RETURN || s.order == O_IDLE ? 0 : 200)) s.mode = M_RIDE;
         else {
             dismount(s);
             s.mode = M_FOOT;
@@ -139,7 +141,10 @@ public final class Squads {
     }
 
     private void dismount(Squad s) {
-        if (s.vehicle >= 0) w.veh.alightAll(s.vehicle);
+        if (s.vehicle >= 0) {
+            w.veh.alightAll(s.vehicle);
+            w.veh.halt(s.vehicle);
+        }
     }
 
     private static float dist(float ax, float ay, float bx, float by) {
@@ -183,6 +188,15 @@ public final class Squads {
         }
         s.boardT += World.DT;
         float vx = w.veh.x[v], vy = w.veh.y[v];
+        // the dead come at us while we're getting in: those still out fight on foot
+        if (((int) (s.boardT * 20) % 10) == 0 && deadNear(s, 70)) {
+            if (aboardCount(s) > 0) startRide(s);
+            else {
+                s.mode = M_FOOT;
+                s.path = null;
+            }
+            return;
+        }
         boolean all = true;
         for (int k = 0; k < s.n; k++) {
             int m = s.mem[k];
@@ -194,9 +208,32 @@ public final class Squads {
             if (dist(e.x[m], e.y[m], vx, vy) < 22) w.veh.board(v, m);
         }
         if (all || s.boardT > 20) {
+            if (aboardCount(s) == 0) {
+                // nobody made it to the vehicle: walk, and don't send it off empty
+                s.mode = M_FOOT;
+                s.path = null;
+                if (w.veh.state[v] == Vehicles.V_PARKED && nearHome(w.veh.x[v], w.veh.y[v], s, 300)) w.veh.toPool(v);
+                return;
+            }
             // anyone who didn't make it walks
             startRide(s);
         }
+    }
+
+    /** Any of the dead within rad of a member on foot. */
+    private boolean deadNear(Squad s, float rad) {
+        Ents e = w.e;
+        for (int k = 0; k < s.n; k++) {
+            int m = s.mem[k];
+            if (e.loc[m] == Ents.FREE && w.sp.nearestZombie(e, e.x[m], e.y[m], rad) >= 0) return true;
+        }
+        return false;
+    }
+
+    private boolean nearHome(float x, float y, Squad s, float rad) {
+        if (s.home < 0) return false;
+        Region.Facility f = w.r.facilities.get(s.home);
+        return dist(x, y, f.x, f.y) < rad;
     }
 
     private void riding(Squad s) {
@@ -223,6 +260,13 @@ public final class Squads {
             if (s.order == O_RETURN || s.order == O_IDLE) s.order = O_HOLD;
             s.gx = w.veh.x[v];
             s.gy = w.veh.y[v];
+            return;
+        }
+        if (aboardCount(s) == 0) {
+            // everyone's out (dragged out, or got off): the vehicle stops and the squad walks
+            w.veh.halt(v);
+            s.mode = M_FOOT;
+            s.path = null;
             return;
         }
         if (w.veh.arrived(v)) {
@@ -323,18 +367,32 @@ public final class Squads {
         Ents e = w.e;
         s.order = O_IDLE;
         s.timer = 1;
+        s.idleT = 0;
         if (s.home < 0) return;
         // restock and patch up at the station / base
+        restock(s, true);
+        if (s.vehicle >= 0) {
+            w.veh.refuel(s.vehicle, s.home);
+            w.veh.cargo[s.vehicle] = Math.max(w.veh.cargo[s.vehicle], 2);
+        }
+    }
+
+    /** Full magazines for everyone from the home's stock; returns the rounds drawn. */
+    private int restock(Squad s, boolean heal) {
+        Ents e = w.e;
+        int total = 0;
         for (int k = 0; k < s.n; k++) {
             int m = s.mem[k];
             Content.Unit u = w.unitOf(m);
+            if (heal) e.hp[m] = Math.max(e.hp[m], e.maxHp[m] * 0.8f);
             if (u.weapon == null) continue;
             int need = u.weapon.ammo - e.ammo[m];
+            if (need <= 0) continue;
             int got = w.strat.drawAmmo(s.home, need);
             e.ammo[m] = (short) (e.ammo[m] + got);
-            e.hp[m] = Math.max(e.hp[m], e.maxHp[m] * 0.8f);
+            total += got;
         }
-        if (s.vehicle >= 0) w.veh.refuel(s.vehicle, s.home);
+        return total;
     }
 
     // ------------------------------------------------------------------ once a second
@@ -343,9 +401,24 @@ public final class Squads {
         Ents e = w.e;
         for (int q = 0; q < list.size(); q++) {
             Squad s = list.get(q);
-            if (!s.alive || s.mode != M_FOOT || s.player) continue;
+            if (!s.alive || s.player) continue;
+            // going home to a formation that has moved on: head for where it is now
+            if (s.order == O_RETURN && s.home >= 0 && s.mode != M_BOARD) {
+                Region.Facility hf = w.r.facilities.get(s.home);
+                if (dist(s.gx, s.gy, hf.x, hf.y) > 150) {
+                    goHome(s);
+                    continue;
+                }
+            }
+            if (s.mode != M_FOOT) continue;
             int lead = s.leader(e);
             if (lead < 0 || e.loc[lead] != Ents.FREE) continue;
+            // walking a long way home, clear of the dead now, with a vehicle: get in it
+            if (s.order == O_RETURN && s.vehicle >= 0 && w.veh.usable(s.vehicle) && ((int) s.idleT) % 5 == 4
+                    && dist(e.x[lead], e.y[lead], s.gx, s.gy) > 450 && !deadNear(s, 120)) {
+                goHome(s);
+                continue;
+            }
             // low on ammunition: go and get more (if a home has any)
             int ammo = 0, max = 0;
             for (int k = 0; k < s.n; k++) {
@@ -356,6 +429,24 @@ public final class Squads {
                 max += u.weapon.ammo;
             }
             if (max > 0 && ammo < max * 0.18f && s.order != O_RETURN && s.order != O_IDLE && s.home >= 0) {
+                // the spare ammunition in the squad's own vehicle first, if it's close
+                int v = s.vehicle;
+                if (v >= 0 && w.veh.usable(v) && w.veh.cargo[v] > 0 && !w.veh.mobbed(v) && !w.veh.flying(v)) {
+                    float vd = dist(e.x[lead], e.y[lead], w.veh.x[v], w.veh.y[v]);
+                    if (vd < 60) {
+                        if (restock(s, false) > 0) {
+                            w.veh.cargo[v]--;
+                            w.news.radio(s.name + ": restocked from the vehicle", e.x[lead], e.y[lead], News.UNIT);
+                            continue;
+                        }
+                    } else if (vd < 600 && w.strat.online(s.home) && w.r.facilities.get(s.home).ammo >= 1) {
+                        s.gx = w.veh.x[v];
+                        s.gy = w.veh.y[v];
+                        s.path = null;
+                        for (int k = 0; k < s.n; k++) e.state[s.mem[k]] = 1;
+                        continue;
+                    }
+                }
                 w.news.radio(s.name + ": low on ammo, returning to restock", e.x[lead], e.y[lead], News.UNIT);
                 goHome(s);
                 continue;
@@ -369,7 +460,7 @@ public final class Squads {
                 for (int k = 0; k < s.n; k++) {
                     int m = s.mem[k];
                     if (e.loc[m] != Ents.FREE) continue;
-                    int near = w.sp.zombiesNear(e, e.x[m], e.y[m], 70, 20);
+                    int near = w.sp.zombiesNear(e, e.x[m], e.y[m], 110, 24);
                     press += near;
                     if (near > 0 && w.sp.zombieCentroid(e, e.x[m], e.y[m], 120, tmp)) {
                         cx += tmp[0];
@@ -378,7 +469,14 @@ public final class Squads {
                     }
                 }
                 Content.Unit lu = w.unitOf(lead);
-                float limit = s.n * (2.5f + lu.nerve * 3);
+                float limit = s.n * (3.5f + lu.nerve * 4);
+                // contact on the way: stop and fight here rather than walk on into them
+                if (s.fallT <= 0 && dist(e.x[lead], e.y[lead], s.gx, s.gy) > 60 && w.sp.zombiesNear(e, e.x[lead], e.y[lead], 150, 12) >= 12) {
+                    s.gx = e.x[lead];
+                    s.gy = e.y[lead];
+                    s.path = null;
+                    s.fallT = 3;
+                }
                 if (cn > 0) {
                     cx /= cn;
                     cy /= cn;
@@ -396,6 +494,30 @@ public final class Squads {
                         }
                     }
                 }
+                // answering a call, in place, and nothing in reach: close in on the nearest of the dead,
+                // stopping well short of the pack
+                if ((s.order == O_RESPOND || (s.order == O_HOLD && s.incident >= 0)) && press == 0 && s.fallT <= 0
+                        && dist(e.x[lead], e.y[lead], s.gx, s.gy) < 60) {
+                    float reach = lu.weapon != null ? lu.weapon.range : 100;
+                    if (w.sp.nearestZombie(e, e.x[lead], e.y[lead], reach * 0.8f) < 0) {
+                        int z = w.sp.nearestZombie(e, e.x[lead], e.y[lead], 400);
+                        if (z >= 0) {
+                            int pack = w.sp.zombiesNear(e, e.x[z], e.y[z], 100, 60);
+                            float stand = Math.min(reach * 0.7f, 50 + 4 * (float) Math.sqrt(pack));
+                            float dx = e.x[lead] - e.x[z], dy = e.y[lead] - e.y[z], dl = (float) Math.sqrt(dx * dx + dy * dy) + 0.01f;
+                            if (dl > stand + 30) {
+                                float nx = e.x[z] + dx / dl * stand, ny = e.y[z] + dy / dl * stand;
+                                if (w.r.walkablePx(nx, ny)) {
+                                    s.gx = nx;
+                                    s.gy = ny;
+                                    s.faceX = -dx / dl;
+                                    s.faceY = -dy / dl;
+                                    s.path = null;
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -409,6 +531,18 @@ public final class Squads {
         s.incident = -1;
         s.task = -1;
         order(s, O_RETURN, f.x, f.y);
+    }
+
+    /** The share of the squad's full ammunition it still has. */
+    public float ammoShare(Squad s) {
+        int ammo = 0, max = 0;
+        for (int k = 0; k < s.n; k++) {
+            Content.Unit u = w.unitOf(s.mem[k]);
+            if (u.weapon == null) continue;
+            ammo += w.e.ammo[s.mem[k]];
+            max += u.weapon.ammo;
+        }
+        return max == 0 ? 1 : ammo / (float) max;
     }
 
     /** Free = idle at home, ready to send. */

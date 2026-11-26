@@ -34,12 +34,14 @@ final class ZombieAI {
                 if (dx * dx + dy * dy > 260 * 260) t = -1;
             }
         }
+        int heard = -1; // someone close by but out of sight (round a corner, behind a car)
         if (t < 0 || ((w.tick + i) % 10) == 0) {
             float sight = zt.night && w.night() ? 170 : 125;
             int n = w.sp.nearestLiving(e, x, y, sight, -1, 0);
             if (n >= 0) {
                 float dx = e.x[n] - x, dy = e.y[n] - y;
                 if (dx * dx + dy * dy < 40 * 40 || w.r.lineOfSight(x, y, e.x[n], e.y[n])) t = n;
+                else if (dx * dx + dy * dy < 100 * 100) heard = n;
             }
         }
         e.target[i] = t;
@@ -70,6 +72,13 @@ final class ZombieAI {
                 dirX = s.f[0];
                 dirY = s.f[1];
                 speed = dist <= 10 ? zt.run * surge(i) : zt.walk * 1.15f;
+                e.timer[i] = 5;
+            } else if (heard >= 0) {
+                // nothing on the scent field here, but someone is just round the corner: go for them
+                float dx = e.x[heard] - x, dy = e.y[heard] - y, d = (float) Math.sqrt(dx * dx + dy * dy) + 0.01f;
+                dirX = dx / d;
+                dirY = dy / d;
+                speed = zt.walk * 1.15f;
                 e.timer[i] = 5;
             } else {
                 // nothing to follow: shuffle along with the sector's drift

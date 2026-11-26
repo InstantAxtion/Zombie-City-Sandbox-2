@@ -136,24 +136,40 @@ public final class Forces extends Module {
         int faction = t.faction.equals("police") ? Ents.COP : Ents.SOLDIER;
         Squads.Squad s = w.sq.create(faction, f.id, t.name);
         s.template = t.index;
+        // the yard: open ground by the facility; the vehicle waits on the nearest street reachable on foot
+        float[] yard = w.r.openGroundNear(f.x, f.y, false);
+        boolean car = t.vehicle != null && f.vpool[t.vehicle.index] > 0;
+        float[] kerb = null;
+        if (car) {
+            // a junction on the road graph near the yard (vehicles drive between junctions); else the nearest street
+            int n = w.r.roads.nearestNode(yard[0], yard[1], 400);
+            if (n >= 0 && w.r.walkablePx(w.r.roads.nx[n], w.r.roads.ny[n])) kerb = new float[]{w.r.roads.nx[n], w.r.roads.ny[n]};
+            else kerb = w.r.openGroundNear(yard[0], yard[1], true);
+        }
+        float sx = kerb != null ? kerb[0] : yard[0], sy = kerb != null ? kerb[1] : yard[1];
         int k = 0;
         for (Content.Unit u : t.units) {
             if (f.pool[u.index] <= 0) continue;
             f.pool[u.index]--;
-            float x = f.x + (k % 4) * 7 - 10, y = f.y + (k / 4) * 7;
-            if (!w.r.walkablePx(x, y)) {
-                x = f.x;
-                y = f.y;
+            float x = sx, y = sy;
+            for (int a = 0; a < 12; a++) {
+                float ang = (k * 5 + a) * 0.9f, rad = 12 + (k % 3) * 5 + a * 3;
+                float px = sx + (float) Math.cos(ang) * rad, py = sy + (float) Math.sin(ang) * rad;
+                if (w.r.walkablePx(px, py)) {
+                    x = px;
+                    y = py;
+                    break;
+                }
             }
             int i = w.spawnUnit(u, x, y);
             w.sq.add(s, i);
             k++;
         }
-        if (t.vehicle != null && f.vpool[t.vehicle.index] > 0) {
+        if (car) {
             f.vpool[t.vehicle.index]--;
-            float vx = f.x, vy = f.y;
-            int n = w.r.roads.nearestNode(f.x, f.y, 300);
-            if (f.kind == Region.F_HQ && n >= 0) {
+            float vx = sx, vy = sy;
+            int n = w.r.roads.nearestNode(sx, sy, 300);
+            if (kerb == null && n >= 0) {
                 vx = w.r.roads.nx[n];
                 vy = w.r.roads.ny[n];
             }
@@ -382,13 +398,27 @@ public final class Forces extends Module {
         Ents e = w.e;
         for (int q = 0; q < w.sq.list.size(); q++) {
             Squads.Squad s = w.sq.list.get(q);
-            if (!s.alive || s.player || s.order != Squads.O_IDLE || s.mode != Squads.M_FOOT) {
-                if (s.alive) s.idleT = 0;
+            if (!s.alive) continue;
+            if (s.player || s.home < 0 || (s.order != Squads.O_IDLE && s.order != Squads.O_RETURN)) {
+                s.idleT = 0;
                 continue;
             }
             s.idleT += dt;
-            if (s.idleT < wait || s.home < 0) continue;
             Region.Facility f = w.r.facilities.get(s.home);
+            float[] p = w.sq.where(s);
+            float hx = p[0] - f.x, hy = p[1] - f.y;
+            boolean hqFar = f.kind == Region.F_HQ && hx * hx + hy * hy > 1000f * 1000f;
+            if (s.order == Squads.O_RETURN) {
+                // a long way home, or a formation that has moved on: the squad rejoins it (as numbers)
+                if (s.idleT > 240 || (hqFar && s.idleT > 20)) standDown(s);
+                continue;
+            }
+            if (s.idleT < wait) continue;
+            if (hqFar || s.idleT > 120) {
+                standDown(s);
+                continue;
+            }
+            if (s.mode != Squads.M_FOOT) continue;
             boolean near = true;
             for (int k = 0; k < s.n; k++) {
                 int m = s.mem[k];

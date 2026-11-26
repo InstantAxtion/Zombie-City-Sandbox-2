@@ -40,17 +40,24 @@ final class CivAI {
             e.timer[i] = 7;
             dirX = dx / d;
             dirY = dy / d;
+            awayFromAll(i, x, y, dirX, dirY, s.f);
+            dirX = s.f[0];
+            dirY = s.f[1];
             speed = u.run;
             // armed survivors make a stand when they can
             if (u.weapon != null && e.ammo[i] > 0 && d < u.weapon.range * 0.8f && e.aimT[i] <= 0) {
                 e.intent[i] = Combat.I_SHOOT;
                 e.intentArg[i] = z;
             }
-            // lean towards somewhere safe
+            // run for somewhere well away from it (never back past it to where I was going)
             float sx = e.gx[i] - x, sy = e.gy[i] - y, sl = (float) Math.sqrt(sx * sx + sy * sy);
-            if (sl > 20 && d > 50) {
-                dirX = dirX * 0.75f + sx / sl * 0.25f;
-                dirY = dirY * 0.75f + sy / sl * 0.25f;
+            if (sl < 30 || sx * dirX + sy * dirY < 0.5f * sl) fleeGoal(i, dirX, dirY);
+            sx = e.gx[i] - x;
+            sy = e.gy[i] - y;
+            sl = (float) Math.sqrt(sx * sx + sy * sy);
+            if (sl > 20 && d > 50 && sx * dirX + sy * dirY > 0) {
+                dirX = dirX * 0.6f + sx / sl * 0.4f;
+                dirY = dirY * 0.6f + sy / sl * 0.4f;
             }
         } else {
             switch (e.state[i]) {
@@ -167,12 +174,66 @@ final class CivAI {
         steer(i, dirX, dirY, speed, s);
     }
 
-    /** The nearest door in a sector free of the dead. */
+    /** Away from every one of the dead close by (the nearest counting most), into out[0..1]. */
+    private void awayFromAll(int i, float x, float y, float nx, float ny, float[] out) {
+        Ents e = w.e;
+        Spatial sp = w.sp;
+        float ax = 0, ay = 0;
+        int seen = 0;
+        int x0 = Math.max(0, (int) ((x - 150) / Spatial.CELL)), x1 = Math.min(sp.cw - 1, (int) ((x + 150) / Spatial.CELL));
+        int y0 = Math.max(0, (int) ((y - 150) / Spatial.CELL)), y1 = Math.min(sp.ch - 1, (int) ((y + 150) / Spatial.CELL));
+        for (int cy = y0; cy <= y1 && seen < 40; cy++)
+            for (int cx = x0; cx <= x1 && seen < 40; cx++) {
+                int c = cy * sp.cw + cx;
+                for (int j = sp.zStart[c]; j < sp.zEnd[c] && seen < 40; j++) {
+                    int o = sp.zList[j];
+                    float dx = x - e.x[o], dy = y - e.y[o], d2 = dx * dx + dy * dy;
+                    if (d2 > 150 * 150) continue;
+                    d2 = Math.max(d2, 16);
+                    ax += dx / d2;
+                    ay += dy / d2;
+                    seen++;
+                }
+            }
+        float l = (float) Math.sqrt(ax * ax + ay * ay);
+        if (l < 1e-6f) {
+            out[0] = nx;
+            out[1] = ny;
+        } else {
+            out[0] = ax / l;
+            out[1] = ay / l;
+        }
+    }
+
+    /** A point about 250 px away from the dead (along the way away from them, or as near to it as is open). */
+    private void fleeGoal(int i, float ax, float ay) {
+        Ents e = w.e;
+        float x = e.x[i], y = e.y[i];
+        float[] turns = {0, 0.5f, -0.5f, 1.0f, -1.0f, 1.4f, -1.4f};
+        for (float t : turns) {
+            float c = (float) Math.cos(t), sn = (float) Math.sin(t);
+            float rx = ax * c - ay * sn, ry = ax * sn + ay * c;
+            for (float rad = 250; rad >= 90; rad -= 80) {
+                float tx = x + rx * rad, ty = y + ry * rad;
+                if (w.r.walkablePx(tx, ty) && w.sp.zombiesNear(e, tx, ty, 80, 1) == 0) {
+                    e.gx[i] = tx;
+                    e.gy[i] = ty;
+                    return;
+                }
+            }
+        }
+        e.gx[i] = x + ax * 120;
+        e.gy[i] = y + ay * 120;
+    }
+
+    /** The nearest door in a sector free of the dead, not past the dead nearby. */
     private void pickShelter(int i, Parallel.Scratch scr) {
         Ents e = w.e;
         int s0 = w.r.sectorOfPx(e.x[i], e.y[i]);
         float bd = Float.MAX_VALUE;
         float bx = e.x[i], by = e.y[i];
+        int zt = w.sp.nearestZombie(e, e.x[i], e.y[i], 300);
+        float zx = zt >= 0 ? e.x[zt] - e.x[i] : 0, zy = zt >= 0 ? e.y[zt] - e.y[i] : 0;
         for (int d = -1; d < 8; d++) {
             int s = d < 0 ? s0 : w.sec.neighbour(s0, d);
             if (s < 0 || w.sec.zIn[s] > 0 || w.sp.secZ[s] > 2) continue;
@@ -182,6 +243,7 @@ final class CivAI {
                 int b = bl[k];
                 float dx = w.doorX[b] - e.x[i], dy = w.doorY[b] - e.y[i], dd = dx * dx + dy * dy;
                 if (d >= 0) dd += 200 * 200;
+                if (zt >= 0 && dx * zx + dy * zy > 0) dd += 400 * 400; // that way is towards the dead
                 if (dd < bd) {
                     bd = dd;
                     bx = w.doorX[b];
