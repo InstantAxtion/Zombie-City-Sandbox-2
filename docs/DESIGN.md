@@ -129,8 +129,12 @@ the national decisions (`Gov.playerDecides`: the alert, martial law, mobilisatio
 command (`Forces.command`) step aside, and which station the dispatcher leaves to the player. Mayors, police chiefs
 and governors keep deciding for their own towns and states whoever is President; an incident commander's city
 gets its evacuation and the army only when the player asks. Everything else stays with the AI. In a campaign the
-small roles play for goals of their own (`Roles.goal`): a precinct's district kept alive, a squad kept alive with
-its streets clear, an officer or survivor alive for two days. The officer is an armed police entity the
+small roles play for goals of their own (`Roles.goal`), each needing the player to act: a precinct's district kept
+alive at home or evacuated, and its station held (its levers: answering the district's calls, a police cordon on
+the district's edge that turns the counted dead back, and evacuating the district door to door); a squad that puts
+down sixty of the dead and stays at least half alive; an officer who reaches the scene of four 911 calls and lives;
+a survivor who reaches safety (the army base, an evacuation point, a survivor settlement or the coast guard's boats,
+`Strategic.safePoints`). The officer is an armed police entity the
 stick moves (`ArmedAI` hands it to `Combat.playerThink`), with its patrol kept close each second. A person can't
 be fast-forwarded (that would fold them into the counts); instead, while none of the dead are near, "Skip ahead"
 steps the world in person as fast as the device can and stops when the dead come close. Speed is not an input, so
@@ -202,6 +206,18 @@ phones down slow the calls and the officials' picture, rumours move people onto 
   (`frontFor`); free formations join the biggest fights; idle ones go home. The player as President or Military
   commander commands the army until they hand it over (`Actions.generalCommands`, "Let the general command" in the
   Order tool) or release single formations (`Actions.releaseFormation`); ordering a formation takes it back.
+- *Officials and the alert.* Each mayor, police chief and governor has a temper that comes with the person
+  (`Command.trait`): cautious ones shelter, quarantine, evacuate and ask for help early, reckless ones late, so a
+  replacement changes what a town does (and says so). A chief whose force is spent abandons the town: its squads go
+  home, the police answer none of its calls, and the general takes it on first after the capital. Martial law
+  enforces the curfew (people stay in, the streets empty), all but stops looting, rations the towns' fuel, and costs
+  trust for as long as it lasts.
+- *Size and response.* Mobilisation calls for the same mix of formations (Guard, infantry, armour, artillery) for
+  any outbreak, sized to the reported dead up to `maxFormations`; so a small war is answered in kind and a huge one
+  outgrows what the country can field. The dead are harder to find as they thin out (`findHalf`), so the last of
+  them take the longest. Streets the dead have overrun (`overrunRatio` of them to each person left) go hungry, and
+  the hungry set off as hordes for where people still are; hordes fall on refugee columns on the roads unless
+  soldiers are near to escort them (`escortReach`).
 - *Evacuation.* The roads out of a town carry `evacPerHourTown`/`evacPerHourCity` an hour; a destination takes
   refugees up to `hostShare` of its people; the bitten among each town's leavers are counted per town.
 - *The news.* A line is said once (its key is the text without its counts, so a changing number doesn't make it

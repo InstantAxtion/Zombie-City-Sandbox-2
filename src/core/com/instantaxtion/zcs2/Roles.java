@@ -46,6 +46,28 @@ public final class Roles extends Module {
     /** The goal's progress for the HUD: 0..1 towards winning, and a line saying where things stand. */
     public float progress;
     public String progressText = "";
+    /** The precinct's levers: a police cordon on its district's edge, and its district being evacuated. */
+    public boolean cordon, districtEvac;
+    /** People of the precinct's district who got out (its own evacuation, or the town's), counted as safe. */
+    public int districtOut;
+    /** People caught (bitten or killed) in the precinct's district since the start. */
+    public int districtLost;
+    /** The district's open 911 calls: game seconds each has waited with no officers or soldiers at the scene. */
+    public final java.util.TreeMap<Integer, Float> callWait = new java.util.TreeMap<Integer, Float>();
+    /** The longest any district call has waited unanswered. */
+    public float worstWait;
+
+    /** People caught in sector s (for the precinct's count of its district). */
+    public void lostAt(int s, int n) {
+        if (n > 0 && role == PRECINCT && inDistrict(s)) districtLost += n;
+    }
+    /** The officer's calls answered (911 calls whose scene the officer reached), by incident id. */
+    public final java.util.List<Integer> callsAnswered = new java.util.ArrayList<Integer>();
+    /** Where the officer's shift began (their station): calls at its door don't count as going out to them. */
+    public float beatX = -1, beatY = -1;
+    /** The squads standing on the precinct's cordon posts. */
+    private final java.util.List<Integer> cordonSquads = new java.util.ArrayList<Integer>();
+    private float cordonT, evacCarry;
 
     public Roles(World w) {
         super(w);
@@ -220,8 +242,8 @@ public final class Roles extends Module {
                 break;
             }
             case PRECINCT:
-                // in a campaign, a station near the front but not swallowed by it: there is a district to hold
-                target = campaign() ? Setup.safeStation(w, ox, oy, 1500) : nearestFacility(ox, oy, Region.F_POLICE);
+                // in a campaign, a station on the front but not swallowed by it: there is a district to hold, and it will be hit
+                target = campaign() ? Setup.safeStation(w, ox, oy, 300) : nearestFacility(ox, oy, Region.F_POLICE);
                 if (target < 0) target = nearestFacility(ox, oy, Region.F_POLICE);
                 break;
             case SQUAD: {
@@ -332,11 +354,185 @@ public final class Roles extends Module {
                 }
             }
         }
+        if (role == PRECINCT && target >= 0) precinct(dt);
+        if (role == OFFICER && w.playerEnt >= 0 && w.e.loc[w.playerEnt] == Ents.FREE) answerCalls();
         if (role == SQUAD && target >= 0 && !w.ended && w.mode != World.MODE_SANDBOX) {
             if (target >= w.sq.list.size() || !w.sq.get(target).alive) end(false, "Your squad is gone", "Every one of them fell.");
         }
         goals(dt);
     }
+
+    // ------------------------------------------------------------------ the precinct's levers, the officer's calls
+
+    public void setCordon(boolean on) {
+        if (role != PRECINCT || target < 0 || cordon == on) return;
+        cordon = on;
+        Region.Facility f = w.r.facilities.get(target);
+        w.news.radio(on ? f.name + ": a cordon round the district. Officers to the posts on its edge." : f.name + ": the cordon is lifted.", f.x, f.y, News.COMMAND);
+        if (!on) releaseCordon();
+    }
+
+    public void setDistrictEvac(boolean on) {
+        if (role != PRECINCT || target < 0 || districtEvac == on) return;
+        districtEvac = on;
+        Region.Facility f = w.r.facilities.get(target);
+        w.news.radio(on ? f.name + ": the district is to be evacuated. Officers going door to door." : f.name + ": the district's evacuation is stopped.", f.x, f.y, News.COMMAND);
+    }
+
+    /** The cordon stands while the station is ours and has the officers to man it. */
+    public boolean cordonHeld() {
+        if (!cordon || role != PRECINCT || target < 0 || !w.strat.online(target)) return false;
+        Region.Facility f = w.r.facilities.get(target);
+        int n = w.forces.armedAt(f, Ents.COP);
+        for (int id : cordonSquads) if (id < w.sq.list.size() && w.sq.get(id).alive) n += w.sq.get(id).n;
+        return n >= 8;
+    }
+
+    /** Does the cordon stop the counted dead moving from sector a into sector b (from outside the district into it)? */
+    public boolean blocks(int a, int b) {
+        return cordon && inDistrict(b) && !inDistrict(a) && cordonHeld();
+    }
+
+    private void precinct(float dt) {
+        Region.Facility f = w.r.facilities.get(target);
+        // the district's calls: how long each waits with nobody armed at the scene
+        if (!w.strategic) {
+            for (Dispatch.Incident in : w.disp.incidents) {
+                if (!in.open || in.zombies <= 0 || !inDistrict(in.sector)) continue;
+                // (officers or soldiers in its street, or the next one)
+                boolean there = w.sp.secCop[in.sector] + w.sp.secSol[in.sector] > 0;
+                for (int d = 0; d < 8 && !there; d++) {
+                    int t = w.sec.neighbour(in.sector, d);
+                    if (t >= 0 && w.sp.secCop[t] + w.sp.secSol[t] > 0) there = true;
+                }
+                Float t = callWait.get(in.id);
+                float nt = (t == null ? 0 : t) + (there ? 0 : dt);
+                callWait.put(in.id, nt);
+                worstWait = Math.max(worstWait, nt);
+            }
+            java.util.Iterator<java.util.Map.Entry<Integer, Float>> it = callWait.entrySet().iterator();
+            while (it.hasNext()) {
+                int id = it.next().getKey();
+                if (id >= w.disp.incidents.size() || !w.disp.incidents.get(id).open) it.remove();
+            }
+        }
+        if (districtEvac && f.settlement >= 0 && !w.command.quarantined(f.settlement) && w.strat.online(target)) {
+            // door to door: the streets with none of the dead in them go first, at what the officers can manage
+            float want = w.c.rule("districtEvacPerHour", 1500) / 60f * dt + evacCarry;
+            int total = 0;
+            for (int s = 0; s < w.sec.n; s++) if (inDistrict(s) && w.sec.zIn[s] == 0) total += w.sec.popIn[s];
+            int moved = 0;
+            if (total > 0) {
+                float share = Math.min(1, want / total);
+                for (int s = 0; s < w.sec.n; s++) {
+                    if (!inDistrict(s) || w.sec.zIn[s] > 0 || w.sec.popIn[s] == 0) continue;
+                    int m = Math.min(w.sec.popIn[s], (int) (w.sec.popIn[s] * share));
+                    w.sec.popIn[s] -= m;
+                    moved += m;
+                }
+            }
+            evacCarry = total > 0 ? Math.max(0, Math.min(want - moved, 50)) : 0;
+            if (moved > 0) {
+                w.strat.sendOut(f.settlement, moved);
+                districtOut += moved;
+            }
+        }
+        if (cordon && !w.strategic) {
+            cordonT -= dt;
+            if (cordonT <= 0) {
+                cordonT = 20;
+                manCordon(f);
+            }
+        }
+    }
+
+    /** Posts on the district's edge, nearest the dead first, each with a squad from the station standing on it. */
+    private void manCordon(Region.Facility f) {
+        for (int k = cordonSquads.size() - 1; k >= 0; k--) {
+            int id = cordonSquads.get(k);
+            if (id >= w.sq.list.size() || !w.sq.get(id).alive || w.sq.get(id).home != target) cordonSquads.remove(k);
+        }
+        int want = 6;
+        if (cordonSquads.size() >= want) return;
+        // junctions in the district next to streets outside it, scored by how close the dead are
+        RoadGraph g = w.r.roads;
+        java.util.List<float[]> posts = new java.util.ArrayList<float[]>();
+        for (int n = 0; n < g.nodeCount; n++) {
+            int s = w.r.sectorOfPx(g.nx[n], g.ny[n]);
+            if (!inDistrict(s)) continue;
+            boolean edge = false;
+            for (int d = 0; d < 8 && !edge; d++) {
+                int t = w.sec.neighbour(s, d);
+                if (t >= 0 && !inDistrict(t) && w.sec.home[t] > 0) edge = true;
+            }
+            if (!edge) continue;
+            boolean close = false;
+            for (float[] p : posts) if (Math.abs(p[0] - g.nx[n]) + Math.abs(p[1] - g.ny[n]) < 500) close = true;
+            if (close) continue;
+            int zd = w.sp.nearestZombie(w.e, g.nx[n], g.ny[n], 2500);
+            // (with none of the dead in sight: the posts furthest out first, on the roads into the district)
+            float score = zd >= 0 ? Math.abs(w.e.x[zd] - g.nx[n]) + Math.abs(w.e.y[zd] - g.ny[n]) : 10000 - Math.abs(f.x - g.nx[n]) - Math.abs(f.y - g.ny[n]);
+            posts.add(new float[]{g.nx[n], g.ny[n], score});
+        }
+        java.util.Collections.sort(posts, new java.util.Comparator<float[]>() {
+            public int compare(float[] a, float[] b) {
+                return Float.compare(a[2], b[2]);
+            }
+        });
+        for (int k = 0; k < posts.size() && cordonSquads.size() < want; k++) {
+            float[] p = posts.get(k);
+            boolean taken = false;
+            for (int id : cordonSquads) {
+                Squads.Squad s = w.sq.get(id);
+                if (Math.abs(s.gx - p[0]) + Math.abs(s.gy - p[1]) < 300) taken = true;
+            }
+            if (taken) continue;
+            Content.SquadT t = w.forces.templateFor(f, Ents.COP, 10);
+            if (t == null) return;
+            Squads.Squad s = w.forces.deploy(f, t);
+            if (s == null) return;
+            s.player = true;
+            s.hold = 50;
+            // facing out of the district
+            float dx = p[0] - f.x, dy = p[1] - f.y, d = (float) Math.sqrt(dx * dx + dy * dy) + 0.01f;
+            s.faceX = dx / d;
+            s.faceY = dy / d;
+            w.sq.order(s, Squads.O_CORDON, p[0], p[1]);
+            cordonSquads.add(s.id);
+        }
+    }
+
+    private void releaseCordon() {
+        for (int id : cordonSquads) {
+            if (id >= w.sq.list.size()) continue;
+            Squads.Squad s = w.sq.get(id);
+            if (!s.alive || s.home != target) continue;
+            s.player = false;
+            w.sq.goHome(s);
+        }
+        cordonSquads.clear();
+    }
+
+    /** The officer reached the scene of an open 911 call. */
+    private void answerCalls() {
+        float px = w.e.x[w.playerEnt], py = w.e.y[w.playerEnt];
+        if (beatX < 0) {
+            beatX = px;
+            beatY = py;
+        }
+        float out = w.c.rule("callAwayFromStation", 600);
+        for (Dispatch.Incident in : w.disp.incidents) {
+            if (!in.open) continue;
+            float dx = in.x - px, dy = in.y - py;
+            if (dx * dx + dy * dy > 250 * 250 || callsAnswered.contains(in.id)) continue;
+            // (out on the beat: not one that came to the station's door)
+            float bx = in.x - beatX, by = in.y - beatY;
+            if (bx * bx + by * by < out * out) continue;
+            callsAnswered.add(in.id);
+            w.news.radio("Officer on scene" + (in.settlement >= 0 ? " in " + w.r.settlements.get(in.settlement).name : "") + " (" + callsAnswered.size() + " calls answered)", in.x, in.y, News.UNIT);
+        }
+    }
+
 
     private boolean noInfected() {
         for (int s = 0; s < w.sec.n; s++) if (w.sec.inf[s] >= 1) return false;
@@ -354,9 +550,13 @@ public final class Roles extends Module {
         if (campaign()) {
             if (role == PRECINCT) return "precinct";
             if (role == SQUAD) return "squad";
-            if (role == OFFICER || role == SURVIVOR) return "survive";
+            // one person can't hold anything; they play for what they can do: answer calls, or get to safety
+            if (role == OFFICER) return "patrol";
+            if (role == SURVIVOR) return "reach";
             // the coast's evacuation city by city: an incident commander's part is getting their own city out
             if (role == INCIDENT && "evaccoast".equals(sc.goal) && target >= 0) return "evaccity";
+            // the army's part in it: getting them out alive (holding the roads, escorting, hunting the hordes)
+            if (role == MILITARY && "evaccoast".equals(sc.goal)) return "evacmil";
         }
         return sc.goal;
     }
@@ -366,15 +566,18 @@ public final class Roles extends Module {
         Content.Scenario sc = w.scenario;
         int d = sc == null ? 0 : sc.days;
         String g = goal();
-        if (g == null || g.equals(sc.goal) || g.equals("evaccity")) return d;
-        return Math.max(1, Math.min(d, g.equals("precinct") ? 3 : 2));
+        if (g == null || g.equals(sc.goal) || g.equals("evaccity") || g.equals("evacmil")) return d;
+        return Math.max(1, Math.min(d, g.equals("precinct") || g.equals("patrol") ? 3 : 2));
     }
+
+    /** Calls an officer must answer, the dead a squad must put down, for their goals. */
+    public static final int CALLS_NEEDED = 4, SQUAD_KILLS = 60;
 
     /** Game seconds the dead may hold a fifth of the capital's streets before it's lost (protect the capital). */
     public static final float PROTECT_HOLD = 1440;
 
     /** The share of its district's people a precinct must keep alive. */
-    public static final float PRECINCT_KEEP = 0.85f;
+    public static final float PRECINCT_KEEP = 0.95f;
 
     /** What the player is playing for, in a sentence (the HUD and the start of the game show it). */
     public String goalText() {
@@ -383,10 +586,15 @@ public final class Roles extends Module {
         int d = goalDays();
         String days = d + (d == 1 ? " day" : " days");
         if (g.equals("precinct") && target >= 0)
-            return "Keep " + (int) (PRECINCT_KEEP * 100) + "% of the people in " + w.r.facilities.get(target).name + "'s district alive for " + days + ". Other stations won't answer calls there: it's yours.";
+            return "Hold " + w.r.facilities.get(target).name + "'s district for " + days + ": keep the station, let no more than " + (100 - (int) (PRECINCT_KEEP * 100)) + "% of its people be caught (those you evacuate are safe), and leave no 911 call there unanswered for " + (int) w.c.rule("precinctCallWait", 90) + " minutes. Other stations won't answer them: they're yours. Cordon the district, evacuate it.";
         if (g.equals("evaccity") && target >= 0)
             return "Get " + (int) (w.c.rule("evacNeed", 0.5f) * 100) + "% of " + w.r.settlements.get(target).name + "'s people inland within " + days + ", before the dead reach them. Ordering the evacuation is yours.";
-        if (g.equals("squad")) return "Keep your squad alive for " + days + " and its sector clear: at least half of you, and the dead in your streets kept down.";
+        if (g.equals("evacmil"))
+            return "The civil government is getting the coast's people inland; keep them alive on the way: " + (int) (w.c.rule("evacNeed", 0.5f) * 100) + "% inland within " + days
+                    + ", with no more than " + (int) (w.c.rule("evacLossMilitary", 0.03f) * 100) + "% of the coast's people caught. Hold the roads out, escort the columns, hunt the hordes.";
+        if (g.equals("squad")) return "Put down " + SQUAD_KILLS + " of the dead within " + days + " and keep at least half your squad alive (and the dead out of your streets).";
+        if (g.equals("patrol")) return "Answer " + CALLS_NEEDED + " 911 calls out on your beat (get to the scene, away from the station) within " + days + ", and stay alive.";
+        if (g.equals("reach")) return "Get to safety within " + days + ": the army base, an evacuation point, a survivor settlement or the boats on the shore.";
         if (g.equals("survive")) return role == OFFICER ? "Stay alive with your patrol for " + days + "." : "Stay alive for " + days + ".";
         return w.scenario.desc;
     }
@@ -428,6 +636,24 @@ public final class Roles extends Module {
         int gd = goalDays();
         float deadline = gd * 1440f;
         boolean late = gd > 0 && w.time >= deadline;
+        if (g.equals("patrol")) {
+            int n = callsAnswered.size();
+            progress = Math.min(1, n / (float) CALLS_NEEDED);
+            progressText = n + " of " + CALLS_NEEDED + " calls answered; " + days() + " of " + gd + (gd == 1 ? " day" : " days");
+            if (w.playerEnt < 0 || w.e.loc[w.playerEnt] != Ents.FREE) return;
+            if (n >= CALLS_NEEDED && late) end(true, "Your shift is over", "You answered " + n + " calls and lived through " + gd + (gd == 1 ? " day" : " days") + " of it.");
+            else if (late) end(false, "Too few calls answered", "You answered " + n + " of the " + CALLS_NEEDED + " calls needed in " + gd + (gd == 1 ? " day" : " days") + ".");
+            return;
+        }
+        if (g.equals("reach")) {
+            progress = Math.min(1, (float) (w.time / Math.max(1, deadline)));
+            progressText = "Find safety: " + days() + " of " + gd + (gd == 1 ? " day" : " days") + " gone";
+            if (w.playerEnt < 0 || w.e.loc[w.playerEnt] != Ents.FREE) return;
+            float[] safe = w.strat.safeAt(w.e.x[w.playerEnt], w.e.y[w.playerEnt]);
+            if (safe != null) end(true, "You reached safety", "You made it to " + Strategic.SAFE_NAMES[(int) safe[2]] + ", " + days() + " in.");
+            else if (late) end(false, "Still out there", "Alive, but not safe: " + gd + (gd == 1 ? " day" : " days") + " gone and nowhere reached.");
+            return;
+        }
         if (g.equals("survive")) {
             // (the survival stories judge this in Strategic; in a campaign it's the player's own goal)
             if (!campaign()) return;
@@ -437,15 +663,20 @@ public final class Roles extends Module {
             return;
         }
         if (g.equals("precinct")) {
-            int alive = districtAlive();
-            if (baseline < 0) baseline = Math.max(1, alive);
-            int need = (int) (baseline * PRECINCT_KEEP);
+            // the district's people at the start; those caught there since (bitten, killed) against what may be lost.
+            // People who got out (its own evacuation, or the town's) are safe: they can't be caught there.
+            if (baseline < 0) baseline = Math.max(1, districtAlive());
+            int cap = (int) (baseline * (1 - PRECINCT_KEEP));
             String name = target >= 0 ? w.r.facilities.get(target).name : "your precinct";
             progress = Math.min(1, (float) (w.time / Math.max(1, deadline)));
-            progressText = News.num(alive) + " alive in " + name + "'s district (" + News.num(baseline) + " at the start; keep " + News.num(need) + ")";
-            lowT = alive < need ? lowT + dt : 0;
-            if (lowT >= 120) end(false, "Your district has fallen", "Only " + News.num(alive) + " of the " + News.num(baseline) + " people in " + name + "'s district are left, " + days() + " in.");
-            else if (late) end(true, "Your district held", News.num(alive) + " people are alive there after " + gd + (gd == 1 ? " day" : " days") + " (" + News.num(baseline) + " at the start).");
+            float wait = w.c.rule("precinctCallWait", 90);
+            progressText = News.num(districtLost) + " of " + News.num(baseline) + " in " + name + "'s district caught (at most " + News.num(cap) + "); " + News.num(districtOut) + " got out"
+                    + (worstWait > 0 ? "; longest unanswered call " + (int) worstWait + " of " + (int) wait + " min" : "");
+            boolean station = target < 0 || w.strat.online(target);
+            if (!station) end(false, "Your station has fallen", "The dead took " + name + ", " + days() + " in.");
+            else if (worstWait >= wait) end(false, "A call went unanswered", "Nobody went to a 911 call in " + name + "'s district for " + News.num((int) wait) + " minutes, " + days() + " in.");
+            else if (districtLost > cap) end(false, "Your district has fallen", News.num(districtLost) + " of the " + News.num(baseline) + " people in " + name + "'s district were caught, " + days() + " in.");
+            else if (late) end(true, "Your district held", "Only " + News.num(districtLost) + " of its " + News.num(baseline) + " people were caught in " + gd + (gd == 1 ? " day" : " days") + "; " + News.num(districtOut) + " got out.");
             return;
         }
         if (g.equals("evaccity")) {
@@ -469,11 +700,12 @@ public final class Roles extends Module {
             int sec = w.r.sectorOfPx(p[0], p[1]);
             int zHere = w.sec.zIn[sec] + w.sp.secZ[sec];
             progress = Math.min(1, (float) (w.time / Math.max(1, deadline)));
-            progressText = s.n + " of " + baseline + " of your squad standing; " + News.num(zHere) + " of the dead in your streets";
+            progressText = s.n + " of " + baseline + " of your squad standing; " + s.kills + " of " + SQUAD_KILLS + " of the dead put down; " + News.num(zHere) + " in your streets";
             lowT = zHere > 150 ? lowT + dt : Math.max(0, lowT - dt);
             if (s.alive && s.n * 2 < baseline) end(false, "Your squad is broken", "Only " + s.n + " of the " + baseline + " are left, " + days() + " in.");
             else if (lowT >= 240) end(false, "Your sector is overrun", "The dead held your streets for four hours, " + days() + " in.");
-            else if (late && s.alive) end(true, "Your squad held", s.n + " of the " + baseline + " made it through " + gd + (gd == 1 ? " day" : " days") + ", and the streets are yours.");
+            else if (late && s.alive && s.kills >= SQUAD_KILLS) end(true, "Your squad held", s.n + " of the " + baseline + " made it through " + gd + (gd == 1 ? " day" : " days") + ", with " + s.kills + " of the dead put down.");
+            else if (late && s.alive) end(false, "Your squad sat it out", "Only " + s.kills + " of the " + SQUAD_KILLS + " of the dead needed were put down in " + gd + (gd == 1 ? " day" : " days") + ".");
             return;
         }
         Region.Settlement cap = w.r.city();
@@ -486,14 +718,17 @@ public final class Roles extends Module {
             lowT = alive < baseline * 0.5f ? lowT + dt : 0;
             if (lowT >= 360) end(false, "The capital has fallen", "Fewer than half its people are left, " + days() + " in.");
             else if (late) end(true, "The capital held", News.num(alive) + " of " + News.num(baseline) + " of its people lived through " + sc.days + " days.");
-        } else if (g.equals("evaccoast")) {
+        } else if (g.equals("evaccoast") || g.equals("evacmil")) {
             if (baseline < 0) baseline = Math.max(1, coastalNow());
             int safe = coastalSafe(), need = (int) (baseline * w.c.rule("evacNeed", 0.5f));
             int lost = 0;
             for (Region.Settlement s : w.r.settlements) if (coastal(s)) lost += w.stats.lostBySettlement[s.id];
             progress = safe / (float) Math.max(1, need);
-            progressText = News.num(safe) + " of the " + News.num(need) + " needed are safe inland";
-            if (safe >= need) end(true, "The coast is evacuated", News.num(safe) + " people from the coast reached safety inland, " + days() + " in.");
+            int lossCap = (int) (baseline * w.c.rule("evacLossMilitary", 0.03f));
+            progressText = News.num(safe) + " of the " + News.num(need) + " needed are safe inland" + (g.equals("evacmil") ? "; " + News.num(lost) + " caught (at most " + News.num(lossCap) + ")" : "");
+            if (g.equals("evacmil") && lost > lossCap)
+                end(false, "Too many caught on the roads", News.num(lost) + " of the coast's people were caught before they reached safety, " + days() + " in.");
+            else if (safe >= need) end(true, "The coast is evacuated", News.num(safe) + " people from the coast reached safety inland, " + days() + " in.");
             else if (lost > baseline * 0.4f) end(false, "The coast is lost", News.num(lost) + " of the coast's people were caught before they could get away.");
             else if (late) end(false, "Too many were left behind", News.num(safe) + " of the " + News.num(need) + " needed got out in time.");
         } else if (g.equals("retakestate")) {
@@ -660,6 +895,24 @@ public final class Roles extends Module {
         o.writeInt(baseline);
         o.writeFloat(lowT);
         o.writeInt(backup);
+        o.writeBoolean(cordon);
+        o.writeBoolean(districtEvac);
+        o.writeInt(districtOut);
+        o.writeFloat(cordonT);
+        o.writeFloat(evacCarry);
+        o.writeInt(callsAnswered.size());
+        for (int id : callsAnswered) o.writeInt(id);
+        o.writeInt(cordonSquads.size());
+        for (int id : cordonSquads) o.writeInt(id);
+        o.writeInt(districtLost);
+        o.writeFloat(beatX);
+        o.writeFloat(beatY);
+        o.writeFloat(worstWait);
+        o.writeInt(callWait.size());
+        for (java.util.Map.Entry<Integer, Float> c : callWait.entrySet()) {
+            o.writeInt(c.getKey());
+            o.writeFloat(c.getValue());
+        }
     }
 
     @Override
@@ -688,6 +941,23 @@ public final class Roles extends Module {
                 lowT = in.readFloat();
             }
             if (in.available() > 0) backup = in.readInt();
+            if (in.available() > 0) {
+                cordon = in.readBoolean();
+                districtEvac = in.readBoolean();
+                districtOut = in.readInt();
+                cordonT = in.readFloat();
+                evacCarry = in.readFloat();
+                callsAnswered.clear();
+                for (int k = in.readInt(); k > 0; k--) callsAnswered.add(in.readInt());
+                cordonSquads.clear();
+                for (int k = in.readInt(); k > 0; k--) cordonSquads.add(in.readInt());
+                districtLost = in.readInt();
+                beatX = in.readFloat();
+                beatY = in.readFloat();
+                worstWait = in.readFloat();
+                callWait.clear();
+                for (int k = in.readInt(); k > 0; k--) callWait.put(in.readInt(), in.readFloat());
+            }
         } else {
             players = 1;
             current = 0;

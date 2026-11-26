@@ -140,13 +140,16 @@ public final class Military {
         int alive = 0;
         for (Forces.Formation f : w.forces.formations) if (f.alive) alive++;
         boolean room = alive < w.c.rule("maxFormations", 45);
-        if (w.gov.level >= 3 && guardT <= 0 && room && dead > 100 && soldiers < 2000 + nat * 0.15f) {
+        // one measure of how many soldiers the reported picture calls for, for the Guard and the regulars alike (a
+        // smaller war gets the same kind of army, artillery and armour included, only less of it)
+        float want = w.c.rule("soldiersBase", 2500) + nat * w.c.rule("soldiersPerDead", 0.1f);
+        if (w.gov.level >= 3 && guardT <= 0 && room && dead > 100 && soldiers < want) {
             arrive("guard_brigade", "National Guard");
             guardsArrived++;
             guardT = w.c.rule("mobiliseEvery", 240) * 1.25f;
         }
-        // national mobilisation: a new formation every few game hours while the reported dead outnumber the army
-        if (w.gov.level >= 4 && regularT <= 0 && room && dead > 1500 && soldiers < nat * w.c.rule("soldiersPerDead", 0.08f)) {
+        // national mobilisation: a new formation every few game hours while the army is short of that
+        if (w.gov.level >= 4 && regularT <= 0 && room && dead > 1500 && soldiers < want) {
             String[] kinds = {"infantry", "armour", "infantry", "artillery"};
             arrive(kinds[regularsArrived % kinds.length], "Army");
             regularsArrived++;
@@ -259,81 +262,6 @@ public final class Military {
         return true;
     }
 
-    /** Supply trucks from the base depot to stations running low. */
-    private void supply() {
-        Region.Facility b = base();
-        if (b == null || !w.strat.online(b.id)) return;
-        int sent = 0;
-        for (Region.Facility f : w.r.facilities) {
-            if (f.kind != Region.F_POLICE && f.kind != Region.F_ARMORY) continue;
-            if (!w.strat.online(f.id) || f.ammo > Strategic.AMMO_START * 0.5f) continue;
-            if (w.strat.supplyOnWay[f.id]) continue;
-            Content.VType t = w.c.vtype("supply_truck");
-            if (t == null) return;
-            int v = w.veh.add(t, b.x, b.y, 0, b.id);
-            w.veh.role[v] = Vehicles.R_SUPPLY;
-            w.veh.cargo[v] = Strategic.AMMO_START;
-            w.veh.target[v] = f.id;
-            if (!w.veh.driveTo(v, f.x, f.y, 0)) {
-                w.veh.state[v] = Vehicles.V_NONE;
-                continue;
-            }
-            w.strat.supplyOnWay[f.id] = true;
-            w.stats.supplyRuns++;
-            if (++sent >= 3) break;
-        }
-    }
-
-    /** A wave from outside the region: squads in vehicles arriving at a highway entry. */
-    public void outsideWave(String unitId, String vehicleId, int squads, String agency, int faction) {
-        Content.Unit u = w.c.unit(unitId);
-        Content.VType vt = w.c.vtype(vehicleId);
-        if (u == null || vt == null || w.r.entryNodes.isEmpty()) return;
-        int entry = w.r.entryNodes.get(w.rng.nextInt(w.r.entryNodes.size()));
-        float ex = w.r.roads.nx[entry], ey = w.r.roads.ny[entry];
-        int homeFac = nearestHome(ex, ey, faction);
-        for (int k = 0; k < squads; k++) {
-            Squads.Squad s = w.sq.create(faction, homeFac, agency);
-            s.outside = true;
-            float ox = ex + (k % 2) * 12, oy = ey + k * 34;
-            int v = w.veh.add(vt, ox, oy, 0, homeFac);
-            if (homeFac >= 0) {
-                Region.Facility f = w.r.facilities.get(homeFac);
-                w.veh.homeX[v] = f.x + (k % 4) * 10;
-                w.veh.homeY[v] = f.y;
-            }
-            s.vehicle = v;
-            w.veh.squad[v] = s.id;
-            int per = Math.max(2, Math.min(vt.seats, faction == Ents.COP ? 4 : 10));
-            for (int m = 0; m < per; m++) {
-                int i = w.spawnUnit(u, ox, oy);
-                w.sq.add(s, i);
-                w.veh.board(v, i);
-            }
-            // go where it's needed most: the biggest open call, or the base
-            Dispatch.Incident target = null;
-            for (Dispatch.Incident in : w.disp.incidents)
-                if (in.open && (target == null || in.zombies > target.zombies)) target = in;
-            if (target != null) w.disp.send(s, target);
-            else w.sq.goHome(s);
-            if (faction == Ents.COP) w.stats.outsidePolice += per;
-            else w.stats.outsideSoldiers += per;
-        }
-        wavesArrived++;
-        w.news.radio(agency + ": " + squads + " units arriving from outside the region", ex, ey, News.COMMAND);
-    }
-
-    private void armour() {
-        Content.VType t = w.c.vtype("tank");
-        if (t == null || w.r.entryNodes.isEmpty()) return;
-        int entry = w.r.entryNodes.get(w.rng.nextInt(w.r.entryNodes.size()));
-        float ex = w.r.roads.nx[entry], ey = w.r.roads.ny[entry];
-        for (int k = 0; k < 2; k++) {
-            int v = w.veh.add(t, ex, ey + k * 44, 0, nearestHome(ex, ey, Ents.SOLDIER));
-            w.veh.timer[v] = 99;
-        }
-    }
-
     /** Tanks have no squad: they go to the biggest fight and stay until a bigger one needs them. */
     private void retaskArmour() {
         Vehicles v = w.veh;
@@ -352,20 +280,5 @@ public final class Military {
             if (dx * dx + dy * dy < 500 * 500) continue;
             if (v.driveTo(i, target.x, target.y, 60)) v.siren[i] = false;
         }
-    }
-
-    private int nearestHome(float x, float y, int faction) {
-        int best = -1;
-        float bd = Float.MAX_VALUE;
-        for (Region.Facility f : w.r.facilities) {
-            boolean ok = faction == Ents.COP ? f.kind == Region.F_POLICE : (f.kind == Region.F_BASE || f.kind == Region.F_ARMORY);
-            if (!ok || !w.strat.online(f.id)) continue;
-            float dx = f.x - x, dy = f.y - y, d = dx * dx + dy * dy;
-            if (d < bd) {
-                bd = d;
-                best = f.id;
-            }
-        }
-        return best;
     }
 }

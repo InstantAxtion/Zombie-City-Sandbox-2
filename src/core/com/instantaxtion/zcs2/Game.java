@@ -1795,7 +1795,9 @@ public final class Game {
                     row.add((have > 0 ? "send:" : "x:") + t.id);
                     row.add(t.name + " (" + have + ")");
                 }
-                return new String[][]{row.toArray(new String[0])};
+                // the precinct's own district: a police cordon on its edge, and getting its people out
+                String[] district = {"pc:cordon", w.roles.cordon ? "Lift cordon" : "Cordon district", "pc:evac", w.roles.districtEvac ? "Stop evacuating" : "Evacuate district"};
+                return new String[][]{row.toArray(new String[0]), district};
             }
             case "map": {
                 String[] row1 = {"m:jump", cam.zoom > cam.countryZoom() * 1.3f ? "Whole country" : "Back to where I was", "ov:0", "Plain", "ov:1", "Infection", "ov:2", "Utilities"};
@@ -3038,6 +3040,8 @@ public final class Game {
                 Actions.generalCommands(w, !w.forces.generalCommands);
                 return;
             case "o:fdone": inspFormation = null; return;
+            case "pc:cordon": Actions.precinctCordon(w, !w.roles.cordon); return;
+            case "pc:evac": Actions.precinctEvac(w, !w.roles.districtEvac); return;
             case "o:home": Actions.home(w, inspSquad); return;
             case "i:quar": Actions.quarantine(w, inspSettle, !w.roles.quarantined(inspSettle)); return;
             case "i:army": Actions.requestArmy(w, inspSettle); return;

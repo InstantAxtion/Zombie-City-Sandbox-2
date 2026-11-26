@@ -222,6 +222,14 @@ public final class Navy extends Module {
         if (sh.kills > 0 && sh.kills < 30) w.news.radio(sh.name + ": naval gunfire on the dead ashore", sh.tx, sh.ty, News.COMMAND);
     }
 
+    /** Is this a sector where boats take people off (a waterfront of a town being evacuated)? */
+    public boolean pickup(int s) {
+        if (s < 0 || s >= w.sec.n) return false;
+        int st = w.sec.settlement[s];
+        if (st < 0 || !w.gov.evacuating(st) || w.sec.zIn[s] > 0) return false;
+        return coastal[s] || wet != null && wet[s] && w.roles.coastal(w.r.settlements.get(st));
+    }
+
     /** Boats take people off the coast of a town being evacuated. */
     private void coastGuard(float dt) {
         float rate = w.c.rule("coastGuard", 0.0015f);

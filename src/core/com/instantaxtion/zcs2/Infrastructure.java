@@ -274,7 +274,8 @@ public final class Infrastructure extends Module {
         for (Region.Facility f : w.r.facilities) {
             if (f.kind != Region.F_FUEL || f.fuel <= 0) continue;
             Region.Settlement s = w.r.settlements.get(f.settlement);
-            f.fuel = Math.max(0, f.fuel - s.residents / 100000f * 6 * dt / 1440f);
+            // (rationed under martial law: half as much for the towns, the rest kept for the army)
+            f.fuel = Math.max(0, f.fuel - s.residents / 100000f * 6 * dt / 1440f * (w.gov.martialLaw() ? 0.5f : 1));
         }
         for (Forces.Formation fm : w.forces.formations) {
             if (!fm.alive || fm.state != Forces.MOVING) continue;
