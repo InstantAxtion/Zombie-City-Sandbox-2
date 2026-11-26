@@ -51,7 +51,8 @@ public final class SectorIndex {
     /** Due this step (stagger), and with what multiple of dt. */
     private final boolean[] due;
     private final byte[] scale;
-    private final boolean[] act;
+    private final boolean[] act, ring;
+    private boolean[] sick = new boolean[0];
     private int[] hospitals;
     private int[] camList = new int[64];
     private int camN;
@@ -77,6 +78,7 @@ public final class SectorIndex {
         due = new boolean[dn];
         scale = new byte[dn];
         act = new boolean[dn];
+        ring = new boolean[dn];
         stagger = w.national;
         reindex();
     }
@@ -350,6 +352,8 @@ public final class SectorIndex {
                 }
         }
         java.util.Arrays.fill(act, false);
+        if (sick.length != bySettlement.length) sick = new boolean[bySettlement.length];
+        else java.util.Arrays.fill(sick, false);
         int scanned = 0;
         // the districts awake last second (and those poked since): still anything in them?
         for (int d = 0; d < dn; d++) {
@@ -363,6 +367,8 @@ public final class SectorIndex {
                     p += sec.popIn[s] + w.sp.secCiv[s];
                     f += (int) sec.inf[s];
                     if (!any && !quiet(s)) any = true;
+                    // (the infected or the dead indoors in a town: its hospital's sector joins the set below)
+                    if ((sec.inf[s] > 0 || sec.zIn[s] > 0) && sec.settlement[s] >= 0) sick[sec.settlement[s]] = true;
                     scanned++;
                 }
             dead[d] = z;
@@ -381,31 +387,22 @@ public final class SectorIndex {
         for (int k = 0; k < camN; k++) act[district(camList[k])] = true;
         boolean st = stagger && w.strategic;
         // the new set: the active districts and the ring round them
+        java.util.Arrays.fill(ring, false);
         for (int d = 0; d < dn; d++) {
-            boolean on = false;
+            if (!act[d]) continue;
             int dx = d % dw, dy = d / dw;
-            for (int oy = -1; oy <= 1 && !on; oy++) {
-                int yy = dy + oy;
-                if (yy < 0 || yy >= dh) continue;
-                for (int ox = -1; ox <= 1; ox++) {
-                    int xx = dx + ox;
-                    if (xx >= 0 && xx < dw && act[yy * dw + xx]) {
-                        on = true;
-                        break;
-                    }
-                }
-            }
-            setAwake(d, on);
-            due[d] = on;
+            for (int yy = Math.max(0, dy - 1); yy <= Math.min(dh - 1, dy + 1); yy++)
+                for (int xx = Math.max(0, dx - 1); xx <= Math.min(dw - 1, dx + 1); xx++) ring[yy * dw + xx] = true;
+        }
+        for (int d = 0; d < dn; d++) {
+            setAwake(d, ring[d]);
+            due[d] = ring[d];
             scale[d] = 1;
         }
-        // the infected walk to their town's hospital, wherever it is: its sector must be in the set
-        for (int k = 0; k < hospitals.length; k += 2) {
-            int[] l = bySettlement[hospitals[k]];
-            boolean any = false;
-            for (int j = 0; j < l.length && !any; j++) any = sec.inf[l[j]] > 0 || sec.zIn[l[j]] > 0;
-            if (any) setAwake(district(hospitals[k + 1]), true);
-        }
+        // the infected walk to their town's hospital, wherever it is: its sector must be in the set (the infected
+        // and the dead indoors are only ever in awake districts, all scanned above)
+        for (int k = 0; k < hospitals.length; k += 2)
+            if (sick[hospitals[k]]) setAwake(district(hospitals[k + 1]), true);
         if (st) {
             // quiet but awake: due every STAGGER steps, with STAGGER x dt
             for (int d = 0; d < dn; d++) {
