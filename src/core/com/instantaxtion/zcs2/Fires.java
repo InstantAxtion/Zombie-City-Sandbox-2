@@ -151,7 +151,12 @@ public final class Fires extends Module {
                         w.stats.civDeaths += lost;
                         sec.zIn[s] += lost / 2;
                         recall(b);
-                    } else h -= crews[b] / 4f * crewRate * dt + grow * dt;
+                    } else {
+                        // no water in the mains: the crews have only what the engines carry
+                        int bs = r.bset[b];
+                        float water = bs >= 0 && w.infra.waterOut(bs) ? 0.3f : 1f;
+                        h -= crews[b] / 4f * crewRate * water * dt + grow * dt;
+                    }
                 }
             }
             if (w.weather.wet()) h -= rain * dt * (w.weather.state == Weather.STORM ? 2 : 1);
@@ -189,7 +194,7 @@ public final class Fires extends Module {
         for (int s = 0; s < sec.n; s++) {
             int p = sec.popIn[s];
             if (p < 200 || sec.grid[s] < 0) continue;
-            boolean dark = !w.strat.lit(s);
+            boolean dark = !w.strat.lit(s) || (sec.settlement[s] >= 0 && w.infra.waterOut(sec.settlement[s]));
             if (!dark && sec.panic[s] < 0.5f) continue;
             float chance = p * rate * dt * (dark ? 1 : 0.3f) * (w.weather.wet() ? 0.3f : 1);
             if (Rng.unit(w.seed, w.tick, s * 41L + 9) >= chance) continue;

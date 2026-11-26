@@ -247,7 +247,8 @@ public final class Society extends Module {
         for (Region.Settlement s : w.r.settlements) {
             int st = s.id;
             if (s.kind != Region.S_CITY && s.kind != Region.S_TOWN) continue;
-            if (w.gov.trust > trustAt || w.media.fear(st) < fearAt || w.stats.popBySettlement[st] < 200) continue;
+            boolean hungry = w.infra.shortage[st] > 0;
+            if ((!hungry && (w.gov.trust > trustAt || w.media.fear(st) < fearAt)) || w.stats.popBySettlement[st] < 200) continue;
             if (Rng.unit(w.seed, w.tick, st * 7L + 99) > 0.4f) continue;
             // a shop or warehouse in the town
             int b = -1;
@@ -268,10 +269,7 @@ public final class Society extends Module {
             }
             boolean burned = Rng.unit(w.seed, w.tick, b) < w.c.rule("lootFire", 0.25f);
             w.fx.add(Effects.SMOKE, x, y, 60, 0, burned ? 400 : 120);
-            if (burned) {
-                w.r.destroyBuilding(b);
-                w.stats.buildingsLost++;
-            }
+            if (burned) w.fires.ignite(b, 0.4f);
             w.news.radio("Looting in " + s.name + (burned ? ": a building has been set on fire" : ""), x, y, News.CALL);
             w.gov.trust -= 1;
             // the police go if they can
