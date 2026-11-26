@@ -462,8 +462,17 @@ public final class Setup {
             float m = r.px();
             float[][] pts = {{0.08f, 0.5f}, {0.92f, 0.5f}, {0.5f, 0.08f}, {0.5f, 0.92f}, {0.1f, 0.1f}, {0.9f, 0.9f}};
             int wave = 0, placed = 0;
+            // (a national map: not from the far borders, but from a ring this far round the capital, so the first is
+            // still about a day away)
+            float ring = w.rule("edgeHordeRing", 0);
+            Region.Settlement capital = r.city();
             for (float[] pt : pts) {
                 float x = pt[0] * m, y = pt[1] * m;
+                if (ring > 0) {
+                    float dx = pt[0] - 0.5f, dy = pt[1] - 0.5f, d = (float) Math.sqrt(dx * dx + dy * dy);
+                    x = Math.max(m * 0.02f, Math.min(m * 0.98f, capital.cx * 16f + dx / d * ring));
+                    y = Math.max(m * 0.02f, Math.min(m * 0.98f, capital.cy * 16f + dy / d * ring));
+                }
                 for (int a = 0; a < 40 && !r.walkablePx(x, y); a++) {
                     x += (m / 2 - x) * 0.05f;
                     y += (m / 2 - y) * 0.05f;
