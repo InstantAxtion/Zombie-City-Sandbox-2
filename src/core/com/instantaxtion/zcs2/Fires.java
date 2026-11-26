@@ -19,6 +19,9 @@ public final class Fires extends Module {
     private final float[] burnT, eta;
     private final int[] crews, crewFrom, engine;
     private final int[] secFires;
+    /** The sectors with a count in secFires. */
+    private int[] fireSecs = new int[16];
+    private int fireSecN;
     public float wind; // radians: where the wind blows to
     private final List<Integer> burning = new ArrayList<Integer>();
     private int unitFF = -1, vEngine = -1;
@@ -133,7 +136,9 @@ public final class Fires extends Module {
         Sectors sec = w.sec;
         wind += (Rng.unit(w.seed, w.tick, 911) - 0.5f) * 0.2f * dt / 60f;
         untended(dt);
-        java.util.Arrays.fill(secFires, 0);
+        // (only the sectors that had fires last time are cleared, not the whole map)
+        for (int k = 0; k < fireSecN; k++) secFires[fireSecs[k]] = 0;
+        fireSecN = 0;
         float grow = 1f / w.c.rule("fireGrow", 600), burnout = w.c.rule("fireBurnout", 900), spread = w.c.rule("fireSpread", 0.004f);
         float crewRate = w.c.rule("fireCrew", 0.0012f), rain = w.c.rule("fireRain", 0.004f);
         float wx = (float) Math.cos(wind), wy = (float) Math.sin(wind);
@@ -172,7 +177,10 @@ public final class Fires extends Module {
                 burnT[b] = 0;
                 continue;
             }
-            secFires[s]++;
+            if (secFires[s]++ == 0) {
+                if (fireSecN == fireSecs.length) fireSecs = java.util.Arrays.copyOf(fireSecs, fireSecN * 2);
+                fireSecs[fireSecN++] = s;
+            }
             burnT[b] += dt * heat[b];
             // into the neighbours, with the wind
             if (heat[b] > 0.5f && Rng.unit(w.seed, w.tick, b * 13L) < spread * heat[b] * dt) spreadFrom(b, wx, wy);

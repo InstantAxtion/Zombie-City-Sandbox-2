@@ -34,7 +34,7 @@ public final class ScaleProbe {
         if (what.equals("sectors") || what.equals("all")) {
             Content c = Content.load(new FileInputStream("assets/content.ini"));
             int size = a.length > 1 && what.equals("sectors") ? Integer.parseInt(a[1]) : 28672;
-            for (int k = 0; k < 3; k++) sectors(c, size, k);
+            for (int k = 0; k < 4; k++) sectors(c, size, k);
         }
     }
 
@@ -79,7 +79,7 @@ public final class ScaleProbe {
      * A world with a national map's sectors, filled from a Nation (until P7 there are no chunks behind it: every
      * page is one shared page of grass, or of water where the nation's sector is mostly water, so the tiles cost
      * nothing; no facilities, roads or buildings). Then: 0 a quiet country, 1 the capital's streets full of the dead,
-     * 2 the dead in every street where anyone lives.
+     * 2 every settlement's streets, 3 every sector where anyone lives.
      */
     static World nationalWorld(Content c, Nation n) {
         int size = n.size;
@@ -128,13 +128,15 @@ public final class ScaleProbe {
                 }
             what = "war in the capital (" + put + " sectors with the dead)";
         } else {
+            // 2: every town and city falls (the dead in each settlement's streets); 3: everywhere anyone lives, the
+            // farms and the countryside too
             int put = 0;
             for (int s = 0; s < sec.n; s++)
-                if (sec.home[s] > 0) {
+                if (sec.home[s] > 0 && (which == 3 || sec.settlement[s] >= 0)) {
                     sec.zIn[sec.touch(s)] += Math.max(10, sec.home[s] / 20);
                     put++;
                 }
-            what = "whole country (" + put + " sectors with the dead)";
+            what = (which == 2 ? "every town falls (" : "the whole country, fields too (") + put + " sectors with the dead)";
         }
         System.out.printf("sectors %d tiles, %s: %d sectors, %d districts, %d people%n", size, what, sec.n, sec.idx.dn, sec.totalPop());
         // street speed: the step that runs the once-a-second update against those that don't
