@@ -2099,7 +2099,7 @@ public final class Game {
             case "army": return placeTemplate != null ? "Tap the map to place the squad and its vehicle" : placeVehicle != null ? "Tap a road to place the vehicle" : "Tap the map to place soldiers";
             case "strike": return "Tap where to aim, then confirm";
             case "town": return "Tap a town: " + (townMode.equals("info") ? "see how it's doing" : townMode.equals("evac") ? "evacuate it" : townMode.equals("quar") ? "quarantine it"
-                    : townMode.equals("corr") ? "open an escorted corridor out of it" : townMode.equals("amb") ? "should its ambulances take the bitten to hospital (and the infection with them)?" : "send the army");
+                    : townMode.equals("corr") ? "escort the road out" : townMode.equals("amb") ? "bitten to hospital, or kept home?" : "send the army");
             case "send": return "Pick who to send, then tap where they go";
             case "map": return "Layers of the national map";
             case "erase": return eraseMode.equals("town") ? "Tap a town: its counted dead are gone" : "Drag to clear the dead away, or clear everything of a kind";

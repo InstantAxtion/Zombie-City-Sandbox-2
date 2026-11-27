@@ -44,6 +44,10 @@ public final class UiShot {
             legibleShots();
             return;
         }
+        if (a.length > 4 && a[4].equals("services")) {
+            servicesShots();
+            return;
+        }
         if (a.length > 4 && a[4].equals("coop")) {
             coop();
             return;
@@ -1173,6 +1177,73 @@ public final class UiShot {
                 if (game.w.r.walkablePx(wx, wy) && game.w.r.walkablePx(wx + 12, wy) && game.w.r.walkablePx(wx - 12, wy)) return new float[]{x, y};
             }
         return new float[]{sx, sy};
+    }
+
+    /** The air and emergency services' controls: a transport helicopter's orders, the engineers in the Build tool, the Town tool's decisions. */
+    static void servicesShots() throws Exception {
+        tap("new");
+        frames(2);
+        tap("mode:0");
+        frames(1);
+        tap("scen:1"); // lab leak, as God
+        frames(1);
+        tap("start");
+        waitPlay();
+        game.speedIdx = 0;
+        frames(30);
+        World w = game.w;
+        tap("tool:army");
+        frames(1);
+        tap("cat:army:veh");
+        frames(2);
+        shot("s01-army-vehicles");
+        // a transport helicopter on its pad: its orders
+        int v = -1;
+        for (int k = 0; k < w.veh.top && v < 0; k++) if (w.veh.usable(k) && w.services.transport(k) && w.veh.state[k] == Vehicles.V_PARKED) v = k;
+        game.cam.follow = -1;
+        game.cam.cx = w.veh.x[v];
+        game.cam.cy = w.veh.y[v];
+        game.cam.zoom = 0.5f;
+        tap("tool:orders");
+        frames(1);
+        game.ordVeh = v;
+        game.vehMode = Orders.VO_GO;
+        frames(2);
+        tap("vo:5");
+        frames(2);
+        shot("s02-helicopter-orders");
+        float[] p = w.r.openGroundNear(Setup.originX + 400, Setup.originY, false);
+        Actions.vehicleOrder(w, v, Orders.VO_ASSAULT, p[0], p[1]);
+        for (int k = 0; k < 120 && w.veh.crewN[v] == 0; k++) frames(1);
+        for (int k = 0; k < 40; k++) {
+            game.cam.cx = w.veh.x[v];
+            game.cam.cy = w.veh.y[v];
+            frames(1);
+        }
+        shot("s03-air-assault-under-way");
+        tap("vo:done");
+        frames(1);
+        // the engineers in the Build tool
+        game.cam.cx = Setup.originX;
+        game.cam.cy = Setup.originY;
+        game.cam.zoom = 1.0f;
+        tap("tool:build");
+        frames(2);
+        tap("bd:eng_wall");
+        frames(2);
+        shot("s04-build-engineers");
+        int n = w.r.roads.nearestNode(Setup.originX + 300, Setup.originY + 300, 1500);
+        Actions.engineer(w, Engineers.J_WALL, w.r.roads.nx[n] + 40, w.r.roads.ny[n]);
+        game.cam.cx = w.r.roads.nx[n];
+        game.cam.cy = w.r.roads.ny[n];
+        frames(90);
+        shot("s05-engineers-on-their-way");
+        // the Town tool's decisions: the airport, a corridor, the bitten and the hospital
+        tap("tool:town");
+        frames(2);
+        tap("tm:amb");
+        frames(2);
+        shot("s06-town-services");
     }
 
     static void tapAt(float[] p) {
