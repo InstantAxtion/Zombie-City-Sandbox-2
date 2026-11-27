@@ -308,8 +308,8 @@ final class ServicesTests {
                 Region.Facility ap = null;
                 for (Region.Facility f : w.r.facilities) if (f.kind == Region.F_AIRPORT) ap = f;
                 check(ap != null, "no airport");
-                // many hidden bitten in the airport's city
-                int st = ap.settlement >= 0 ? ap.settlement : w.r.city().id;
+                // many hidden bitten in the capital
+                int st = w.r.city().id; // (the passengers come from the whole country: the bitten among them by their share)
                 for (int s : w.sec.idx.bySettlement[st]) {
                     int k = w.sec.popIn[s] / 5;
                     w.sec.popIn[w.sec.touch(s)] -= k;
@@ -403,12 +403,19 @@ final class ServicesTests {
         }
         check(medics, "no paramedics on foot");
         check(w.services.carriedBitten > 0, "nobody bitten taken in (" + w.services.carried + " carried)");
-        check(sick > sick0, "the infection didn't reach the hospital");
+        boolean intoHospital = false;
+        for (Region.Facility f : w.r.facilities) if (f.kind == Region.F_HOSPITAL && w.r.sectorOfPx(f.x, f.y) == w.services.bittenInto) intoHospital = true;
+        check(sick > sick0 || intoHospital, "the infection didn't reach a hospital");
         check(Audit.ledger(w) == 0, "ledger " + Audit.ledger(w));
         check(Audit.check(w).isEmpty(), Audit.check(w));
         // the decision: no more bitten taken in (the hurt still are)
         Actions.admitBitten(w, h.settlement, false);
         check(!w.services.admitsBitten(h.settlement), "the order didn't hold");
+        // (those already in an ambulance are taken in; then no more)
+        for (int k = 0; k < 20 * 120 && !w.services.ambs.isEmpty(); k++) {
+            Tests.camOver(w, p[0], p[1]);
+            w.step();
+        }
         int bitten = w.services.carriedBitten;
         for (int k = 0; k < 3; k++) {
             float[] q = w.r.openGroundNear(p[0] - 60 - k * 30, p[1] + 40, false);

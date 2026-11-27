@@ -590,6 +590,8 @@ public final class Services extends Module {
     /** Per settlement: the ambulances no longer take the bitten (the officials' or the player's decision). */
     public final boolean[] noBitten;
     public int carried, carriedBitten;
+    /** The sector the last bitten patient was taken into (a hospital's: the infection goes with them). */
+    public int bittenInto = -1;
     private final int unitMedic, vAmb;
     private float ambT;
 
@@ -850,6 +852,7 @@ public final class Services extends Module {
                 carried++;
                 if (inf) {
                     carriedBitten++;
+                    bittenInto = hs;
                     w.news.count("ambInf:" + hf.id, "A bitten patient taken in at " + hf.name + "|" + hf.name + ": %d more bitten patient{s} taken in", 1, hf.x, hf.y);
                 } else e.flags[m] &= ~Ents.F_INFECTED;
                 indoors(m, hs);
