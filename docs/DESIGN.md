@@ -346,14 +346,22 @@ replay being watched: `Replay.fork` loads the replay's snapshot at or before the
 frame with a `WorldView` of its own into an off-screen `GImage` (`offline`, so every picture in view is painted
 now, not within a frame's budget). The camera is the replay's path (its zoom scaled to the clip's width) or the
 view the player had. `GImage.getPixels` reads the frame back; `PngEncoder` (Paeth rows, `java.util.zip`) writes
-each numbered frame and `GifEncoder` adds it to a GIF: a colour table per frame (exact when a frame has 256 colours
-or fewer, else a median cut over 15-bit counts), LZW in variable-width codes with a clear code when the table fills,
-as compress(1) and every GIF decoder do it, and delays carried over so 15 fps keeps its length. None of it needs a
+each numbered frame and `GifEncoder` adds it to a GIF. The first frame sets a global colour table (its own colours
+when it has 255 or fewer, else a median cut over 15-bit counts to 127); each later frame is only the rectangle that
+differs from what the decoder shows, its other pixels transparent and drawn over the frame before (disposal: leave in
+place), in the global table where it fits, else a table of its own. Many-colour frames are coded lossily, as
+gifsicle's --lossy: a pixel within 24 in every channel of what's shown is left, and where the LZW dictionary can't go
+on with a pixel it may take a child within 32 instead (a longer match); an error that grows past that is sent
+again, so nothing drifts. No dithering: it would make still parts change every frame. Frames of 255 colours or fewer
+are exact. The LZW is in variable-width codes with a clear code when the table fills, as compress(1) and every GIF
+decoder do it, and delays carry over so 15 fps keeps its length. A 90-frame 720 x 404 clip of a street full of the dead
+went from about 8 MB (whole frames) to 1.3-1.7 MB. None of it needs a
 screen or a platform library, so it runs headless and is the same on a phone. Files go through
 `Platform.openClip`: the app's files on Android, which `ClipProvider` (a read-only provider, one granted file at a
 time) hands to the share sheet, and `publishClip` saves to Pictures through the media store from API 29 (the public
-folder, after asking for the storage permission, on 23-28); a folder on a desktop. The tests check that the GIF
-decodes back to the same frames with javax.imageio and that exporting leaves the replay's tick, snapshots and hash
+folder, after asking for the storage permission, on 23-28); a folder on a desktop. The tests check that the GIF,
+its frames composited as a viewer shows them, decodes back to the same frames with javax.imageio (and many-colour
+footage stays near, with no error building up over frames), and that exporting leaves the replay's tick, snapshots and hash
 as they were, and that the copy came out with the hash of playing straight through.
 
 **Scripts.** A scenario can carry triggers and goals of its own (`Script`): a module added only to games whose

@@ -46,24 +46,43 @@ final class GuideTests {
 
     // ------------------------------------------------------------------ the GIF encoder
 
-    /** Every frame of a GIF, as ARGB pixels, read by the JDK's own decoder; also the delays (hundredths). */
+    /**
+     * Every frame of a GIF as it is shown, ARGB, read by the JDK's own decoder: each frame's rectangle drawn over the
+     * picture so far where it isn't transparent (the encoder's frames leave the one before in place); also the delays.
+     */
     static int[][] decodeGif(byte[] gif, int w, int h, java.util.List<Integer> delays) throws Exception {
         ImageReader rd = ImageIO.getImageReadersByFormatName("gif").next();
         ImageInputStream in = ImageIO.createImageInputStream(new ByteArrayInputStream(gif));
         rd.setInput(in, false);
         int n = rd.getNumImages(true);
         int[][] out = new int[n][];
+        int[] canvas = new int[w * h];
         for (int k = 0; k < n; k++) {
             BufferedImage img = rd.read(k);
-            check(img.getWidth() == w && img.getHeight() == h, "frame " + k + " is " + img.getWidth() + "x" + img.getHeight());
-            out[k] = img.getRGB(0, 0, w, h, null, 0, w);
-            if (delays != null) {
-                javax.imageio.metadata.IIOMetadata md = rd.getImageMetadata(k);
-                org.w3c.dom.Node root = md.getAsTree("javax_imageio_gif_image_1.0");
-                for (org.w3c.dom.Node c = root.getFirstChild(); c != null; c = c.getNextSibling())
-                    if (c.getNodeName().equals("GraphicControlExtension"))
-                        delays.add(Integer.parseInt(((org.w3c.dom.Element) c).getAttribute("delayTime")));
+            org.w3c.dom.Node root = rd.getImageMetadata(k).getAsTree("javax_imageio_gif_image_1.0");
+            int fx = 0, fy = 0;
+            String disposal = "none";
+            for (org.w3c.dom.Node c = root.getFirstChild(); c != null; c = c.getNextSibling()) {
+                org.w3c.dom.Element e = (org.w3c.dom.Element) c;
+                if (c.getNodeName().equals("ImageDescriptor")) {
+                    fx = Integer.parseInt(e.getAttribute("imageLeftPosition"));
+                    fy = Integer.parseInt(e.getAttribute("imageTopPosition"));
+                } else if (c.getNodeName().equals("GraphicControlExtension")) {
+                    disposal = e.getAttribute("disposalMethod");
+                    if (delays != null) delays.add(Integer.parseInt(e.getAttribute("delayTime")));
+                }
             }
+            check(disposal.equals("doNotDispose"), "frame " + k + " disposal " + disposal);
+            int fw = img.getWidth(), fh = img.getHeight();
+            check(fx >= 0 && fy >= 0 && fx + fw <= w && fy + fh <= h, "frame " + k + " is outside the picture");
+            if (k == 0) check(fw == w && fh == h, "the first frame isn't whole");
+            int[] px = img.getRGB(0, 0, fw, fh, null, 0, fw);
+            for (int y = 0; y < fh; y++)
+                for (int x = 0; x < fw; x++) {
+                    int c = px[y * fw + x];
+                    if ((c >>> 24) != 0) canvas[(fy + y) * w + fx + x] = c | 0xFF000000;
+                }
+            out[k] = canvas.clone();
         }
         rd.dispose();
         return out;
@@ -71,20 +90,27 @@ final class GuideTests {
 
     static void gifRoundTrip() throws Exception {
         Random rnd = new Random(7);
-        // frames of 256 colours or fewer come back exactly: an odd size, a gradient, noise that fills the LZW table
-        // (and so needs a clear code), two colours, one colour
-        int w = 211, h = 157, n = 6;
+        // frames of 255 colours or fewer come back exactly: an odd size, a gradient, noise that fills the LZW table
+        // (and so needs a clear code), two colours, one colour, the same again, a square moving over a still
+        // picture, and new colours the first frame hadn't (a table of their own)
+        int w = 211, h = 157, n = 11;
         int[][] frames = new int[n][w * h];
-        int[] pal = new int[256];
-        for (int k = 0; k < 256; k++) pal[k] = 0xFF000000 | rnd.nextInt(1 << 24);
+        int[] pal = new int[255];
+        for (int k = 0; k < 255; k++) pal[k] = 0xFF000000 | rnd.nextInt(1 << 24);
         for (int i = 0; i < w * h; i++) {
             int x = i % w, y = i / w;
-            frames[0][i] = pal[(x + y) & 0xFF];
-            frames[1][i] = pal[rnd.nextInt(256)];
+            frames[0][i] = pal[(x + y) % 255];
+            frames[1][i] = pal[rnd.nextInt(255)];
             frames[2][i] = (x / 8 + y / 8) % 2 == 0 ? 0xFF000000 : 0xFFFFFFFF;
             frames[3][i] = 0xFF336699;
             frames[4][i] = pal[(x * x + y * 3) % 37];
-            frames[5][i] = rnd.nextInt(9) == 0 ? pal[rnd.nextInt(256)] : pal[(x / 20) * 7 % 256];
+            frames[5][i] = frames[4][i];
+            for (int f = 6; f <= 8; f++) {
+                int sx = 30 + (f - 6) * 9;
+                frames[f][i] = x >= sx && x < sx + 20 && y >= 50 && y < 70 ? 0xFFE0453A : frames[4][i];
+            }
+            frames[9][i] = x > 100 && y > 100 ? 0xFF000000 | ((x * 7 + y) % 200) << 8 : frames[8][i];
+            frames[10][i] = rnd.nextInt(9) == 0 ? pal[rnd.nextInt(255)] : pal[(x / 20) * 7 % 255];
         }
         ByteArrayOutputStream bo = new ByteArrayOutputStream();
         GifEncoder enc = new GifEncoder(bo, w, h);
@@ -100,30 +126,68 @@ final class GuideTests {
         int sum = 0;
         for (int d : delays) sum += d;
         check(delays.size() == n && Math.abs(sum - n * 100 / 15.0) <= 1, "delays " + delays);
-        // a frame with thousands of colours: the median cut keeps it close
-        int[] smooth = new int[w * h];
+        // a still picture with a little moving in it costs little a frame: only the changed rectangle is kept
+        bo.reset();
+        enc = new GifEncoder(bo, w, h);
+        enc.addFrame(frames[0], 10);
+        int first = bo.size();
+        for (int f = 0; f < 20; f++) {
+            int[] fr = frames[0].clone();
+            for (int y = 60; y < 70; y++) for (int x = 10 + f * 5; x < 20 + f * 5; x++) fr[y * w + x] = 0xFFFFFFFF;
+            enc.addFrame(fr, 10);
+        }
+        enc.finish();
+        check(bo.size() < first + 20 * 600, "20 frames of a small moving square took " + (bo.size() - first) + " bytes");
+        int[][] moved = decodeGif(bo.toByteArray(), w, h, null);
+        check((moved[20][65 * w + 10 + 19 * 5] & 0xFFFFFF) == 0xFFFFFF && (moved[20][65 * w + 12] & 0xFFFFFF) == (frames[0][65 * w + 12] & 0xFFFFFF),
+                "the moving square came back wrong");
+        // frames with thousands of colours: the median cut keeps them close, and changes in them follow
+        int[] smooth = new int[w * h], smooth2 = new int[w * h];
         for (int i = 0; i < w * h; i++) {
             int x = i % w, y = i / w;
             smooth[i] = 0xFF000000 | (x * 255 / w) << 16 | (y * 255 / h) << 8 | ((x + y) * 255 / (w + h));
+            smooth2[i] = x < w / 2 ? smooth[i] : 0xFF000000 | (y * 255 / h) << 16 | (x * 255 / w) << 8 | 40;
         }
         smooth[w * h / 2] = 0xFFFF0000; // one vivid dot
         bo.reset();
         enc = new GifEncoder(bo, w, h);
         enc.addFrame(smooth, 10);
+        enc.addFrame(smooth2, 10);
         enc.finish();
-        int[] got = decodeGif(bo.toByteArray(), w, h, null)[0];
-        long err = 0;
-        int worst = 0;
-        for (int i = 0; i < w * h; i++)
-            for (int sh = 0; sh <= 16; sh += 8) {
-                int e = Math.abs(((got[i] >> sh) & 0xFF) - ((smooth[i] >> sh) & 0xFF));
-                err += e;
-                worst = Math.max(worst, e);
-            }
-        double mean = err / (3.0 * w * h);
-        check(mean < 6 && worst < 48, "the median cut is too far off: mean " + mean + ", worst " + worst);
-        // and the GIF is a GIF from a real frame of the game, too
+        int[][] got = decodeGif(bo.toByteArray(), w, h, null);
+        int[][] want = {smooth, smooth2};
+        for (int f = 0; f < 2; f++) {
+            long err = 0;
+            int worst = 0;
+            for (int i = 0; i < w * h; i++)
+                for (int sh = 0; sh <= 16; sh += 8) {
+                    int e = Math.abs(((got[f][i] >> sh) & 0xFF) - ((want[f][i] >> sh) & 0xFF));
+                    err += e;
+                    worst = Math.max(worst, e);
+                }
+            double mean = err / (3.0 * w * h);
+            check(mean < 8 && worst <= 48, "frame " + f + ": the colours are too far off: mean " + mean + ", worst " + worst);
+        }
         check(back[2][0] == 0xFF000000 && back[3][5] == 0xFF336699, "colours");
+        // many-colour footage over many frames (the lossy coder and still pixels): the error doesn't build up
+        bo.reset();
+        enc = new GifEncoder(bo, w, h);
+        int[] cur = null;
+        for (int f = 0; f < 16; f++) {
+            cur = smooth.clone();
+            for (int i = 0; i < w * h; i++) {
+                int x = i % w, y = i / w, dx = x - 20 - f * 10, dy = y - 70;
+                if (dx * dx + dy * dy < 400) cur[i] = 0xFF000000 | (200 - dx * dx / 4) << 16 | 40 << 8 | (60 + f * 8);
+                if ((x + f) % 17 == 0) cur[i] = cur[i] ^ 0x030303; // shimmer
+            }
+            enc.addFrame(cur, 10);
+        }
+        enc.finish();
+        int[][] film = decodeGif(bo.toByteArray(), w, h, null);
+        long err = 0;
+        for (int i = 0; i < w * h; i++)
+            for (int sh = 0; sh <= 16; sh += 8) err += Math.abs(((film[15][i] >> sh) & 0xFF) - ((cur[i] >> sh) & 0xFF));
+        check(err / (3.0 * w * h) < 8, "the last of 16 many-colour frames is off by " + err / (3.0 * w * h));
     }
 
     // ------------------------------------------------------------------ clip export
