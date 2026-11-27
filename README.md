@@ -11,7 +11,7 @@ part of it respond, or take a place in the response at any level, from the Presi
 try to live through it as one person.
 
 **Download:** [`release/ZombieCitySandbox2.apk`](release/ZombieCitySandbox2.apk) (Android 5.0 and newer, about
-320 KB: every picture and sound is made by code). It installs alongside the first game.
+700 KB: every picture and sound is made by code). It installs alongside the first game.
 
 ## What's in it
 
