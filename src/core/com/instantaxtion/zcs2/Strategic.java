@@ -797,12 +797,19 @@ public final class Strategic {
      */
     private void homecoming() {
         int ns = refuge.length;
-        for (int a = 0; a < ns; a++) {
+        // national maps: at most HOME_COLUMNS columns set off a second (each a route of a town-to-town trip), the
+        // towns taken in turn from a start that moves with the clock; a capital emptying back home after a war otherwise
+        // sent a hundred columns, and planned a hundred long routes, in one second. Today's maps: all at once, as before.
+        int budget = w.national ? HOME_COLUMNS : Integer.MAX_VALUE, start = w.national ? (int) (w.tick % Math.max(1, ns)) : 0;
+        for (int i = 0; i < ns; i++) {
+            int a = (start + i) % ns;
+            if (budget <= 0) return;
             if (w.gov.evacuating(a) || w.command.quarantined(a) || w.stats.zBySettlement[a] > 0 || !w.command.calm(a, 720)) continue;
             Region.Settlement home = w.r.settlements.get(a);
             if (home.hubNode < 0) continue;
-            for (int b = 0; b < ns; b++) {
+            for (int b = 0; b < ns && budget > 0; b++) {
                 if (refuge[a][b] <= 0 || b == a) continue;
+                budget--;
                 Region.Settlement host = w.r.settlements.get(b);
                 int n = Math.min(refuge[a][b], (int) (roadsOut(host) * 0.25f));
                 // take them from the host town's streets
@@ -846,6 +853,8 @@ public final class Strategic {
             }
         }
     }
+
+    private static final int HOME_COLUMNS = 6;
 
     /** A sector of the settlement where people live (its hub's, or any), or -1. */
     private int home(int st) {
