@@ -249,7 +249,7 @@ public final class ServicesShot {
                 w = game(size, seed, "evacuate");
                 int best = -1;
                 for (int k = 0; k < w.sec.n && best < 0; k++)
-                    if (w.navy.coastal(k) && w.sec.settlement[k] >= 0 && w.sec.popIn[k] > 300) best = k;
+                    if (w.navy.coastal(k) && w.sec.settlement[k] >= 0 && w.sec.popIn[k] > (w.national ? 0 : 300)) best = k;
                 if (best < 0) {
                     System.out.println("  no coastal sector");
                     return;
@@ -423,7 +423,6 @@ public final class ServicesShot {
                 for (int k = 0; k < 8 * 144 && w.services.aid.isEmpty(); k++) w.step();
                 System.out.println("  camps " + w.society.camps.size() + " aid convoys " + w.services.aid.size() + " at t=" + (int) w.time);
                 if (!w.services.aid.isEmpty()) {
-                    for (int k = 0; k < 6 && w.services.aid.size() > 0 && w.services.aid.get(0).ri < w.services.aid.get(0).route.length - 4; k++) w.step();
                     Services.Aid ad = w.services.aid.get(0);
                     System.out.println("  convoy at (" + (int) ad.x + ", " + (int) ad.y + "), " + w.services.aid.size() + " on the road");
                     shot(w, "aid_1_convoy", ad.x, ad.y, 0.25f);
@@ -437,7 +436,7 @@ public final class ServicesShot {
                 break;
             }
             case "flight": {
-                w = game(size, seed, "lab_leak");
+                w = game(size, seed, size >= 8192 ? "sandbox" : "lab_leak");
                 Region.Facility ap = null;
                 for (Region.Facility f : w.r.facilities) if (f.kind == Region.F_AIRPORT) ap = f;
                 if (ap == null) {

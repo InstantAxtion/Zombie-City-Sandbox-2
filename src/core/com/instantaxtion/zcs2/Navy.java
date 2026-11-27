@@ -68,6 +68,18 @@ public final class Navy extends Module {
                 int t = w.sec.neighbour(s, d);
                 if (t >= 0 && deepHere[t]) coastal[s] = true;
             }
+            // a national shore has shallows wider than a sector between the land and the deep: boats come in
+            // from deep water up to three kilometres out
+            int sx = s % w.sec.sw, sy = s / w.sec.sw;
+            for (int dy = -12; dy <= 12 && !coastal[s]; dy++)
+                for (int dx = -12; dx <= 12; dx++) {
+                    int x = sx + dx, y = sy + dy;
+                    if (x < 0 || y < 0 || x >= w.sec.sw || y >= w.sec.sh) continue;
+                    if (deepHere[y * w.sec.sw + x]) {
+                        coastal[s] = true;
+                        break;
+                    }
+                }
         }
     }
 
@@ -309,7 +321,7 @@ public final class Navy extends Module {
         for (Boat b : boats) if (b.sector == s) return;
         Sectors sec = w.sec;
         float cx = sec.cx(s), cy = sec.cy(s);
-        float[] sea = sea(cx, cy, 3000);
+        float[] sea = sea(cx, cy, w.national ? 14000 : 3000);
         if (sea == null) return;
         // the shore: from the sea towards the street, the last water before the land
         float dx = cx - sea[0], dy = cy - sea[1], d = (float) Math.sqrt(dx * dx + dy * dy) + 0.01f;
