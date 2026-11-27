@@ -785,7 +785,8 @@ public final class Tests {
     static final long[] OLD_REGION = {7541346224121036853L, 5717814252102046637L, 1073831598034722776L, -5103872686852295160L,
             350794609727050026L, -194660480813946018L, -6916372190236208595L, 8371790037975010950L};
     static final int[] OLD_REGION_NAMES = {-432190659, -1698590290, 987147127, -170146497, 1805316018, -2130176824, -2143075508, -1708706981};
-    static final long[] OLD_NATION = {-2588273170170537126L, 8295708271490474933L, 3116740770274513315L, 4709034136227997975L};
+    // (re-recorded in P10: downtown blocks of one, two and four lattice cells, towers round plazas)
+    static final long[] OLD_NATION = {5042255307011530386L, 8267388383151469706L, 6652278332439866455L, 5162018547629075945L};
     static final int OLD_NAMES = 1579710398;
 
     static void dataMoved() throws Exception {
@@ -1202,7 +1203,7 @@ public final class Tests {
                 failed++;
                 System.out.printf("FAIL  %-34s %s%n", n, t);
                 StackTraceElement[] st = t.getStackTrace();
-                for (int k = 0; k < Math.min(6, st.length); k++) System.out.println("        at " + st[k]);
+                for (int k = 0; k < Math.min(Integer.getInteger("trace", 6), st.length); k++) System.out.println("        at " + st[k]);
             }
         }
         System.out.println(passed + " passed, " + failed + " failed");
