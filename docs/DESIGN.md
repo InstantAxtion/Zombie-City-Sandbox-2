@@ -386,6 +386,25 @@ Systems added as modules, each saved with the game and run in fast-forward too:
 - `Ecology`, `Fires`, `Navy`, `Engineers`: hunger, nests, local strains that spread, hordes that follow roads and
   valleys and split; fires that spread downwind and fire brigades; destroyers, the coast guard, jets from the air
   base, airlifts; forward bases with field hospitals, and barricades across cordon streets.
+- `Services` (with parts in `Fires`, `Navy`, `Engineers`): the air and emergency services as people and vehicles.
+  Air tasks for the transport helicopters (assault: a squad from the pad's base spawned aboard, flown to open
+  ground near the fight, set down and left holding; extract: soldiers cut off from their vehicle; rescue: people
+  from a trapped street's count, carried to the base's sector). Ambulances from each hospital's pool drive to the
+  nearest hurt or bitten person on the street (who waits for them, `F_PATIENT`); two paramedics (`F_CREW`: not
+  among the people, never folded, think in `Services.crewThink`) walk them in; at the hospital the bitten are
+  added to its sector's bitten, so the infection goes with them, unless the town stops it (`noBitten`, the mayor's
+  call once the hospital has the dead in it, or `Actions.ADMIT`; it also stops the counted bitten walking in).
+  Fire crews on foot take their place at hoses round the building and only those at work put it out; two of the
+  dead at a firefighter (or any at the engine) send them back and the engine home. Checkpoints man a quarantined
+  town's edge junctions in active chunks with a station's patrol; corridors hold the road out (a polyline of the
+  route) with officers taken from the pools, and `Forces.escortNear` counts them. A rescue sends a police squad
+  and a bus from the depot. Aid convoys follow a route from the border to the camp with the most people. Engineers'
+  jobs (`Engineers.Job`) are worked by a squad on site (barricades 40 s, walls 90, forward bases 240, bridges 60),
+  stop while the dead are within 140 px, and finish by the clock in fast-forward. Seizures, strains (`strainKill`,
+  `strainLoss` in `Forces.aggregate`, `grenadePack` and `nightCaution` in `ArmedAI`) and flights are numbers.
+  Every part has a rule (`[rules services]`) that is off in code, so with them off the game is exactly as before
+  (the golden test with `SERVICES_OFF=1`); everything is saved, and the crews and passengers are set down before
+  fast-forward (`Services.enterStrategic`, `Fires.enterStrategic`).
 - `Roles`, `Director`: the eight roles; recorded actions, exact replays, the timelapse and heatmaps.
 
 They interact: hunger brings looting, looters and dry towns start fires, fire crews without mains water are weaker,

@@ -34,6 +34,16 @@ one person.
   moves as formations on the national map (infantry and armoured battalions, artillery batteries, marines,
   National Guard brigades) and holds ground; where nobody is watching, fights are settled by the numbers. Outside
   help arrives by the interstates as the alert level rises.
+- **Air and emergency services.** Transport helicopters fly squads into fights no soldiers are near, pull out
+  soldiers cut off from their vehicles and lift people out of streets the dead hold (and take your orders: air
+  assault, lift out). Ambulances and paramedics bring the hurt and the bitten to hospital, and with the bitten the
+  infection, until the mayor (or you) stops them. Firefighters get down and hose the fire, and the engine pulls out
+  when the dead come. Police man the checkpoints of a quarantined town (turning people back, holding the bitten),
+  escort the road out of a town being evacuated, and go in with a bus for people trapped among the dead. Coast
+  guard boats come in to the shore, aid agencies drive convoys to the refugee camps, engineers drive out and build
+  barricades, walls and forward bases over time (or blow a bridge) and the dead can stop them. Martial law seizes
+  vehicles, each strain changes how the forces fight, and civilian flights carry the infection to other cities until
+  the President closes the airport. Each has a switch in content.ini's `[rules services]`.
 - **Officers and soldiers who think.** Each one weighs fighting, cover, falling back, pulling back when wounded,
   reloading in cover, searching and the rear guard, with their own nerve (training, rank, a commander near, losses,
   the odds, ammunition): they break and run, and rally. Police, the army and SWAT fight by their own doctrine, and
@@ -115,8 +125,10 @@ machine-gun nests, ammunition crates, medical kits and command posts (God also l
 ground and puts people on the street); the **Clear** tool drags the dead away or clears wrecks, blood, barricades,
 everyone, or a town's dead. In the **Order** tool a squad can move, follow a route, fall back, hold a cordon line,
 clear an area or escort someone, with a stance (hold fire, normal, aggressive) and mount up; formations attack,
-defend, screen, withdraw or dig in; God can send any vehicle (go, orbit, attack an area, return) or take the wheel,
-and take over any person (Control on their sheet). **Rules** on the New Game screen and in God's pause menu set the
+defend, screen, withdraw or dig in; God can send any vehicle (go, orbit, attack an area, return; a transport
+helicopter flies an air assault or lifts people out) or take the wheel, and take over any person (Control on their
+sheet). The Build tool also sends the engineers (a wall, a forward base, a bridge blown), and the Town tool closes
+the airport, opens an escorted corridor and decides whether ambulances take the bitten to hospital. **Rules** on the New Game screen and in God's pause menu set the
 dead's speed and infection, the forces' strength, civilians, fleeing, outside help, the weather and the time of
 day. Every one of these is recorded, so replays stay exact. The tools are along the bottom (down the left side when the phone is
 sideways); each says in a line above its options what a tap does. The **Map** tool switches the national map's
@@ -154,7 +166,9 @@ interface driven by scripted taps; `UiShot dir 1080 2400 2.75` shoots a phone in
 2.75` sideways, and `UiShot dir 1080 2400 2.75 director` walks the roles, campaigns, editor, layers, the hand-over
 to the general, the timelapse and replays; `UiShot dir 1080 2400 2.75 survival` the survivor's card, Kit, a
 building, a car and companions; `director14` the editor's tabs, a scripted game, the replay's scrubber, camera
-keyframes and path, a director's cut and a content.ini import).
+keyframes and path, a director's cut and a content.ini import), `ServicesShot dir [size] [seed] [scenes...]` (the
+air and emergency services in action, each shot to a PNG: assault, lift, ambulance, fire, boats, checkpoint,
+corridor, rescue, engineers, aid, flight; a size of 8192 or more is a national map).
 
 `tools/balance.sh 5000,50000,100000,250000 8 2304 30 4` plays each outbreak size on many seeds in fast-forward
 and prints the spread of outcomes (days to contain or fall, share of the country lost, losses); every run goes to
