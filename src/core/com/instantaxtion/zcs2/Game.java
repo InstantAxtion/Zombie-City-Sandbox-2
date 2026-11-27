@@ -41,6 +41,12 @@ public final class Game {
      */
     int ngNational;
 
+    /** The first of the labels that fits a button of width w (dp) at the smallest text size, whole. */
+    String firstFit(Gfx g, float w, float textDp, String... labels) {
+        for (String l : labels) if (g.textWidth(l, ui.dp(textDp), true) <= w - ui.dp(10)) return l;
+        return labels[labels.length - 1];
+    }
+
     /** The heap the Large country needs (its sectors, chunk cache and pictures); below it the menu skips it. */
     static final long LARGE_NEEDS = 400L << 20;
 
@@ -688,7 +694,7 @@ public final class Game {
         // the map
         float bw = (rightW - ui.dp(16)) / 3;
         ui.button("preset", rightX, ry, bw, ui.dp(40), Data.presetName(ngPreset), false, 13);
-        ui.button("size", rightX + bw + ui.dp(8), ry, bw, ui.dp(40), Ui.fit(g, ngSizeLabel(), bw - ui.dp(10), ui.dp(13), true), false, 13);
+        ui.button("size", rightX + bw + ui.dp(8), ry, bw, ui.dp(40), firstFit(g, bw, 11, ngSizeLabel(), ngSizeName(), ngNational > 0 ? "Test" : ngSizeName()), false, 13);
         ui.button("seed", rightX + (bw + ui.dp(8)) * 2, ry, bw, ui.dp(40), "New map", false, 13);
         ry += ui.dp(46);
         // the start, and the challenge code tucked above it
@@ -697,7 +703,7 @@ public final class Game {
         float codeY = startY - ui.dp(42);
         float third = (rightW - ui.dp(16)) / 3;
         ui.button("code", rightX, codeY, third, ui.dp(34), "Enter a code", false, 12);
-        ui.button("editor", rightX + third + ui.dp(8), codeY, third, ui.dp(34), "Make your own", false, 12);
+        ui.button("editor", rightX + third + ui.dp(8), codeY, third, ui.dp(34), firstFit(g, third, 11, "Make your own", "Editor"), false, 12);
         ui.button("rules", rightX + (third + ui.dp(8)) * 2, codeY, third, ui.dp(34), ngRulesChanged() ? "Rules (changed)" : "Rules", ngRulesChanged(), 12);
         String best = bestText(challengeCode());
         g.color(best != null ? Ui.GOOD : 0xFF707A86);
