@@ -28,6 +28,8 @@ public final class Settings {
     public boolean colourBlind = false;
     /** Fast-forward slows to 1x for big events (and offers to go there): 2 all of them, 1 the biggest, 0 never. */
     public int autoSlow = 2;
+    /** A line of help the first time each tool is picked (each shown once). */
+    public boolean tips = true;
     public static final String[] AUTOSLOW_NAMES = {"Never", "Biggest only", "All events"};
 
     /** Does fast-forward stop for this kind of alert (Records.A_*)? */
@@ -62,6 +64,7 @@ public final class Settings {
         unitNames = b(p, "unitNames", unitNames);
         colourBlind = b(p, "colourBlind", colourBlind);
         autoSlow = Math.max(0, Math.min(2, i(p, "autoSlow", autoSlow)));
+        tips = b(p, "tips", tips);
     }
 
     public void save(Platform p) {
@@ -88,6 +91,7 @@ public final class Settings {
         p.setPref("unitNames", "" + unitNames);
         p.setPref("colourBlind", "" + colourBlind);
         p.setPref("autoSlow", "" + autoSlow);
+        p.setPref("tips", "" + tips);
     }
 
     private static int i(Platform p, String k, int def) {

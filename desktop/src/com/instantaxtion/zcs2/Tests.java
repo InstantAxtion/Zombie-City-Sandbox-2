@@ -3992,6 +3992,7 @@ public final class Tests {
         nationalTests();
         lifeTests();
         ServicesTests.define();
+        GuideTests.define();
     }
 
     // ------------------------------------------------------------------ active-area paging (docs/SCALE_PLAN.md P2)

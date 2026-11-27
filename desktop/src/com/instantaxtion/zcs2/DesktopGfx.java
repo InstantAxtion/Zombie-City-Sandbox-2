@@ -189,6 +189,10 @@ public final class DesktopGfx implements Gfx {
             img.setRGB(x, y, w, h, argb, offset, stride);
         }
 
+        public void getPixels(int[] argb) {
+            img.getRGB(0, 0, img.getWidth(), img.getHeight(), argb, 0, img.getWidth());
+        }
+
         public void recycle() {
         }
     }

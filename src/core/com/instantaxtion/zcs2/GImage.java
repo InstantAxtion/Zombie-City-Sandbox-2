@@ -15,5 +15,8 @@ public interface GImage {
     /** Replaces a rectangle of its pixels: argb holds rows of 'stride' ints, the first at 'offset'. */
     void updatePixels(int[] argb, int offset, int stride, int x, int y, int w, int h);
 
+    /** Copies its pixels out (ARGB, row by row, width() x height() of them) into argb: for exporting pictures. */
+    void getPixels(int[] argb);
+
     void recycle();
 }

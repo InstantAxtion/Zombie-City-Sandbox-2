@@ -95,7 +95,30 @@ public final class Replay {
 
     /** After a step: a snapshot when one is due. */
     public void afterStep() {
-        if (w.time >= nextSnap) snapshot();
+        if (keepsSnaps && w.time >= nextSnap) snapshot();
+    }
+
+    /** False for a fork (a clip being exported): it plays once, forwards, and keeps nothing to seek with. */
+    private boolean keepsSnaps = true;
+
+    /**
+     * A second copy of this replay, at snapshot s (from {@link #nearest}): its own world, loaded from the snapshot's
+     * bytes, the same inputs to play on with, and no snapshots of its own. Playing it never touches this replay or
+     * its world, so a clip can be rendered from it while this one stays exactly where it was. Blocking (it loads a
+     * world): call it off the game's thread.
+     */
+    public Replay fork(Snap s) throws IOException {
+        Replay f = new Replay();
+        f.content = content;
+        f.threads = threads;
+        f.header = header;
+        f.title = title;
+        f.endTick = endTick;
+        f.events.addAll(events);
+        f.keepsSnaps = false;
+        f.w = load(s);
+        f.next = s.next;
+        return f;
     }
 
     /** One step of the replay (its inputs, the step, and a snapshot if one is due). */

@@ -33,7 +33,8 @@ All in one package, `com.instantaxtion.zcs2`. The core (`src/core`) never touche
 | Forces | `Squads`, `Vehicles`, `Dispatch`, `Military` | Squads and their orders; driving on the road graph and flying; 911 calls, cordons; the army, gunships, tanks, air strikes, supply, outside help |
 | The region-wide | `Strategic`, `Gov`, `News`, `Stats`, `Records` | Facilities, power grids, ammunition, hordes, refugees, bridges, strains, goals; the alert level, trust, curfews, evacuations, rumours; the radio log; the numbers and the report; why things happened (a tracer of each fighter's last seconds, why towns fell, each formation's story, decisive moments, callouts and the alerts fast-forward stops for: read-only, a module of its own) |
 | Player | `Tools`, `Setup`, `Actions`, `Roles`, `Defences`, `Orders`, `Rules`, `Survival` | Everything the player can do (every change goes through `Actions`, which records it); building a new game, its scenario and the player's role; the country-scale campaign goals; what the player builds, lasting orders, driving and possession, and the rules sheet; living through it as one person (hiding, scavenging, needs, weapons, melee, cars, companions) |
-| Director | `Director`, `Replay`, `DirectorScreens` | The record of inputs, replays from a game's start, the timelapse, heatmaps; the replay list, timelapse and scenario editor screens |
+| Director | `Director`, `Replay`, `DirectorScreens`, `ClipExport`, `PngEncoder`, `GifEncoder` | The record of inputs, replays from a game's start, the timelapse, heatmaps; the replay list, timelapse and scenario editor screens; clips exported as PNG frames and a GIF |
+| Learning | `Tutorial` | The guided first game (coach marks over the real game) and the first-time tips |
 | Checking | `Audit`, `SaveIO` | Invariants and state hashes; saves |
 | Presentation | `Gfx`, `GImage`, `Platform`, `Camera`, `MapPainter`, `NationPainter`, `WorldView`, `Ui`, `Icons`, `Game`, `Settings`, `Texts` | Drawing at every zoom (the country picture, district and town pictures, street pictures), the interface, the screens |
 | Sound | `Synth`, `Mixer`, `AudioDirector` | Every effect, bed and score stem, synthesised once; mixing with priorities and a limiter; what to play, where, and the captions, vibration and shake that go with it |
@@ -339,6 +340,22 @@ it (counting the step under way, so it doesn't stutter) until the player moves t
 is not an input (the recorded camera events are), so a path changes nothing. A director's cut is the replay file
 again (version 2) with the path after the inputs; version 1 files still load.
 
+**Clips.** `ClipExport` renders a stretch of a replay to pictures on a background thread. It never touches the
+replay being watched: `Replay.fork` loads the replay's snapshot at or before the start into a world of its own
+(the same inputs, no snapshots of its own), plays it on to the start and then from frame to frame, and draws each
+frame with a `WorldView` of its own into an off-screen `GImage` (`offline`, so every picture in view is painted
+now, not within a frame's budget). The camera is the replay's path (its zoom scaled to the clip's width) or the
+view the player had. `GImage.getPixels` reads the frame back; `PngEncoder` (Paeth rows, `java.util.zip`) writes
+each numbered frame and `GifEncoder` adds it to a GIF: a colour table per frame (exact when a frame has 256 colours
+or fewer, else a median cut over 15-bit counts), LZW in variable-width codes with a clear code when the table fills,
+as compress(1) and every GIF decoder do it, and delays carried over so 15 fps keeps its length. None of it needs a
+screen or a platform library, so it runs headless and is the same on a phone. Files go through
+`Platform.openClip`: the app's files on Android, which `ClipProvider` (a read-only provider, one granted file at a
+time) hands to the share sheet, and `publishClip` saves to Pictures through the media store from API 29 (the public
+folder, after asking for the storage permission, on 23-28); a folder on a desktop. The tests check that the GIF
+decodes back to the same frames with javax.imageio and that exporting leaves the replay's tick, snapshots and hash
+as they were, and that the copy came out with the hash of playing straight through.
+
 **Scripts.** A scenario can carry triggers and goals of its own (`Script`): a module added only to games whose
 scenario has them (`Script.attach`, from `Setup.newGame` and `SaveIO.load`, before `Records`, which stays last),
 so every other game and its save are unchanged. Once a game second each trigger not yet fired checks its
@@ -362,6 +379,23 @@ nation checksums, roofs and names recorded on the code before. These sections ar
 of any mistake; an import (`Platform.pickFile`: Android's `ACTION_GET_CONTENT`, a file chooser on a desktop) is
 checked without being put in use, then kept as the app's `content.ini`; Share sends the one in use
 (`ACTION_SEND`).
+
+## Learning to play
+
+`Tutorial` is a guided first game that runs through the real `Game`, not a mock-up: a fixed small map (a 1,536-tile
+test map, seed 4242, an open sandbox as God), built in the background like any new game. Each step is a coach mark
+drawn after the screen: a card with the step, a line or two of help, Back and Skip (and a cross to stop), and the
+control it means ringed (found by its hit area, `Ui.rect`) with the rest of the screen a little darker; steps done on
+the map show a finger making the gesture. It waits by watching the game's own state rather than hooking the input
+paths: the camera's centre and zoom, the tool, whether a sheet is open, the inputs the director recorded since the
+step began (a paint, a squad, an order, a strike), the speed, the overlay, the numbers panel, the screen. Only the
+card takes taps, so it never blocks play. The step reached is kept in the prefs, so the menu offers to resume it.
+Its game is never autosaved, saved on a crash or counted as a best; when it ends its world is closed and the
+player's choices it changed (tool, brushes, palettes, the numbers panel, speed) are put back. Quitting to the menu
+stops it; loading another game drops it. The tips are one line, once per tool (`tip.<tool>` in the prefs), and the
+replay bar has one too; Settings turns them off. The test drives every step with scripted taps (`TutorialDriver`,
+also UiShot's `tutorial` shots), Back, Skip, stopping and resuming, and a load cancelled with back, and checks that
+the files, the prefs (other than the tour's own) and the game's choices are as they were.
 
 ## Lessons from the first game, and where they went
 
@@ -537,5 +571,3 @@ The New Game screen offers the three national sizes; the Large country only wher
 - Online play: co-op is pass-and-play on one phone and results are compared by code; playing together over the
   internet would need a server.
 - Several countries; the sea as a place.
-- Exporting a stretch of a replay as pictures (PNG frames, or a GIF): Android can write PNGs without a library
-  (`Bitmap.compress`), so it is feasible, but it is not built yet.

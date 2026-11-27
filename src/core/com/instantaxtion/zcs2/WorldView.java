@@ -308,6 +308,8 @@ public final class WorldView {
     // ------------------------------------------------------------------ ground
 
     private long paintBudgetNs = 6_000_000L;
+    /** Drawing off the screen (a clip being exported): every picture in view is painted now, whatever it takes. */
+    public boolean offline;
     private float lastCx, lastCy, lastZ, stillT;
     private int framesDrawn;
 
@@ -333,7 +335,7 @@ public final class WorldView {
         int n = w.r.W / MapPainter.CHUNK;
         int cx0 = Math.max(0, (int) (cam.x0() / chunkPx)), cy0 = Math.max(0, (int) (cam.y0() / chunkPx));
         int cx1 = Math.min(n - 1, (int) (cam.x1() / chunkPx)), cy1 = Math.min(n - 1, (int) (cam.y1() / chunkPx));
-        long budget = framesDrawn < 20 ? 40_000_000L : stillT > 0.25f ? 14_000_000L : paintBudgetNs;
+        long budget = offline ? 2_000_000_000L : framesDrawn < 20 ? 40_000_000L : stillT > 0.25f ? 14_000_000L : paintBudgetNs;
         long t0 = System.nanoTime();
         // paint the chunks nearest the middle first
         float mx = (cx0 + cx1) / 2f, my = (cy0 + cy1) / 2f;
@@ -1887,7 +1889,7 @@ public final class WorldView {
         lastCx = cam.cx;
         lastCy = cam.cy;
         lastZ = z;
-        long budget = framesDrawn < 20 ? 40_000_000L : stillT > 0.25f ? 14_000_000L : paintBudgetNs;
+        long budget = offline ? 2_000_000_000L : framesDrawn < 20 ? 40_000_000L : stillT > 0.25f ? 14_000_000L : paintBudgetNs;
         float ox = cam.toScreenX(0), oy = cam.toScreenY(0);
         float da = districtFade(z), sa = streetFade(z);
         float dpx = NationPainter.DISTRICT * Tile.SIZE;

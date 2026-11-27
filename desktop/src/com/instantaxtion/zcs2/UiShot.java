@@ -24,6 +24,17 @@ public final class UiShot {
         new File(out).mkdirs();
         File dir = new File("build/uishot-data");
         deleteAll(dir);
+        if (a.length > 4 && (a[4].equals("tutorial") || a[4].equals("clip"))) {
+            // the guided first game, step by step (and the first-time tips); or a replay's stretch exported as a clip
+            TutorialDriver d = new TutorialDriver(dir, W, H, density, new File(out));
+            if (a[4].equals("tutorial")) {
+                d.runAll();
+                TutorialDriver t = new TutorialDriver(new File("build/uishot-tips"), W, H, density, new File(out));
+                t.tips();
+            } else d.clipDemo(new File(out));
+            System.out.println("ok");
+            System.exit(0);
+        }
         DesktopPlatform pf = new DesktopPlatform(dir);
         pf.density = density;
         game = new Game(pf);

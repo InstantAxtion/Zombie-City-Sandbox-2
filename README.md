@@ -94,6 +94,13 @@ try to live through it as one person.
   (snapshots kept as it plays make going back quick, and it still comes out exactly the same), with back an hour,
   pause, step and speed; camera keyframes make a smooth path the view glides along, saved with the replay as a
   director's cut.
+- **Clips.** From the replay bar, Clip exports a stretch (a minute to twelve hours of the game, from where the
+  replay is) as numbered PNG frames and an animated GIF, at a chosen width, frame rate, length and shape (wide,
+  square, or the screen's), along the camera path or the view as it is. It is drawn in the background from a copy
+  of the replay, with a progress bar and Cancel; the replay itself stays exactly where it was. On a phone the clip
+  is kept in the app's files, Share GIF sends it, and Save to Pictures puts it in the photos (through the media
+  store from Android 10; on 5-9 the public Pictures folder). On a desktop it goes to a folder (`clips/` in the
+  game's data, or `-Dzcs2.clips=dir`).
 - **Shared worlds.** A challenge code (map size, terrain, seed, scenario, role), shown on the New Game screen
   and in the pause menu, can be typed in to play the same game. Your best for each code (fewest lives lost,
   fastest containment) is kept and shown.
@@ -122,6 +129,14 @@ try to live through it as one person.
   and a colour-blind-safe palette for the dead, the living, police and army.
 
 ## Controls
+
+New to it? **Learn to play** on the menu (offered the first time the game opens, and in Settings and Help) is a
+short guided game on a small country of its own. Each step rings the control it means with a line or two of help
+and waits for you to do it: moving and zooming from a street to the whole country, tapping to look, painting the
+dead, placing police and ordering a squad, an aimed and confirmed air strike, fast-forward and how it slows down for
+big events, the map layers, the roles, the numbers and the report. Skip and Back move between steps, the cross stops
+it, and the menu picks it up where it left off. The first time each tool is picked a one-line tip says what it does
+(Settings: First-time tips).
 
 Drag to move, pinch to zoom, tap to look. The **Build** tool puts down barricades, walls, sandbags, razor wire,
 machine-gun nests, ammunition crates, medical kits and command posts (God also lays roads, builds houses, clears the
@@ -172,7 +187,8 @@ interface driven by scripted taps; `UiShot dir 1080 2400 2.75` shoots a phone in
 2.75` sideways, and `UiShot dir 1080 2400 2.75 director` walks the roles, campaigns, editor, layers, the hand-over
 to the general, the timelapse and replays; `UiShot dir 1080 2400 2.75 survival` the survivor's card, Kit, a
 building, a car and companions; `director14` the editor's tabs, a scripted game, the replay's scrubber, camera
-keyframes and path, a director's cut and a content.ini import), `ServicesShot dir [size] [seed] [scenes...]` (the
+keyframes and path, a director's cut and a content.ini import; `tutorial` every step of the guided game, done by
+scripted taps, and the first-time tips; `clip` a replay's stretch exported from the clip sheet, with the GIF), `ServicesShot dir [size] [seed] [scenes...]` (the
 air and emergency services in action, each shot to a PNG: assault, lift, ambulance, fire, boats, checkpoint,
 corridor, rescue, engineers, aid, flight; a size of 8192 or more is a national map).
 

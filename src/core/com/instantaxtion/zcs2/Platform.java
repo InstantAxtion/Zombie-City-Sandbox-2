@@ -71,6 +71,21 @@ public interface Platform {
     /** Offers a text file to other apps (to share a content.ini: Android's share sheet). */
     void shareText(String fileName, String text);
 
+    /**
+     * Opens a file of an exported clip for writing (a numbered frame or the GIF), in a folder of its own: under the
+     * app's files on a phone (clips/folder), under the game's data folder on a desktop. Called on a background thread.
+     */
+    OutputStream openClip(String folder, String name) throws IOException;
+
+    /** Where an exported clip's folder is, in words for the player. */
+    String clipPlace(String folder);
+
+    /**
+     * Hands a file of an exported clip to the device: share it (Android's share sheet) or keep it where photos go
+     * (Pictures, through the media store, where the phone has it). Returns what happened, in words, or null if it can't.
+     */
+    String publishClip(String folder, String name, boolean share);
+
     interface FileAnswer {
         void file(String name, byte[] data);
     }

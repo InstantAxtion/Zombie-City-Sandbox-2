@@ -51,6 +51,11 @@ final class AndroidImage implements GImage {
         }
     }
 
+    public void getPixels(int[] argb) {
+        Bitmap b = bitmap;
+        if (b != null) b.getPixels(argb, 0, b.getWidth(), 0, 0, b.getWidth(), b.getHeight());
+    }
+
     /** True if drawing it now means uploading it first. */
     boolean needsUpload() {
         return bitmap != null && (dirty || texId == 0 || texGen != GLGfx.contextGen || dx0 <= dx1);

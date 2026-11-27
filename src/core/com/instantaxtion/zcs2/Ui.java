@@ -64,6 +64,15 @@ public final class Ui {
         return null;
     }
 
+    /** The hit area with this id as {x, y, w, h} (the topmost, as drawn this frame), or null: for pointing at it. */
+    public float[] rect(String id) {
+        for (int i = used - 1; i >= 0; i--) {
+            Hit t = hits.get(i);
+            if (t.id.equals(id)) return new float[]{t.x, t.y, t.w, t.h};
+        }
+        return null;
+    }
+
     public String at(float x, float y) {
         for (int i = used - 1; i >= 0; i--) {
             Hit t = hits.get(i);

@@ -187,13 +187,28 @@ final class DirectorScreens {
         boolean onKey = keyAt(r, w.tick) >= 0;
         String[][] b = {{"rb:back", "-1h"}, {"rb:play", g0.paused ? "Play" : "Pause"}, {"rb:step", "Step"},
                 {"rb:speed", Game.SPEED_NAMES[g0.speedIdx]}, {"rb:key", onKey ? "-Key" : "+Key"}, {"rb:path", "Path"},
-                {"rb:cut", "Cut"}};
+                {"rb:cut", "Cut"}, {"rb:clip", "Clip"}};
         float gap = ui.dp(4), by = cy + ui.dp(18), bh2 = y0 + bh - by - ui.dp(8);
         float each = (bw - m * 2 + gap) / b.length;
         for (int k = 0; k < b.length; k++) {
-            boolean on = b[k][0].equals("rb:path") && g0.pathOn && r.path.size() > 0 || b[k][0].equals("rb:play") && !g0.paused;
+            boolean on = b[k][0].equals("rb:path") && g0.pathOn && r.path.size() > 0 || b[k][0].equals("rb:play") && !g0.paused
+                    || b[k][0].equals("rb:clip") && (clipSheet || clip != null);
             ui.button(b[k][0], x0 + m + k * each, by, each - gap, bh2, b[k][1], on, 12);
         }
+        // the clip sheet goes over everything else on the map (drawn at the end of the frame: clipOverlay)
+        barShown = true;
+        barX = x0;
+        barY = y0;
+        barW = bw;
+    }
+
+    private boolean barShown;
+    private float barX, barY, barW;
+
+    /** After the frame's screen: the clip sheet over the replay bar, on top of the radio and the rest of the HUD. */
+    void clipOverlay(Gfx g) {
+        if (barShown && (clipSheet || clip != null) && g0.screen == Game.S_PLAY) clipSheet(g, barX, barY, barW);
+        barShown = false;
     }
 
     /** The keyframe at this tick (within a game minute), or -1. */
@@ -233,7 +248,16 @@ final class DirectorScreens {
         Replay r = g0.replay;
         World w = g0.w;
         if (r == null || w == null) return true;
+        if (clip != null && !clip.finished() && !id.equals("rb:clip")) {
+            // the replay stays where it is until the clip is out (it's rendered from a copy, but one at a time is plenty)
+            g0.toast("Exporting a clip: cancel it to use the replay");
+            return true;
+        }
         switch (id) {
+            case "rb:clip":
+                if (clip != null && clip.finished()) clip = null;
+                clipSheet = clip == null && !clipSheet;
+                break;
             case "rb:scrub": {
                 float f = Math.max(0, Math.min(1, (g0.upX - rbX0) / Math.max(1, rbX1 - rbX0)));
                 g0.seekTo((long) (f * r.endTick));
@@ -267,6 +291,167 @@ final class DirectorScreens {
             case "rb:cut": saveCut(); break;
             default:
         }
+        return true;
+    }
+
+    // ------------------------------------------------------------------ exporting a clip
+
+    /** The clip sheet over the replay bar is open. */
+    boolean clipSheet;
+    /** The clip sheet's choices (indexes into ClipExport's lists). */
+    int clipSpan = 1, clipSecs = 1, clipFps = 1, clipWidth = 1, clipShape;
+    boolean clipGif = true;
+    /** The export running (or finished, until the sheet is closed), or null. */
+    ClipExport clip;
+    /** What the last share or save said. */
+    private String clipNote;
+
+    /** The clip's size for the current choices: {width, height}, the height from the shape (the map's own shape for Screen). */
+    int[] clipSize() {
+        int cw = ClipExport.WIDTHS[clipWidth];
+        float fw = Math.max(1, g0.freeR - g0.freeL), fh = Math.max(1, g0.freeB - g0.freeT);
+        float shape = ClipExport.SHAPES[clipShape] > 0 ? ClipExport.SHAPES[clipShape] : fh / fw;
+        int ch = Math.max(16, Math.round(cw * shape) & ~1);
+        return new int[]{cw, ch};
+    }
+
+    /** Starts exporting the chosen stretch from where the replay is now, on a background thread. */
+    void startClip() {
+        Replay r = g0.replay;
+        World w = g0.w;
+        if (r == null || w == null) return;
+        long from = w.tick, to = Math.min(r.endTick, from + (long) (ClipExport.SPAN_MIN[clipSpan] * 1200));
+        if (to <= from) {
+            g0.toast("That's the end of the replay: go back to where the clip should start");
+            return;
+        }
+        int[] sz = clipSize();
+        Camera cam = g0.cam;
+        float fx = (g0.freeL + g0.freeR) / 2, fy = (g0.freeT + g0.freeB) / 2;
+        g0.paused = true;
+        clip = new ClipExport(g0.pf, r, from, to, sz[0], sz[1], ClipExport.FPS[clipFps], ClipExport.SECONDS[clipSecs], clipGif,
+                cam.toWorldX(fx), cam.toWorldY(fy), cam.zoom, (int) Math.max(1, g0.freeR - g0.freeL), g0.pathOn, g0.ui.d, g0.view);
+        clipNote = null;
+        clip.start();
+    }
+
+    /** A row of choices with its name at the left; returns the row's height. */
+    private float choiceRow(Gfx g, String name, String idPrefix, String[] labels, int on, float x, float y, float wdt) {
+        Ui ui = g0.ui;
+        float lw = ui.dp(88), h = ui.dp(34), gap = ui.dp(4);
+        g.color(Ui.DIM);
+        g.text(name, x, y + h / 2 + ui.dp(4), ui.dp(Ui.S + 0.5f), Gfx.ALIGN_LEFT, false);
+        float each = (wdt - lw + gap) / labels.length;
+        for (int k = 0; k < labels.length; k++)
+            ui.button(idPrefix + k, x + lw + k * each, y, each - gap, h, labels[k], k == on, 12);
+        return h + ui.dp(6);
+    }
+
+    /** The clip sheet, above the replay bar: what to export, then its progress, then where it went. */
+    private void clipSheet(Gfx g, float x0, float barY, float bw) {
+        Ui ui = g0.ui;
+        float m = ui.dp(12), wdt = bw - m * 2;
+        boolean running = clip != null && !clip.finished(), over = clip != null && clip.finished();
+        float h = clip == null ? ui.dp(376) : ui.dp(over && clip.phase == ClipExport.DONE ? 178 : 132);
+        float y = Math.max(g0.freeT + ui.dp(4), barY - h - ui.dp(6));
+        ui.panel(x0 + ui.dp(6), y, bw - ui.dp(12), h);
+        float x = x0 + m + ui.dp(4);
+        wdt -= ui.dp(8);
+        g.color(Ui.TEXT);
+        g.text("Export a clip", x, y + ui.dp(24), ui.dp(Ui.L), Gfx.ALIGN_LEFT, true);
+        if (!running) ui.button("cx:close", x + wdt - ui.dp(34), y + ui.dp(6), ui.dp(34), ui.dp(28), "✕", false, 13);
+        float yy = y + ui.dp(36);
+        if (clip == null) {
+            yy += choiceRow(g, "From now, for", "cx:span:", ClipExport.SPAN_NAMES, clipSpan, x, yy, wdt);
+            String[] secs = new String[ClipExport.SECONDS.length];
+            for (int k = 0; k < secs.length; k++) secs[k] = ClipExport.SECONDS[k] + " s";
+            yy += choiceRow(g, "Plays in", "cx:secs:", secs, clipSecs, x, yy, wdt);
+            String[] fps = new String[ClipExport.FPS.length];
+            for (int k = 0; k < fps.length; k++) fps[k] = ClipExport.FPS[k] + " fps";
+            yy += choiceRow(g, "Frame rate", "cx:fps:", fps, clipFps, x, yy, wdt);
+            String[] ws = new String[ClipExport.WIDTHS.length];
+            for (int k = 0; k < ws.length; k++) ws[k] = "" + ClipExport.WIDTHS[k];
+            yy += choiceRow(g, "Width (px)", "cx:w:", ws, clipWidth, x, yy, wdt);
+            yy += choiceRow(g, "Shape", "cx:shape:", ClipExport.SHAPE_NAMES, clipShape, x, yy, wdt);
+            float lw = ui.dp(88);
+            g.color(Ui.DIM);
+            g.text("Animated GIF", x, yy + ui.dp(21), ui.dp(Ui.S + 0.5f), Gfx.ALIGN_LEFT, false);
+            ui.toggle("cx:gif", x + lw, yy, wdt - lw, ui.dp(34), clipGif);
+            yy += ui.dp(40);
+            int[] sz = clipSize();
+            int n = ClipExport.SECONDS[clipSecs] * ClipExport.FPS[clipFps];
+            Replay r = g0.replay;
+            String cam = g0.pathOn && r != null && r.path.size() > 0 ? "along the camera path" : "the view as it is now";
+            ui.wrap(n + " PNG frames of " + sz[0] + " x " + sz[1] + (clipGif ? " and a GIF" : "") + ", " + cam
+                    + ". Made from a copy of the replay: this one stays where it is.", x, yy + ui.dp(8), wdt, ui.dp(Ui.S + 0.5f), Ui.DIM, 2);
+            yy += ui.dp(36);
+            ui.bigButton("cx:go", x, yy, wdt, ui.dp(44), "Export", Ui.ACCENT);
+            return;
+        }
+        // the progress, or how it went
+        g.color(clip.phase == ClipExport.FAILED ? 0xFFFF8A70 : Ui.TEXT);
+        g.text(Ui.fit(g, clip.status(), wdt, ui.dp(Ui.M), false), x, yy + ui.dp(14), ui.dp(Ui.M), Gfx.ALIGN_LEFT, false);
+        float barW = wdt, barH = ui.dp(8);
+        g.color(0xFF2A333F);
+        g.fillRoundRect(x, yy + ui.dp(26), barW, barH, barH / 2);
+        g.color(clip.phase == ClipExport.DONE ? Ui.GOOD : clip.phase >= ClipExport.FAILED ? Ui.ACCENT : 0xFF5A9CFF);
+        g.fillRoundRect(x, yy + ui.dp(26), Math.max(barH, barW * clip.overall()), barH, barH / 2);
+        yy += ui.dp(44);
+        if (running) {
+            ui.button("cx:cancel", x, yy, wdt, ui.dp(40), "Cancel", false, 13);
+            return;
+        }
+        if (clip.phase == ClipExport.DONE) {
+            if (clipNote != null) ui.wrap(clipNote, x, yy + ui.dp(4), wdt, ui.dp(Ui.S + 0.5f), Ui.DIM, 2);
+            else {
+                // (a folder's path has no spaces to wrap at: the end of it is what tells)
+                String place = g0.pf.clipPlace(clip.folder);
+                float ts = ui.dp(Ui.S + 0.5f);
+                if (g.textWidth(place, ts, false) > wdt) {
+                    int cut = 0;
+                    while (cut < place.length() - 1 && g.textWidth("\u2026" + place.substring(cut), ts, false) > wdt) cut++;
+                    place = "\u2026" + place.substring(cut);
+                }
+                g.color(Ui.DIM);
+                g.text("Saved in", x, yy + ui.dp(4) + ts, ts, Gfx.ALIGN_LEFT, false);
+                g.text(place, x, yy + ui.dp(4) + ts * 2.3f, ts, Gfx.ALIGN_LEFT, false);
+            }
+            yy += ui.dp(40);
+            float half = (wdt - ui.dp(8)) / 2;
+            if (clip.gif) {
+                ui.button("cx:share", x, yy, half, ui.dp(40), "Share GIF", false, 13);
+                ui.button("cx:save", x + half + ui.dp(8), yy, half, ui.dp(40), "Save to Pictures", false, 13);
+            } else ui.button("cx:close", x, yy, wdt, ui.dp(40), "Close", false, 13);
+            return;
+        }
+        ui.button("cx:close", x, yy, wdt, ui.dp(40), "Close", false, 13);
+    }
+
+    private boolean clipButton(String id) {
+        if (id.startsWith("cx:span:")) clipSpan = Integer.parseInt(id.substring(8));
+        else if (id.startsWith("cx:secs:")) clipSecs = Integer.parseInt(id.substring(8));
+        else if (id.startsWith("cx:fps:")) clipFps = Integer.parseInt(id.substring(7));
+        else if (id.startsWith("cx:w:")) clipWidth = Integer.parseInt(id.substring(5));
+        else if (id.startsWith("cx:shape:")) clipShape = Integer.parseInt(id.substring(9));
+        else switch (id) {
+                case "cx:gif": clipGif = !clipGif; break;
+                case "cx:go": if (clip == null) startClip(); break;
+                case "cx:cancel": if (clip != null) clip.cancel = true; break;
+                case "cx:close":
+                    if (clip == null || clip.finished()) {
+                        clip = null;
+                        clipSheet = false;
+                    }
+                    break;
+                case "cx:share":
+                case "cx:save":
+                    if (clip != null && clip.phase == ClipExport.DONE) {
+                        String said = g0.pf.publishClip(clip.folder, "clip.gif", id.equals("cx:share"));
+                        clipNote = said != null ? said : "Couldn't do that here: the clip is in " + g0.pf.clipPlace(clip.folder);
+                    }
+                    break;
+                default:
+            }
         return true;
     }
 
@@ -1090,6 +1275,7 @@ final class DirectorScreens {
     /** Handles this class's buttons; false if the id isn't one of them. */
     boolean onButton(String id) {
         if (id.startsWith("rb:")) return replayButton(id);
+        if (id.startsWith("cx:")) return clipButton(id);
         if (id.startsWith("mod:")) return modButton(id);
         if (id.startsWith("rp:")) {
             g0.playReplay(id.substring(3));

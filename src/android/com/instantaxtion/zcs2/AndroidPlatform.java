@@ -243,6 +243,116 @@ final class AndroidPlatform implements Platform {
         });
     }
 
+    // ------------------------------------------------------------------ exported clips
+
+    private File clipDir(String folder) {
+        return new File(new File(act.getFilesDir(), "clips"), folder);
+    }
+
+    public OutputStream openClip(String folder, String name) throws IOException {
+        File d = clipDir(folder);
+        if (!d.isDirectory() && !d.mkdirs()) throw new IOException("couldn't make " + d);
+        return new java.io.BufferedOutputStream(new FileOutputStream(new File(d, name)), 1 << 16);
+    }
+
+    public String clipPlace(String folder) {
+        return "the app's files: clips/" + folder;
+    }
+
+    /**
+     * Share: the share sheet with the file through ClipProvider (read access granted to the app chosen). Save: on
+     * Android 10 and newer into Pictures/Zombie City 2 through the media store (no permission needed); before that
+     * into the public Pictures folder, which needs the storage permission (asked for on 6-9 the first time).
+     */
+    public String publishClip(final String folder, final String name, boolean share) {
+        final File f = new File(clipDir(folder), name);
+        if (!f.isFile()) return null;
+        final String mime = name.endsWith(".gif") ? "image/gif" : "image/png";
+        if (share) {
+            act.runOnUiThread(new Runnable() {
+                public void run() {
+                    try {
+                        Uri uri = ClipProvider.uriFor(folder, name);
+                        Intent send = new Intent(Intent.ACTION_SEND);
+                        send.setType(mime);
+                        send.putExtra(Intent.EXTRA_STREAM, uri);
+                        send.setClipData(android.content.ClipData.newRawUri(name, uri));
+                        send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                        Intent chooser = Intent.createChooser(send, "Share the clip");
+                        chooser.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                        act.startActivity(chooser);
+                    } catch (Throwable e) {
+                        Toast.makeText(act, "Couldn't share it", Toast.LENGTH_SHORT).show();
+                    }
+                }
+            });
+            return "Choose where to send it";
+        }
+        final String display = folder + (name.endsWith(".gif") ? ".gif" : "_" + name);
+        if (android.os.Build.VERSION.SDK_INT < 29 && android.os.Build.VERSION.SDK_INT >= 23
+                && act.checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            act.runOnUiThread(new Runnable() {
+                public void run() {
+                    act.requestPermissions(new String[]{android.Manifest.permission.WRITE_EXTERNAL_STORAGE}, 4712);
+                }
+            });
+            return "Allow saving to your photos, then tap Save to Pictures again";
+        }
+        new Thread(new Runnable() {
+            public void run() {
+                String said;
+                try {
+                    if (android.os.Build.VERSION.SDK_INT >= 29) {
+                        android.content.ContentResolver cr = act.getContentResolver();
+                        android.content.ContentValues v = new android.content.ContentValues();
+                        v.put(MediaStore.MediaColumns.DISPLAY_NAME, display);
+                        v.put(MediaStore.MediaColumns.MIME_TYPE, mime);
+                        v.put("relative_path", "Pictures/Zombie City 2"); // (MediaColumns.RELATIVE_PATH, API 29)
+                        v.put("is_pending", 1); // (MediaColumns.IS_PENDING, API 29)
+                        Uri uri = cr.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, v);
+                        if (uri == null) throw new IOException("the media store said no");
+                        OutputStream o = cr.openOutputStream(uri);
+                        if (o == null) throw new IOException("couldn't write it");
+                        copy(f, o);
+                        v.clear();
+                        v.put("is_pending", 0);
+                        cr.update(uri, v, null, null);
+                    } else {
+                        @SuppressWarnings("deprecation")
+                        File pics = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_PICTURES);
+                        File dir = new File(pics, "Zombie City 2");
+                        if (!dir.isDirectory() && !dir.mkdirs()) throw new IOException("couldn't make " + dir);
+                        File out = new File(dir, display);
+                        copy(f, new FileOutputStream(out));
+                        android.media.MediaScannerConnection.scanFile(act, new String[]{out.getAbsolutePath()}, new String[]{mime}, null);
+                    }
+                    said = "Saved to Pictures/Zombie City 2";
+                } catch (Throwable e) {
+                    said = "Couldn't save to Pictures: use Share instead";
+                }
+                final String s = said;
+                act.runOnUiThread(new Runnable() {
+                    public void run() {
+                        Toast.makeText(act, s, Toast.LENGTH_SHORT).show();
+                    }
+                });
+            }
+        }, "saveclip").start();
+        return "Saving to Pictures/Zombie City 2...";
+    }
+
+    private static void copy(File from, OutputStream o) throws IOException {
+        InputStream in = new FileInputStream(from);
+        try {
+            byte[] buf = new byte[1 << 16];
+            int n;
+            while ((n = in.read(buf)) > 0) o.write(buf, 0, n);
+        } finally {
+            in.close();
+            o.close();
+        }
+    }
+
     public void askText(final String title, final String current, final TextAnswer answer) {
         act.runOnUiThread(new Runnable() {
             public void run() {

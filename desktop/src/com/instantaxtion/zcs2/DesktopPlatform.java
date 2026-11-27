@@ -44,6 +44,12 @@ public final class DesktopPlatform implements Platform {
     }
     public String pref(String key, String def) { return prefs.getProperty(key, def); }
     public void setPref(String key, String value) { prefs.setProperty(key, value); }
+    /** Every pref (for tests: what a feature leaves behind). */
+    public java.util.Map<String, String> prefsCopy() {
+        java.util.Map<String, String> m = new java.util.HashMap<String, String>();
+        for (String k : prefs.stringPropertyNames()) m.put(k, prefs.getProperty(k));
+        return m;
+    }
     public void playSound(String name, float volume, float pan) { sounds++; }
     public void setMusic(int track, float volume) { }
     /** Silent: nothing is rendered, but the game's calls go through it (and are counted) as on a phone. */
@@ -91,6 +97,27 @@ public final class DesktopPlatform implements Platform {
             o.close();
         } catch (IOException ignored) {
         }
+    }
+
+    /** Exported clips go to a folder: clips/<folder> under the data folder (or -Dzcs2.clips=dir). */
+    public File clipDir(String folder) {
+        String base = System.getProperty("zcs2.clips");
+        return new File(base != null ? new File(base) : new File(dir, "clips"), folder);
+    }
+
+    public OutputStream openClip(String folder, String name) throws IOException {
+        File d = clipDir(folder);
+        d.mkdirs();
+        return new java.io.BufferedOutputStream(new FileOutputStream(new File(d, name)), 1 << 16);
+    }
+
+    public String clipPlace(String folder) {
+        return clipDir(folder).getAbsolutePath();
+    }
+
+    public String publishClip(String folder, String name, boolean share) {
+        File f = new File(clipDir(folder), name);
+        return f.exists() ? "It's in " + f.getAbsolutePath() : null;
     }
 
     public void askText(String title, String current, TextAnswer answer) {

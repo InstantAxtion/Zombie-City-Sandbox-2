@@ -78,6 +78,8 @@ public final class Game {
     /** A replay being watched (the world is fed its recorded inputs), or null. */
     Replay replay;
     final DirectorScreens dir = new DirectorScreens(this);
+    /** The guided first game and the first-time tips (drawn over the screens, see the tutorial's hooks below). */
+    final Tutorial tut = new Tutorial(this);
     /** The scenario editor's custom scenarios file. */
     static final String CUSTOM = "custom_scenarios.ini";
     boolean customContent;
@@ -276,7 +278,7 @@ public final class Game {
         StackTraceElement[] st = t.getStackTrace();
         if (st.length > 0) where = " (" + st[0].getFileName() + ":" + st[0].getLineNumber() + ")";
         String saved = "";
-        if (w != null && !wasStepping && screen != S_LOADING && replay == null) {
+        if (w != null && !wasStepping && screen != S_LOADING && replay == null && !tut.owns(w)) {
             try {
                 saveTo("autosave");
                 saved = " The game was saved: Continue picks it up.";
@@ -362,6 +364,8 @@ public final class Game {
             case S_HANDOFF: handoff(g); break;
             default:
         }
+        dir.clipOverlay(g);
+        tut.frame(g, dt);
         if (screen != S_PLAY && screen != S_PAUSE && screen != S_PLAYERS) audio.idle(dt);
         if (msg != null && msgT > 0) {
             msgT -= dt;
@@ -489,7 +493,7 @@ public final class Game {
         float bx = land ? W * 0.75f - bw / 2 : W / 2f - bw / 2;
         boolean two = w != null || pf.exists("autosave.sav");
         float smallH = ui.dp(44);
-        float total = (two ? bh + gap : 0) + bh + gap + (smallH + gap) * 3;
+        float total = (two ? bh + gap : 0) + bh + gap + (smallH + gap) * 4;
         y = land ? (H - total) / 2 : H - total - ui.dp(36);
         if (w != null) {
             ui.bigButton("resume", bx, y, bw, bh, "Back to the game", Ui.ON);
@@ -500,6 +504,8 @@ public final class Game {
         }
         ui.bigButton("new", bx, y, bw, bh, "New game", Ui.ACCENT);
         y += bh + gap;
+        ui.button("tut:start", bx, y, bw, smallH, tut.menuLabel(), false, 13);
+        y += smallH + gap;
         float half = (bw - gap) / 2;
         String[][] small = {{"load", "Load game"}, {"replays", "Replays"}, {"settings", "Settings"}, {"help", "How to play"}, {"notes", "What's new"}, {"quit", "Quit"}};
         for (int k = 0; k < small.length; k++)
@@ -3355,6 +3361,9 @@ public final class Game {
                 {"set:ui", "Button size", new String[]{"Small", "Normal", "Large"}[s.uiSize]},
                 {"set:fps", "Frame rate", s.fpsCap == 30 ? "30 (saver)" : "60"},
                 {"set:debug", "Frame rate (for testing)", "?" + s.debug},
+                {"#", "Learning"},
+                {"tut:restart", "The tutorial", "Play it"},
+                {"set:tips", "First-time tips", "?" + s.tips},
                 {"#", "The simulation"},
                 {"set:max", "People in detail", WorldView.fmt(s.maxIndividuals)},
                 {"set:threads", "Threads", s.threads == 0 ? "Auto (" + s.simThreads() + ")" : "" + s.threads},
@@ -4205,7 +4214,7 @@ public final class Game {
 
     /** Keeps the best result for this challenge: fewest lives lost, fastest containment (only finished games count). */
     void recordBest() {
-        if (w == null || replay != null) return;
+        if (w == null || replay != null || tut.owns(w)) return;
         boolean finished = w.roles.containedAt >= 0 || (w.ended && w.won);
         if (!finished) return;
         String key = "best." + challengeCodeOf(w);
@@ -4356,6 +4365,10 @@ public final class Game {
         if (id.length() == 0) return;
         if (id.startsWith("sv:")) {
             if (w != null && replay == null && w.surv.enabled) survButton(id);
+            return;
+        }
+        if (id.startsWith("tut:")) {
+            tut.onButton(id);
             return;
         }
         switch (id) {
@@ -4820,6 +4833,7 @@ public final class Game {
             case "effects": s.effects = (s.effects + 1) % 3; break;
             case "fps": s.fpsCap = s.fpsCap == 30 ? 60 : 30; break;
             case "debug": s.debug = !s.debug; break;
+            case "tips": s.tips = !s.tips; break;
             case "gpu":
                 s.gpu = !s.gpu;
                 if (s.gpu) pf.setPref("gpuFailed", "false"); // let it try again
@@ -4911,7 +4925,7 @@ public final class Game {
      */
     public void autosave() {
         sinceAutosave = 0;
-        if (w == null || screen == S_LOADING || error != null || replay != null) return;
+        if (w == null || screen == S_LOADING || error != null || replay != null || tut.owns(w)) return;
         waitForSave();
         final SaveIO.Snapshot snap;
         final String info;
@@ -5791,6 +5805,103 @@ public final class Game {
     public int screen() {
         return screen;
     }
+
+    // ------------------------------------------------------------------ the tutorial's hooks (Tutorial drives the tour)
+
+    /** Builds the tour's small game in the background, as a new game is built, then plays it (as God, normal rules). */
+    void startTutorialWorld(final Content.Scenario sc, final int size, final long seed) {
+        closeWorld();
+        loadingFrom = screen == S_LOADING || screen == S_PLAY || screen == S_PAUSE ? S_MENU : screen;
+        screen = S_LOADING;
+        loadingText = "Setting up the tutorial...";
+        loaded = null;
+        loadError = null;
+        final int gen = ++loadGen;
+        new Thread(new Runnable() {
+            public void run() {
+                try {
+                    World nw = Setup.newGame(content, size, RegionGen.COAST, seed, sc, settings.simThreads(), Roles.GOD, settings.maxIndividuals);
+                    startX = Setup.originX;
+                    startY = Setup.originY;
+                    outbreakX = Setup.originX;
+                    outbreakY = Setup.originY;
+                    publish(gen, nw);
+                } catch (Throwable t) {
+                    if (gen == loadGen) loadError = t;
+                }
+            }
+        }, "tutorial").start();
+    }
+
+    /** The tour's game is in play: no notice of its scenario's name over the first step. */
+    void tutorialBegun() {
+        msgT = 0;
+        startX = 0; // (no outbreak to point the way to)
+        tool = "look";
+    }
+
+    /** Ends the tour's game: its world closed, back to the menu, nothing of it kept. */
+    void closeTutorialWorld() {
+        closeWorld();
+        screen = S_MENU;
+        paused = false;
+        skipping = false;
+        hideUi = false;
+        ended = false;
+        cam.follow = -1;
+        cam.followVehicle = -1;
+        closeInspector();
+        inspSquad = null;
+        inspFormation = null;
+        msgT = 0;
+        scroll = 0;
+    }
+
+    /** Is a strike being aimed (its Fire and Cancel showing)? */
+    boolean aimShown() {
+        return view != null && view.aimX >= 0;
+    }
+
+    /** The player's choices the tour may change, to put back when it ends. */
+    Object[] tutorialKeep() {
+        return new Object[]{tool, brush, zType, placeUnit, placeVehicle, placeTemplate, buildItem, eraseMode, orderMode, fpMode, vehMode,
+                townMode, strikeMode, sendTemplate, statsOpen, legendOpen, speedIdx, new java.util.HashMap<String, String>(palCat), pathOn};
+    }
+
+    @SuppressWarnings("unchecked")
+    void tutorialRestore(Object[] k) {
+        int i = 0;
+        tool = (String) k[i++];
+        brush = (Integer) k[i++];
+        zType = (Integer) k[i++];
+        placeUnit = (String) k[i++];
+        placeVehicle = (String) k[i++];
+        placeTemplate = (String) k[i++];
+        buildItem = (String) k[i++];
+        eraseMode = (String) k[i++];
+        orderMode = (String) k[i++];
+        fpMode = (Integer) k[i++];
+        vehMode = (Integer) k[i++];
+        townMode = (String) k[i++];
+        strikeMode = (String) k[i++];
+        sendTemplate = (String) k[i++];
+        boolean so = (Boolean) k[i++];
+        if (so != statsOpen) {
+            statsOpen = so;
+            pf.setPref("statsOpen", "" + so);
+        }
+        legendOpen = (Boolean) k[i++];
+        speedIdx = (Integer) k[i++];
+        palCat.clear();
+        palCat.putAll((java.util.Map<String, String>) k[i++]);
+        pathOn = (Boolean) k[i];
+    }
+
+    /** The choices above as one line (for the tests: the tour leaves them as it found them). */
+    String tutorialFingerprint() {
+        return java.util.Arrays.deepToString(tutorialKeep()) + " " + screen + " " + (w == null) + " " + paused + " " + hideUi;
+    }
+
 
     /** Pausing the app (phone call, home button): stop and keep a save, finished before returning (the app may be stopped next). */
     public void onPause() {
