@@ -199,6 +199,9 @@ public final class Nation {
         return t;
     }
 
+    /** Each national building's door tile (y * size + x), worked out by NationGen; -1 where only the chunk knows. */
+    public int[] bdoor;
+
     int addBuilding(int x, int y, int w, int h, int kind, int floors, int settlement, int res, int roof) {
         if (bCount == bx.length) {
             int n = bx.length * 2;

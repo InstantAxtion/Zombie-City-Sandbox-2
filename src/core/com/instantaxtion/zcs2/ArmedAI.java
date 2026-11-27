@@ -715,7 +715,7 @@ final class ArmedAI {
         float dx = bx - ax, dy = by - ay;
         int n = (int) (Math.sqrt(dx * dx + dy * dy) / 10) + 1;
         if (n > 60) return false;
-        for (int k = 1; k <= n; k++) if (!w.r.walkablePx(ax + dx * k / n, ay + dy * k / n)) return false;
+        for (int k = 1; k <= n; k++) if (!w.r.walkableResidentPx(ax + dx * k / n, ay + dy * k / n)) return false;
         return true;
     }
 

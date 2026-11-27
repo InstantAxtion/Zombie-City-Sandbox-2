@@ -212,7 +212,15 @@ public final class World {
         r.setDoors(doorX, doorY);
         int ns = r.secW * r.secH;
         int[] cnt = new int[ns];
+        int[] known = r.nation != null ? r.nation.bdoor : null;
         for (int b = 0; b < r.bCount; b++) {
+            if (known != null && b < known.length && known[b] >= 0) {
+                // a national building: NationGen worked its door out (no chunk made for it)
+                doorX[b] = (known[b] % r.W) * Tile.SIZE + 8;
+                doorY[b] = (known[b] / r.W) * Tile.SIZE + 8;
+                cnt[r.sectorOfPx(doorX[b], doorY[b])]++;
+                continue;
+            }
             int x0 = r.bx(b), y0 = r.by(b), x1 = x0 + r.bw(b) - 1, y1 = y0 + r.bh(b) - 1;
             float best = -1;
             int mx = (x0 + x1) / 2, my = (y0 + y1) / 2;

@@ -167,6 +167,8 @@ public final class Navy extends Module {
             for (int a = 0; a < 24; a++) {
                 double ang = a * Math.PI / 12;
                 float px = x + (float) Math.cos(ang) * rad, py = y + (float) Math.sin(ang) * rad;
+                // (national: only where the coarse layer has sea, so the search makes no chunks on land)
+                if (r.nation != null && (px < 0 || py < 0 || r.nation.coverAt((int) (px / 16), (int) (py / 16)) != Nation.C_DEEP)) continue;
                 if (r.tileAtPx(px, py) == Tile.DEEP) return new float[]{px, py};
             }
         return null;

@@ -313,6 +313,7 @@ public final class SaveIO {
         }
         boolean[] alive = readBools(in);
         System.arraycopy(alive, 0, r.roads.ealive, 0, Math.min(alive.length, r.roads.edgeCount));
+        r.roads.changed();
         readFacilities(in, w, map);
         if (r.nation == null) r.rebuildNav(0, 0, r.W - 1, r.H - 1); // (a chunk's cells come with it, edits applied)
         w.sec.connectivity();

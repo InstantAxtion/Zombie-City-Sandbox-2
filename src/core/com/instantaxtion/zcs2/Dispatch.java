@@ -321,8 +321,37 @@ public final class Dispatch {
         return s;
     }
 
+    /**
+     * National maps: a city has dozens of stations, and the nearest one alone would empty itself into a cluster of
+     * calls while the next streets' stations sat idle. A station looks further away the more of its officers are
+     * already out: with half of them out it counts as twice as far, with all but a few out four times, so the calls
+     * of a district are shared among the few stations nearest it, by load. Today's maps (a few stations a town) send
+     * the nearest, as before.
+     */
+    private boolean balance;
+    private int[] outN;
+    private long outTick = -1;
+
+    private float loadFactor(Region.Facility f) {
+        if (outTick != w.tick) {
+            outTick = w.tick;
+            int nf = w.r.facilities.size();
+            if (outN == null || outN.length < nf) outN = new int[nf];
+            java.util.Arrays.fill(outN, 0);
+            for (Squads.Squad s : w.sq.list) if (s.alive && s.faction == Ents.COP && s.home >= 0 && s.home < nf) outN[s.home] += s.n;
+        }
+        int out = outN[f.id], left = w.forces.armedAt(f, Ents.COP);
+        float share = out + left <= 0 ? 1 : out / (float) (out + left);
+        float k = 1 + LOAD * share;
+        return k * k;
+    }
+
+    /** How much further a station looks with all its officers out (in distance, not squared). */
+    private static final float LOAD = 3f;
+
     private Squads.Squad findFree(Incident in, int faction, float maxDist) {
         if (sendBudget <= 0) return null;
+        balance = w.national && faction == Ents.COP;
         // calls in the player's own precinct are the player's to answer (the army still comes to a perimeter)
         if (faction == Ents.COP && w.roles.playerDistrict(in.x, in.y)) return null;
         Squads.Squad best = null;
@@ -354,6 +383,7 @@ public final class Dispatch {
             }
             float dx = f.x - in.x, dy = f.y - in.y, d = dx * dx + dy * dy;
             if (faction == Ents.COP && in.settlement >= 0 && f.settlement != in.settlement && f.kind != Region.F_HQ) d *= 4;
+            if (balance && f.kind == Region.F_POLICE) d *= loadFactor(f);
             if (d >= bd) continue;
             Content.SquadT t = w.forces.templateFor(f, faction, in.zombies);
             if (t == null) continue;
@@ -363,7 +393,10 @@ public final class Dispatch {
         }
         if (from != null) {
             Squads.Squad s = w.forces.deploy(from, tmpl);
-            if (s != null) return s;
+            if (s != null) {
+                if (balance && outN != null && outTick == w.tick && from.id < outN.length) outN[from.id] += s.n;
+                return s;
+            }
         }
         return best;
     }

@@ -1838,6 +1838,18 @@ public final class WorldView {
         return clamp01((z / NationPainter.Z_STREET - 1) / 0.25f);
     }
 
+    /** Whether every street picture of a fine square is painted (at any level). */
+    private boolean streetsAt(int fx, int fy) {
+        int per = NationPainter.FINE / MapPainter.CHUNK;
+        for (int cy = fy * per; cy < (fy + 1) * per; cy++)
+            for (int cx = fx * per; cx < (fx + 1) * per; cx++) {
+                boolean any = false;
+                for (int l = 0; l < MapPainter.PPT.length && !any; l++) any = map.has(cx, cy, l);
+                if (!any) return false;
+            }
+        return true;
+    }
+
     /** A real-scale map with no world on it: the ground, the lines, the buildings and the names. */
     private void drawNation(Gfx g, Camera cam, float dt) {
         time += dt;
@@ -1924,8 +1936,31 @@ public final class WorldView {
                         else g.image(img, sx, sy, side, side, da);
                     }
         }
+        // town zoom: a tile a pixel over the district pictures, nearest the middle first, till the streets cover
+        float fa = clamp01((z / NationPainter.FINE_FROM - 1) / 0.25f);
+        if (fa > 0 && !streetsCover) {
+            float fpx = NationPainter.FINE * Tile.SIZE;
+            int fn = nat.size / NationPainter.FINE;
+            int fx0 = Math.max(0, (int) (cam.x0() / fpx)), fy0 = Math.max(0, (int) (cam.y0() / fpx));
+            int fx1 = Math.min(fn - 1, (int) (cam.x1() / fpx)), fy1 = Math.min(fn - 1, (int) (cam.y1() / fpx));
+            float mx = (fx0 + fx1) / 2f, my = (fy0 + fy1) / 2f;
+            int rings = Math.max(fx1 - fx0, fy1 - fy0);
+            for (int ring = 0; ring <= rings; ring++)
+                for (int fy = fy0; fy <= fy1; fy++)
+                    for (int fx = fx0; fx <= fx1; fx++) {
+                        if ((int) Math.max(Math.abs(fx - mx), Math.abs(fy - my)) != ring) continue;
+                        // under the streets that are already in, nothing to paint
+                        if (sa >= 1 && streetsAt(fx, fy)) continue;
+                        boolean may = (np.paintNs + map.paintNs - p0) < budget;
+                        GImage img = np.fine(fx, fy, may);
+                        if (img == null) continue;
+                        float sx = cam.toScreenX(fx * fpx), sy = cam.toScreenY(fy * fpx), side = fpx * z;
+                        if (fa >= 1) g.image(img, sx, sy, side + 0.75f, side + 0.75f);
+                        else g.image(img, sx, sy, side, side, fa);
+                    }
+        }
         float chunkPx = Chunk.SIZE * Tile.SIZE;
-        if (z >= NationPainter.Z_STREET * 0.6f) {
+        if (z >= NationPainter.Z_STREET * 0.8f) {
             // close to the streets: the chunks in view are made in the background, the nearest first
             int cx0 = Math.max(0, (int) (cam.x0() / chunkPx)), cy0 = Math.max(0, (int) (cam.y0() / chunkPx));
             int cx1 = Math.min(nat.sw - 1, (int) (cam.x1() / chunkPx)), cy1 = Math.min(nat.sw - 1, (int) (cam.y1() / chunkPx));
@@ -2008,6 +2043,7 @@ public final class WorldView {
             }
         }
         RoadGraph rg = nat.roads;
+        interchanges(g, cam, x0, y0, x1, y1);
         for (int pass = 0; pass < 2; pass++) {
             g.color(pass == 0 ? 0xFF2A2C30 : MapPainter.GROUND[Tile.HIGHWAY]);
             for (int e : np.highways) {
@@ -2022,6 +2058,72 @@ public final class WorldView {
 
     private int[] natStamp;
     private int natStampN;
+    /** Interchanges: {x, y, highway dir x, dir y} where a highway meets a city street (national maps), worked out once. */
+    private float[][] ichg;
+
+    /**
+     * Where a highway meets the streets of a city it passes over them: a cloverleaf of ramps in the four corners
+     * and the carriageway's shadow on the road below, drawn with the highways (vectors, below street zoom).
+     */
+    private void interchanges(Gfx g, Camera cam, float x0, float y0, float x1, float y1) {
+        RoadGraph rg = nat.roads;
+        if (ichg == null) {
+            java.util.List<float[]> l = new java.util.ArrayList<float[]>();
+            java.util.HashSet<Integer> seen = new java.util.HashSet<Integer>();
+            for (int e : np.highways)
+                for (int end = 0; end < 2; end++) {
+                    int n = end == 0 ? rg.ea[e] : rg.eb[e];
+                    if (!seen.add(n)) continue;
+                    int st = nat.secSettlement[nat.sector((int) (rg.nx[n] / 16), (int) (rg.ny[n] / 16))];
+                    if (st < 0 || nat.settlements.get(st).kind != Region.S_CITY) continue;
+                    boolean street = false;
+                    for (int k = rg.adjStart[n]; k < rg.adjStart[n + 1]; k++) if (rg.ekind[rg.adjEdge[k]] != RoadGraph.HIGHWAY) street = true;
+                    if (!street) continue;
+                    // only where an avenue or arterial crosses (not every street the lattice runs up to it)
+                    boolean avenue = false;
+                    for (int k = rg.adjStart[n]; k < rg.adjStart[n + 1]; k++) if (rg.ekind[rg.adjEdge[k]] == RoadGraph.AVENUE) avenue = true;
+                    if (!avenue) continue;
+                    float dx = rg.nx[rg.eb[e]] - rg.nx[rg.ea[e]], dy = rg.ny[rg.eb[e]] - rg.ny[rg.ea[e]], d = (float) Math.sqrt(dx * dx + dy * dy) + 1e-3f;
+                    // not two within a kilometre: one interchange each
+                    boolean near = false;
+                    for (float[] q : l) if (Math.abs(q[0] - rg.nx[n]) + Math.abs(q[1] - rg.ny[n]) < 4000) near = true;
+                    if (!near) l.add(new float[]{rg.nx[n], rg.ny[n], dx / d, dy / d});
+                }
+            ichg = l.toArray(new float[0][]);
+        }
+        float z = cam.zoom;
+        if (z < 0.004f) return;
+        float r = 220; // a ramp's radius, px (75 m)
+        float lw = Math.max(1.1f * dp, 22 * z);
+        for (int pass = 0; pass < 2; pass++) {
+            g.color(pass == 0 ? 0xFF2A2C30 : MapPainter.GROUND[Tile.HIGHWAY]);
+            for (float[] q : ichg) {
+                if (q[0] + 3 * r < x0 || q[0] - 3 * r > x1 || q[1] + 3 * r < y0 || q[1] - 3 * r > y1) continue;
+                float hx = q[2], hy = q[3], px = -hy, py = hx;
+                // a diamond: on each side a slip road leaves the carriageway, meets the street below, and rejoins
+                for (int side = -1; side <= 1; side += 2) {
+                    float off = 60 * side, wx = q[0] + px * r * side, wy = q[1] + py * r * side;
+                    float ax = q[0] - hx * r * 2.6f + px * off, ay = q[1] - hy * r * 2.6f + py * off;
+                    float bx = q[0] + hx * r * 2.6f + px * off, by = q[1] + hy * r * 2.6f + py * off;
+                    float mx0 = q[0] - hx * r * 0.9f + px * r * 0.8f * side, my0 = q[1] - hy * r * 0.9f + py * r * 0.8f * side;
+                    float mx1 = q[0] + hx * r * 0.9f + px * r * 0.8f * side, my1 = q[1] + hy * r * 0.9f + py * r * 0.8f * side;
+                    float lww = pass == 0 ? lw + 1.2f * dp : lw;
+                    g.line(cam.toScreenX(ax), cam.toScreenY(ay), cam.toScreenX(mx0), cam.toScreenY(my0), lww);
+                    g.line(cam.toScreenX(mx0), cam.toScreenY(my0), cam.toScreenX(wx), cam.toScreenY(wy), lww);
+                    g.line(cam.toScreenX(wx), cam.toScreenY(wy), cam.toScreenX(mx1), cam.toScreenY(my1), lww);
+                    g.line(cam.toScreenX(mx1), cam.toScreenY(my1), cam.toScreenX(bx), cam.toScreenY(by), lww);
+                }
+                if (pass == 0) {
+                    // the carriageway's shadow where it passes over the street
+                    g.color(0x50000000);
+                    float sx = cam.toScreenX(q[0] - hx * r * 1.6f) + 3 * dp, sy = cam.toScreenY(q[1] - hy * r * 1.6f) + 4 * dp;
+                    float ex = cam.toScreenX(q[0] + hx * r * 1.6f) + 3 * dp, ey = cam.toScreenY(q[1] + hy * r * 1.6f) + 4 * dp;
+                    g.line(sx, sy, ex, ey, Math.max(2 * dp, 90 * z));
+                    g.color(0xFF2A2C30);
+                }
+            }
+        }
+    }
 
     /** The buildings of the cached chunks near the view (and the national buildings in them) into the drawn arrays. */
     private int nationBuildings(float x0, float y0, float x1, float y1) {
@@ -2165,7 +2267,20 @@ public final class WorldView {
             heat.draw(g, cam, 1);
         }
         // state borders from far out (their names come last, where there's room)
-        if (z < 0.2f && w.r.states.size() > 1) {
+        if (z < 0.2f && w.r.states.size() > 1 && w.national) {
+            float lw = 1.4f * dp;
+            float[] seg = stateBorders();
+            float bx0 = cam.x0(), by0 = cam.y0(), bx1 = cam.x1(), by1 = cam.y1();
+            for (int pass = 0; pass < 2; pass++) {
+                g.color(pass == 0 ? 0x80000000 : 0xB0F0E8D8);
+                float o = pass == 0 ? dp * 0.8f : 0;
+                for (int i = 0; i + 3 < seg.length; i += 4) {
+                    if (Math.max(seg[i], seg[i + 2]) < bx0 || Math.min(seg[i], seg[i + 2]) > bx1 || Math.max(seg[i + 1], seg[i + 3]) < by0 || Math.min(seg[i + 1], seg[i + 3]) > by1) continue;
+                    g.line(cam.toScreenX(seg[i]) + o, cam.toScreenY(seg[i + 1]) + o, cam.toScreenX(seg[i + 2]) + o, cam.toScreenY(seg[i + 3]) + o, pass == 0 ? lw * 1.8f : lw);
+                }
+            }
+            if (z < 0.08f) stateCentres();
+        } else if (z < 0.2f && w.r.states.size() > 1) {
             float lw = 1.4f * dp;
             for (int pass = 0; pass < 2; pass++) {
                 g.color(pass == 0 ? 0x80000000 : 0xB0F0E8D8);
@@ -2179,26 +2294,83 @@ public final class WorldView {
                         if (sy + 1 < sec.sh && w.roles.stateOfSector(s + sec.sw) != st) dashedLine(g, x + o, y + len + o, x + len + o, y + len + o, pass == 0 ? lw * 1.8f : lw, 5 * dp);
                     }
             }
-            if (z < 0.08f) {
-                if (stateX == null) {
-                    int ns = w.r.states.size();
-                    stateX = new float[ns];
-                    stateY = new float[ns];
-                    int[] cnt = new int[ns];
-                    for (int s = 0; s < sec.n; s++) {
-                        int st = w.roles.stateOfSector(s);
-                        if (st < 0 || !dryAt(sec.cx(s), sec.cy(s))) continue;
-                        stateX[st] += sec.cx(s);
-                        stateY[st] += sec.cy(s);
-                        cnt[st]++;
-                    }
-                    for (int k = 0; k < ns; k++) if (cnt[k] > 0) {
-                        stateX[k] /= cnt[k];
-                        stateY[k] /= cnt[k];
-                    }
-                }
-            }
+            if (z < 0.08f) stateCentres();
         }
+    }
+
+    private void stateCentres() {
+        if (stateX != null) return;
+        Sectors sec = w.sec;
+        int ns = w.r.states.size();
+        stateX = new float[ns];
+        stateY = new float[ns];
+        int[] cnt = new int[ns];
+        for (int s = 0; s < sec.n; s++) {
+            int st = w.roles.stateOfSector(s);
+            if (st < 0 || !dryAt(sec.cx(s), sec.cy(s))) continue;
+            stateX[st] += sec.cx(s);
+            stateY[st] += sec.cy(s);
+            cnt[st]++;
+        }
+        for (int k = 0; k < ns; k++) if (cnt[k] > 0) {
+            stateX[k] /= cnt[k];
+            stateY[k] /= cnt[k];
+        }
+    }
+
+    private float[] borderSeg;
+
+    /**
+     * National maps: the states' borders as lines, worked out once by marching squares over 1 km cells (each the
+     * state most of its 4x4 sectors belong to), so they run at angles instead of in 256 m steps, and a frame draws a
+     * few thousand segments instead of looking at every sector.
+     */
+    private float[] stateBorders() {
+        if (borderSeg != null) return borderSeg;
+        Sectors sec = w.sec;
+        int K = 4, cw = (sec.sw + K - 1) / K, ch = (sec.sh + K - 1) / K;
+        int[] cell = new int[cw * ch];
+        int ns = w.r.states.size();
+        int[] votes = new int[ns + 1];
+        for (int cy = 0; cy < ch; cy++)
+            for (int cx = 0; cx < cw; cx++) {
+                java.util.Arrays.fill(votes, 0);
+                for (int dy = 0; dy < K; dy++)
+                    for (int dx = 0; dx < K; dx++) {
+                        int sx = cx * K + dx, sy = cy * K + dy;
+                        if (sx >= sec.sw || sy >= sec.sh) continue;
+                        int st = w.roles.stateOfSector(sy * sec.sw + sx);
+                        votes[st < 0 || st >= ns ? ns : st]++;
+                    }
+                int best = ns;
+                for (int k = 0; k <= ns; k++) if (votes[k] > votes[best]) best = k;
+                cell[cy * cw + cx] = best;
+            }
+        float cpx = w.r.sect * Tile.SIZE * K;
+        float[] out = new float[1024];
+        int n = 0;
+        // marching squares over the cells' centres: midpoints of the sides whose ends differ, joined
+        for (int cy = 0; cy + 1 < ch; cy++)
+            for (int cx = 0; cx + 1 < cw; cx++) {
+                int a = cell[cy * cw + cx], b = cell[cy * cw + cx + 1], c = cell[(cy + 1) * cw + cx + 1], d = cell[(cy + 1) * cw + cx];
+                if (a == b && b == c && c == d) continue;
+                float x0 = (cx + 0.5f) * cpx, y0 = (cy + 0.5f) * cpx, h = cpx / 2;
+                float[] mx = new float[4], my = new float[4];
+                int m = 0;
+                if (a != b) { mx[m] = x0 + h; my[m++] = y0; }
+                if (b != c) { mx[m] = x0 + cpx; my[m++] = y0 + h; }
+                if (c != d) { mx[m] = x0 + h; my[m++] = y0 + cpx; }
+                if (d != a) { mx[m] = x0; my[m++] = y0 + h; }
+                if (n + 16 > out.length) out = java.util.Arrays.copyOf(out, out.length * 2);
+                if (m == 2) {
+                    out[n++] = mx[0]; out[n++] = my[0]; out[n++] = mx[1]; out[n++] = my[1];
+                } else
+                    for (int k = 0; k < m; k++) {
+                        out[n++] = mx[k]; out[n++] = my[k]; out[n++] = x0 + h; out[n++] = y0 + h;
+                    }
+            }
+        borderSeg = java.util.Arrays.copyOf(out, n);
+        return borderSeg;
     }
 
     /** The states' names, spaced out, from far out: the least important label, only where there's room. */
@@ -2415,6 +2587,9 @@ public final class WorldView {
     /**
      * Something per sector as a small picture (two pixels a sector, blurred), scaled up over the map with smoothing:
      * the infection's bleed, the dark of places without power, heatmaps. Rebuilt twice a second.
+     * On a national map (200,000 sectors) the whole map at two pixels a sector would be 3 MB a picture plus its
+     * working arrays; instead it is a window of WIN x WIN sectors round the camera at two pixels a sector while the
+     * view is that close, and the whole map at a pixel per 4x4 sectors (the strongest of them) from further out.
      */
     private final class SecMap {
         int kind; // 0 infection, 1 unlit, 2+ heatmap of an overlay
@@ -2425,6 +2600,10 @@ public final class WorldView {
         int iw, ih;
         float builtAt = -100;
         float max;
+        /** National: the picture's first sector, and sectors a pixel (0.5 = two pixels a sector). */
+        int sx0, sy0;
+        float spp = 0.5f;
+        static final int WIN = 160, COARSE = 4;
 
         SecMap(int kind) {
             this.kind = kind;
@@ -2437,18 +2616,77 @@ public final class WorldView {
             }
         }
 
-        void build() {
+        /** The picture's layout for the camera: whole map (today's maps), or a window or the coarse map (national). */
+        private void layoutFor(Camera cam) {
             Sectors sec = w.sec;
-            if (img == null) {
-                iw = sec.sw * 2;
-                ih = sec.sh * 2;
+            int niw, nih;
+            if (!w.national) {
+                sx0 = sy0 = 0;
+                spp = 0.5f;
+                niw = sec.sw * 2;
+                nih = sec.sh * 2;
+            } else {
+                float secPx = w.r.sect * Tile.SIZE;
+                float span = Math.max(cam.sw, cam.sh) / cam.zoom / secPx;
+                if (span <= WIN * 0.7f) {
+                    spp = 0.5f;
+                    sx0 = Math.max(0, Math.min(sec.sw - WIN, (int) (cam.cx / secPx) - WIN / 2));
+                    sy0 = Math.max(0, Math.min(sec.sh - WIN, (int) (cam.cy / secPx) - WIN / 2));
+                    niw = nih = WIN * 2;
+                } else {
+                    spp = COARSE;
+                    sx0 = sy0 = 0;
+                    niw = (sec.sw + COARSE - 1) / COARSE;
+                    nih = (sec.sh + COARSE - 1) / COARSE;
+                }
+            }
+            if (img == null || niw != iw || nih != ih) {
+                if (img != null) img.recycle();
+                iw = niw;
+                ih = nih;
                 px = new int[iw * ih];
                 v = new float[iw * ih];
                 tmp = new float[iw * ih];
                 img = pf.newImage(iw, ih);
             }
+        }
+
+        /** Whether the camera has left the window the picture was built for. */
+        private boolean stale(Camera cam) {
+            if (!w.national) return false;
+            float secPx = w.r.sect * Tile.SIZE;
+            float span = Math.max(cam.sw, cam.sh) / cam.zoom / secPx;
+            boolean wantWin = span <= WIN * 0.7f;
+            if (wantWin != (spp < 1)) return true;
+            if (!wantWin) return false;
+            float cx = cam.cx / secPx - sx0, cy = cam.cy / secPx - sy0, half = span / 2;
+            return cx - half < 0 && sx0 > 0 || cy - half < 0 && sy0 > 0 || cx + half > WIN && sx0 + WIN < w.sec.sw || cy + half > WIN && sy0 + WIN < w.sec.sh;
+        }
+
+        void build(Camera cam) {
+            Sectors sec = w.sec;
+            layoutFor(cam);
             max = 0;
-            for (int s = 0; s < sec.n; s++) {
+            if (spp >= 1) java.util.Arrays.fill(v, 0);
+            int s0 = 0, s1 = sec.n;
+            for (int s = s0; s < s1; s++) {
+                int ssx = s % sec.sw, ssy = s / sec.sw;
+                if (spp < 1) {
+                    // a window: only its sectors
+                    if (ssy < sy0) {
+                        s = sy0 * sec.sw + sx0 - 1;
+                        continue;
+                    }
+                    if (ssy >= sy0 + iw / 2) break;
+                    if (ssx < sx0) {
+                        s = ssy * sec.sw + sx0 - 1;
+                        continue;
+                    }
+                    if (ssx >= sx0 + iw / 2) {
+                        s = (ssy + 1) * sec.sw + sx0 - 1;
+                        continue;
+                    }
+                } else if (sec.home[s] <= 0 && sec.zIn[s] <= 0 && w.sp.secZ[s] <= 0 && kind < 2) continue;
                 float val = 0;
                 switch (kind) {
                     case 0: {
@@ -2471,7 +2709,13 @@ public final class WorldView {
                             val = p <= 0 ? 0 : Math.min(1, 0.15f + (float) Math.log10(1 + p) * 0.2f);
                         } else if (heatOf == OV_UTIL) val = sec.home[s] > 0 && !w.strat.lit(s) ? 0.8f : 0;
                 }
-                int x = (s % sec.sw) * 2, y = (s / sec.sw) * 2;
+                if (spp >= 1) {
+                    // the coarse map: the strongest of each 4x4 sectors
+                    int q = (ssy / COARSE) * iw + ssx / COARSE;
+                    if (val > v[q]) v[q] = val;
+                    continue;
+                }
+                int x = (ssx - sx0) * 2, y = (ssy - sy0) * 2;
                 v[y * iw + x] = v[y * iw + x + 1] = v[(y + 1) * iw + x] = v[(y + 1) * iw + x + 1] = val;
             }
             blur();
@@ -2523,9 +2767,9 @@ public final class WorldView {
         }
 
         void draw(Gfx g, Camera cam, float alpha) {
-            if (time - builtAt > 0.5f || time < builtAt) build();
-            float cs = w.r.sect * Tile.SIZE;
-            g.image(img, cam.toScreenX(0), cam.toScreenY(0), w.sec.sw * cs * cam.zoom, w.sec.sh * cs * cam.zoom, alpha);
+            if (time - builtAt > 0.5f || time < builtAt || stale(cam)) build(cam);
+            float cs = w.r.sect * Tile.SIZE, pxW = cs * spp;
+            g.image(img, cam.toScreenX(sx0 * cs), cam.toScreenY(sy0 * cs), iw * pxW * cam.zoom, ih * pxW * cam.zoom, alpha);
         }
     }
 

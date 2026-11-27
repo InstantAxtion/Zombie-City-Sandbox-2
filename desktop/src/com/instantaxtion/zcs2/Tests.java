@@ -169,16 +169,13 @@ public final class Tests {
                     899034403475077398L, -8743856849602321660L, 6454688224853898311L},
     };
     static final long[][] GOLDEN = {
-            {-6811953568210793475L, 5778103874850558222L, 8857716788076918771L, 4792106920122058147L, -6794509540347192303L, -6937393560661736764L,
-                    -7406887491022942024L},
-            {7984511155703235057L, 879720782069893769L, -8620997396822493285L, 3319256820798909750L, -1237692696540054400L, 1853187084082603076L,
-                    -7515433378579047161L, -120988191449871815L, 4461661099741383525L},
-            {-638193659069855935L, 8930533000221328182L, 7391438071380233447L, 332113706447388665L, 4910068912088271442L, -3299898539835271192L,
-                    4668268736763652483L, 6358305260879915396L, 6090241627913169578L, 6465983066126028591L, -8002442164956145104L},
-            {7214266689277810170L, -8393298301559258583L, -6720245459225634995L, 1943288891196722462L, 5241274053830060556L, 3177127850120341122L,
-                    5726069834268710069L, 7752233287527836680L, -5918576957556873540L, -5918576957556873540L, -5918576957556873540L},
-            {-9003409391803947466L, -7116851187033799194L, 6818727136088331011L, -6865888280722732986L, -2422517742381733562L, 1861993002934273086L,
-                    -557322079808958602L, -3004903586131504859L, 8840876899959044383L},
+            // re-recorded after merging the services and P10 (both changed content.ini, whose fingerprint is in the save;
+            // GOLDEN_STATE, the outcomes, unchanged)
+            {6321605977047614845L, -3585666594986744702L, -5034795766247785292L, -5033579522939165632L, 8520564196823574834L, -5189146889135483621L, -457092416514069893L},
+            {6680270120071766882L, 4880025088386080850L, -4150588208372790117L, 8628858051382416530L, 6183394014508668474L, -2968772945063925250L, -6926382134095086365L, -6723926197837126641L, 345848058283360847L},
+            {-51543427587088830L, 3192191111496452100L, 486255105232599247L, 8945784998771070108L, -5878599796302764217L, 4171938674376576445L, 5964017869009167534L, 7433114051167446215L, 3756196204639329246L, 930288049359187905L, -7127025631751022867L},
+            {-8611618207782144362L, -1163324467305780365L, -8966232795561131805L, 1265057490490471310L, -7025020336372094173L, 1045314786893970109L, -8961789294075932426L, 2744751961315515566L, 6508094877210881019L, 6508094877210881019L, 6508094877210881019L},
+            {-6311550867654072089L, -2251136310042658163L, 4352631182690880836L, 6942745661903398385L, -2784575146428704048L, -3092233343405757123L, -7547967512484493826L, 2778861027623825238L, 1203550349802417488L},
     };
 
     /**
@@ -810,7 +807,8 @@ public final class Tests {
     static final long[] OLD_REGION = {7541346224121036853L, 5717814252102046637L, 1073831598034722776L, -5103872686852295160L,
             350794609727050026L, -194660480813946018L, -6916372190236208595L, 8371790037975010950L};
     static final int[] OLD_REGION_NAMES = {-432190659, -1698590290, 987147127, -170146497, 1805316018, -2130176824, -2143075508, -1708706981};
-    static final long[] OLD_NATION = {-2588273170170537126L, 8295708271490474933L, 3116740770274513315L, 4709034136227997975L};
+    // (re-recorded in P10: downtown blocks of one, two and four lattice cells, towers round plazas)
+    static final long[] OLD_NATION = {5042255307011530386L, 8267388383151469706L, 6652278332439866455L, 5162018547629075945L};
     static final int OLD_NAMES = 1579710398;
 
     static void dataMoved() throws Exception {
@@ -1227,11 +1225,32 @@ public final class Tests {
                 failed++;
                 System.out.printf("FAIL  %-34s %s%n", n, t);
                 StackTraceElement[] st = t.getStackTrace();
-                for (int k = 0; k < Math.min(6, st.length); k++) System.out.println("        at " + st[k]);
+                for (int k = 0; k < Math.min(Integer.getInteger("trace", 6), st.length); k++) System.out.println("        at " + st[k]);
             }
         }
         System.out.println(passed + " passed, " + failed + " failed");
         System.exit(failed > 0 ? 1 : 0);
+    }
+
+    /** Rail, states, bases and every kind of facility, and at least this many people. */
+    static void checkCountry(Region r, long minPeople) {
+        long people = 0;
+        int bases = 0;
+        for (Region.Settlement st : r.settlements) {
+            people += st.residents;
+            if (st.kind == Region.S_BASE) bases++;
+        }
+        check(people > minPeople, "only " + people + " people");
+        check(bases >= 2, "army bases " + bases);
+        check(r.states.size() >= 3, "states " + r.states.size());
+        check(r.rails.nodeCount > 50, "rail junctions " + r.rails.nodeCount);
+        int stations = 0;
+        for (Region.Facility f : r.facilities) if (f.kind == Region.F_STATION && f.railNode >= 0) stations++;
+        check(stations >= 3, "stations on the railway " + stations);
+        boolean[] kinds = new boolean[Region.FKINDS];
+        for (Region.Facility f : r.facilities) kinds[f.kind] = true;
+        for (int k : new int[]{Region.F_WATER, Region.F_PHONE, Region.F_FOODW, Region.F_FIRE, Region.F_HALL, Region.F_GOV, Region.F_AIRBASE})
+            check(kinds[k], "no " + Region.FNAMES[k]);
     }
 
     private static void define() {
@@ -1608,29 +1627,64 @@ public final class Tests {
                 w.shutdown();
             }
         });
-        test("country: a capital of a million, cities, rail, states", new T() {
+        test("country: a capital of a million, cities, rail, states (the Country map, 28,672)", new T() {
+            public void run() {
+                Region r = Setup.region(28672, RegionGen.COAST, 9, 2);
+                check(r.nation != null, "not a national map");
+                check(r.city().capital && r.city().residents >= 1000000 && r.city().residents <= 1400000, "the capital has " + r.city().residents);
+                int big = 0, police = 0;
+                for (Region.Settlement st : r.settlements) if (st.kind == Region.S_CITY && !st.capital && st.residents >= 150000 && st.residents <= 450000) big++;
+                for (Region.Facility f : r.facilities) if (f.kind == Region.F_POLICE) police++;
+                check(big >= 3, "cities of 150-450k: " + big);
+                check(police >= 60, "police stations " + police);
+                checkCountry(r, 3000000);
+            }
+        });
+        test("country: today's map: a capital of a million, cities, rail, states (2304, regression)", new T() {
             public void run() {
                 Region r = RegionGen.generate(2304, RegionGen.COAST, 9);
-                long people = 0;
-                int cities = 0, bases = 0;
-                for (Region.Settlement s : r.settlements) {
-                    people += s.residents;
-                    if (s.kind == Region.S_CITY) cities++;
-                    if (s.kind == Region.S_BASE) bases++;
-                }
-                check(people > 1500000, "only " + people + " people");
                 check(r.city().capital && r.city().residents > 700000, "the capital has " + r.city().residents);
+                int cities = 0;
+                for (Region.Settlement st : r.settlements) if (st.kind == Region.S_CITY) cities++;
                 check(cities >= 3, "cities " + cities);
-                check(bases >= 2, "army bases " + bases);
-                check(r.states.size() >= 3, "states " + r.states.size());
-                check(r.rails.nodeCount > 50, "rail junctions " + r.rails.nodeCount);
-                int stations = 0;
-                for (Region.Facility f : r.facilities) if (f.kind == Region.F_STATION && f.railNode >= 0) stations++;
-                check(stations >= 3, "stations on the railway " + stations);
-                boolean[] kinds = new boolean[Region.FKINDS];
-                for (Region.Facility f : r.facilities) kinds[f.kind] = true;
-                for (int k : new int[]{Region.F_WATER, Region.F_PHONE, Region.F_FOODW, Region.F_FIRE, Region.F_HALL, Region.F_GOV, Region.F_AIRBASE})
-                    check(kinds[k], "no " + Region.FNAMES[k]);
+                checkCountry(r, 1500000);
+            }
+        });
+        test("balance: outbreak sizes play out in broad bands on a national map (State, 20,480)", new T() {
+            public void run() throws Exception {
+                int[] sizes = {3000, 50000, 200000};
+                java.util.List<Balance.Run> runs = Balance.batch(content, sizes, 2, 20480, 20, 2);
+                System.out.print(Balance.table(runs, sizes).replaceAll("(?m)^", "        "));
+                for (Balance.Run r : runs) {
+                    if (r.zombies == 3000)
+                        check(r.result == Balance.CONTAINED && r.days < 3, "a small outbreak should be put down within a few days: " + Balance.RESULTS[r.result] + " after " + r.days);
+                    if (r.zombies == 50000) {
+                        check(r.result != Balance.CONTAINED || r.days > 4, "a medium outbreak should be a fight of days, not over in " + r.days + " days");
+                        check(r.result != Balance.FALLEN && r.lostShare < 0.25f, "a medium outbreak should be won without losing a quarter of the country: lost " + r.lostShare);
+                    }
+                    if (r.zombies == 200000) {
+                        check(r.result != Balance.CONTAINED || r.days > 10, "a big outbreak should be a war, not over in " + r.days + " days");
+                        check(r.lostShare > 0.08f, "a big outbreak should cost a lot: lost " + r.lostShare);
+                    }
+                }
+                for (Balance.Run m : runs)
+                    for (Balance.Run b : runs)
+                        if (m.zombies == 50000 && b.zombies == 200000 && m.seed == b.seed) {
+                            check(b.lostShare > m.lostShare, "200,000 cost less than 50,000 (seed " + m.seed + "): " + b.lostShare + " vs " + m.lostShare);
+                            check(b.result != Balance.CONTAINED || m.result == Balance.CONTAINED && b.days > m.days, "200,000 was put down sooner than 50,000 (seed " + m.seed + ")");
+                        }
+            }
+        });
+        test("country: sectors belong to the town whose people live there (State, 20,480)", new T() {
+            public void run() {
+                World w = Setup.newGame(content, 20480, RegionGen.COAST, 5, content.scenario("sandbox"), 1);
+                w.stats.recount();
+                for (Region.Settlement st : w.r.settlements) {
+                    if (st.kind != Region.S_CITY && st.kind != Region.S_TOWN) continue;
+                    int pop = w.stats.popBySettlement[st.id];
+                    check(pop > st.residents * 0.85f && pop < st.residents * 1.15f, st.name + " counts " + pop + " of its " + st.residents + " people");
+                }
+                w.shutdown();
             }
         });
         test("forces: squads come out of the pools and go back in", new T() {
@@ -2259,7 +2313,7 @@ public final class Tests {
                 w.shutdown();
             }
         });
-        test("balance: outbreak sizes play out in broad bands (many seeds)", new T() {
+        test("balance: outbreak sizes play out in broad bands (1536, regression)", new T() {
             public void run() throws Exception {
                 int[] sizes = {3000, 60000, 250000};
                 java.util.List<Balance.Run> runs = Balance.batch(content, sizes, 2, 1536, 14, 2);
@@ -2318,6 +2372,39 @@ public final class Tests {
                 w.shutdown();
             }
         });
+        test("country: a small outbreak on a national map is put down and everything stands down again (State, 20,480)", new T() {
+            public void run() {
+                World w = Setup.newGame(content, 20480, RegionGen.COAST, 12, content.scenario("sandbox"), 2);
+                Region.Settlement cap = w.r.city();
+                Tools.paintZombies(w, cap.cx * 16f, cap.cy * 16f, 3000, 400, -1);
+                play(w, 60, true);
+                w.setStrategic(true);
+                int peakLevel = 0;
+                boolean curfewed = false, sheltered = false;
+                for (int k = 0; k < 6 * 144; k++) {
+                    w.step();
+                    peakLevel = Math.max(peakLevel, w.gov.level);
+                    curfewed |= w.gov.curfew;
+                    sheltered |= w.command.sheltering(cap.id);
+                }
+                check(peakLevel >= 2, "the alert never went up: " + peakLevel);
+                check(curfewed && sheltered, "no curfew or shelter order during the outbreak");
+                check(w.totalZombies() == 0, "not contained in six days: " + w.totalZombies());
+                check(w.gov.level <= 1, "the alert level never came down: " + Gov.LEVELS[w.gov.level]);
+                check(!w.gov.curfew, "the curfew was never lifted");
+                check(!w.command.sheltering(cap.id), "the shelter order was never lifted");
+                check(w.command.nationalReported() < 1, "the officials still believe in " + w.command.nationalReported() + " of the dead");
+                for (Region.Settlement s : w.r.settlements) check(!w.gov.evacuating(s.id), "still evacuating " + s.name);
+                int outside = 0;
+                for (Forces.Formation f : w.forces.formations) if (f.alive && f.outside) outside++;
+                check(outside == 0, outside + " outside formations never went home");
+                boolean over = false;
+                for (News.Item it : w.news.log) if (it.text.startsWith("The outbreak in " + cap.name + " is over")) over = true;
+                check(over, "nobody said it was over");
+                check(Audit.check(w).isEmpty(), Audit.check(w));
+                w.shutdown();
+            }
+        });
         test("country: the news says a thing once and adds up the rest", new T() {
             public void run() {
                 World w = Setup.newGame(content, 1024, RegionGen.COAST, 3, content.scenario("sandbox"), 1);
@@ -2331,7 +2418,7 @@ public final class Tests {
                 w.shutdown();
             }
         });
-        test("country: sectors belong to the town whose people live there", new T() {
+        test("country: sectors belong to the town whose people live there (1536, regression)", new T() {
             public void run() {
                 World w = Setup.newGame(content, 1536, RegionGen.COAST, 5, content.scenario("sandbox"), 1);
                 w.stats.recount();

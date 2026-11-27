@@ -33,21 +33,45 @@ public final class Game {
     String error;
 
     // new game choices
+    /** ngSize indexes Nation.SIZES (the menu: State, Country, Large country); the Country is the default. */
     int ngMode, ngScenario, ngPreset, ngSize = 1;
     /**
-     * A real-scale map size picked by a challenge code (a developer's way in until P10 puts them on the menu: e.g.
-     * ZC2-28672-0-7-lab_leak), or 0 for the menu's size.
+     * A map size the menu doesn't offer, picked by a challenge code: today's RegionGen maps (1,536-3,072 tiles, kept
+     * as quick test maps) or the small 8,192 test nation; 0 for the menu's size.
      */
     int ngNational;
 
+    /** The first of the labels that fits a button of width w (dp) at the smallest text size, whole. */
+    String firstFit(Gfx g, float w, float textDp, String... labels) {
+        for (String l : labels) if (g.textWidth(l, ui.dp(textDp), true) <= w - ui.dp(10)) return l;
+        return labels[labels.length - 1];
+    }
+
+    /** The heap the Large country needs (its sectors, chunk cache and pictures); below it the menu skips it. */
+    static final long LARGE_NEEDS = 400L << 20;
+
+    /** Whether the menu's size i can be played on this device. */
+    boolean sizeOffered(int i) {
+        return Nation.SIZES[i] != 36864 || pf.maxMemory() >= LARGE_NEEDS;
+    }
+
     /** The map side the New Game screen will build. */
     int ngMapSize() {
-        return ngNational > 0 ? ngNational : RegionGen.SIZES[ngSize];
+        return ngNational > 0 ? ngNational : Nation.SIZES[ngSize];
     }
 
     String ngSizeName() {
-        if (ngNational > 0) for (int i = 0; i < Nation.SIZES.length; i++) if (Nation.SIZES[i] == ngNational) return Nation.SIZE_NAMES[i];
-        return ngNational > 0 ? "Nation" : RegionGen.SIZE_NAMES[ngSize];
+        if (ngNational > 0) {
+            for (int i = 0; i < RegionGen.SIZES.length; i++) if (RegionGen.SIZES[i] == ngNational) return "Test map " + ngNational;
+            return "Test nation";
+        }
+        return Nation.SIZE_NAMES[ngSize];
+    }
+
+    /** The menu's size with its width, for the size button. */
+    String ngSizeLabel() {
+        if (ngNational > 0) return ngSizeName();
+        return Nation.SIZE_NAMES[ngSize] + " " + Math.round(Nation.SIZES[ngSize] / Nation.KM) + " km";
     }
     /** The role picked on the New Game screen (-1 = the scenario's own). */
     int ngRole = -1;
@@ -539,15 +563,16 @@ public final class Game {
             int size = Integer.parseInt(p[1]), preset = Integer.parseInt(p[2]);
             long seed = Long.parseLong(p[3]);
             int si = -1;
-            for (int i = 0; i < RegionGen.SIZES.length; i++) if (RegionGen.SIZES[i] == size) si = i;
-            // (a real-scale size isn't on the menu yet: a code is the hidden way to one)
-            boolean nat = national(size) || size == SMALL_NATIONAL;
-            if ((si < 0 && !nat) || preset < 0 || preset >= Data.presetCount()) return false;
+            for (int i = 0; i < Nation.SIZES.length; i++) if (Nation.SIZES[i] == size) si = i;
+            // today's maps and the small test nation aren't on the menu: a code is the way to them
+            boolean hidden = si < 0 && (size == SMALL_NATIONAL || isTestMap(size));
+            if ((si < 0 && !hidden) || preset < 0 || preset >= Data.presetCount()) return false;
             if (si >= 0) ngSize = si;
-            ngNational = nat ? size : 0;
+            ngNational = hidden ? size : 0;
+            codeNote = null;
+            if (si >= 0 && !sizeOffered(si)) codeNote = "This map needs more memory than the phone gives the game: it may not load";
             ngPreset = preset;
             ngSeed = seed;
-            codeNote = null;
             if (p.length > 4) {
                 boolean found = false;
                 for (int tab = 0; tab < TABS.length; tab++) {
@@ -669,7 +694,7 @@ public final class Game {
         // the map
         float bw = (rightW - ui.dp(16)) / 3;
         ui.button("preset", rightX, ry, bw, ui.dp(40), Data.presetName(ngPreset), false, 13);
-        ui.button("size", rightX + bw + ui.dp(8), ry, bw, ui.dp(40), ngSizeName(), false, 13);
+        ui.button("size", rightX + bw + ui.dp(8), ry, bw, ui.dp(40), firstFit(g, bw, 11, ngSizeLabel(), ngSizeName(), ngNational > 0 ? "Test" : ngSizeName()), false, 13);
         ui.button("seed", rightX + (bw + ui.dp(8)) * 2, ry, bw, ui.dp(40), "New map", false, 13);
         ry += ui.dp(46);
         // the start, and the challenge code tucked above it
@@ -678,7 +703,7 @@ public final class Game {
         float codeY = startY - ui.dp(42);
         float third = (rightW - ui.dp(16)) / 3;
         ui.button("code", rightX, codeY, third, ui.dp(34), "Enter a code", false, 12);
-        ui.button("editor", rightX + third + ui.dp(8), codeY, third, ui.dp(34), "Make your own", false, 12);
+        ui.button("editor", rightX + third + ui.dp(8), codeY, third, ui.dp(34), firstFit(g, third, 11, "Make your own", "Editor"), false, 12);
         ui.button("rules", rightX + (third + ui.dp(8)) * 2, codeY, third, ui.dp(34), ngRulesChanged() ? "Rules (changed)" : "Rules", ngRulesChanged(), 12);
         String best = bestText(challengeCode());
         g.color(best != null ? Ui.GOOD : 0xFF707A86);
@@ -824,7 +849,8 @@ public final class Game {
         float k = ps / (pr != null ? pr.W : pn.size);
         // the caption first: the names keep above it
         long people = 0;
-        for (Region.Settlement s : setts) people += s.residents;
+        if (pn != null && pr == null) people = pn.totalResidents(); // (the countryside too, as the game counts them)
+        else for (Region.Settlement s : setts) people += s.residents;
         // the country's name, and its people and states: on one line if it fits, else on two
         String cap = pname + ": " + WorldView.people(people) + " people, " + nstates + " states";
         String sub = WorldView.people(people) + " people, " + nstates + " states";
@@ -896,6 +922,11 @@ public final class Game {
 
     /** The small national map the tests use (8,192 tiles), also allowed in a code. */
     static final int SMALL_NATIONAL = 8192;
+
+    static boolean isTestMap(int size) {
+        for (int v : RegionGen.SIZES) if (v == size) return true;
+        return size == 768 || size == 1024;
+    }
 
     /** A real-scale map size (built by NationGen). */
     static boolean national(int size) {
@@ -1489,7 +1520,7 @@ public final class Game {
         boolean pal = palette() != null && !inspectorOpen();
         if (landscape) {
             railW = ui.dp(60);
-            paletteW = pal ? Math.min(ui.dp(210), W * 0.27f) : 0;
+            paletteW = pal ? sideFit(palette(), W, H) : 0;
             sheetW = inspectorOpen() ? Math.min(ui.dp(340), W * 0.42f) : 0;
             left = railW + paletteW;
             if (replayBarShown()) bottom = dir.replayBarH(true);
@@ -2501,7 +2532,47 @@ public final class Game {
         else ui.button(id, x, y, bw, h, label, paletteOn(id), 12.5f);
     }
 
-    /** The options as a panel beside the rail (landscape): two columns. */
+    /** The side palette's columns and button height, worked out by sideFit for this frame. */
+    private int sideCols = 2;
+    private float sideBh;
+
+    /**
+     * Sideways, the options sit in a panel beside the rail. Its width and columns are chosen so that every label is
+     * whole and every option fits the screen's height: two columns as wide as the longest label (never narrower than
+     * the old panel), lower buttons if they don't fit, then three or four columns, up to half the screen.
+     */
+    private float sideFit(String[][] rows, int W, int H) {
+        float base = Math.min(ui.dp(210), W * 0.27f);
+        Gfx g = lastG;
+        sideCols = 2;
+        sideBh = ui.dp(40);
+        if (rows == null || g == null) return base;
+        float ts = ui.dp(12.5f), labelW = ui.dp(44);
+        for (String[] row : rows)
+            for (int i = 0; i + 1 < row.length; i += 2)
+                if (row.length > 2) labelW = Math.max(labelW, g.textWidth(row[i + 1], ts, true) + ui.dp(18));
+        float availH = H - topH - ui.dp(8) - ui.dp(22) - ui.dp(10);
+        String cap = paletteCaption();
+        float best = base;
+        for (int cols = 2; cols <= 4; cols++) {
+            float wdt = Math.max(cols == 2 ? base : 0, cols * labelW + (cols - 1) * ui.dp(8) + ui.dp(16));
+            if (wdt > W * 0.5f && cols > 2) break;
+            float capH = cap == null ? 0 : Math.min(3, Ui.lines(g, cap, wdt - ui.dp(20), ui.dp(Ui.S + 0.5f))) * ui.dp(Ui.S + 0.5f) * 1.3f + ui.dp(6);
+            int lines = 0;
+            for (String[] row : rows) lines += (row.length / 2 + cols - 1) / cols;
+            for (int hi = 0; hi < 2; hi++) {
+                float bh = ui.dp(hi == 0 ? 40 : 34), gap = ui.dp(hi == 0 ? 6 : 4);
+                // the last that still fits across is kept if nothing fits down
+                sideCols = cols;
+                sideBh = bh;
+                best = Math.min(wdt, W * 0.5f);
+                if (capH + lines * (bh + gap) <= availH) return best;
+            }
+        }
+        return best;
+    }
+
+    /** The options as a panel beside the rail (landscape): two columns or more, every label whole. */
     private void sidePalette(Gfx g, String[][] rows, float x, float y, float wdt, float h) {
         g.color(0xEC121820);
         g.fillRect(x, y, wdt, h);
@@ -2515,16 +2586,19 @@ public final class Game {
         g.text(toolName(tool), x + ui.dp(10), yy + ui.dp(16), ui.dp(Ui.L), Gfx.ALIGN_LEFT, true);
         yy += ui.dp(22);
         if (cap != null) yy += ui.wrap(cap, x + ui.dp(10), yy + ui.dp(10), wdt - ui.dp(20), ui.dp(Ui.S + 0.5f), Ui.DIM, 3) + ui.dp(6);
-        float bw = (wdt - ui.dp(24)) / 2, bh = ui.dp(40);
+        int cols = Math.max(2, sideCols);
+        float bh = sideBh > 0 ? sideBh : ui.dp(40), gap = bh < ui.dp(40) ? ui.dp(4) : ui.dp(6);
+        float bw = (wdt - ui.dp(16) - (cols - 1) * ui.dp(8)) / cols;
         int k = 0;
         for (String[] row : rows) {
             for (int i = 0; i < row.length / 2; i++) {
+                // a lone option, or a label longer than a column, takes the whole line
                 boolean wide = row.length == 2 || g.textWidth(row[i * 2 + 1], ui.dp(12.5f), true) > bw - ui.dp(12);
-                if (wide && k % 2 == 1) k++;
-                option(row[i * 2], row[i * 2 + 1], x + ui.dp(8) + (k % 2) * (bw + ui.dp(8)), yy + (k / 2) * (bh + ui.dp(6)), wide ? bw * 2 + ui.dp(8) : bw, bh);
-                k += wide ? 2 : 1;
+                if (wide && k % cols != 0) k += cols - k % cols;
+                option(row[i * 2], row[i * 2 + 1], x + ui.dp(8) + (k % cols) * (bw + ui.dp(8)), yy + (k / cols) * (bh + gap), wide ? wdt - ui.dp(16) : bw, bh);
+                k += wide ? cols : 1;
             }
-            if (k % 2 == 1) k++;
+            if (k % cols != 0) k += cols - k % cols;
         }
     }
 
@@ -4391,7 +4465,10 @@ public final class Game {
                 return;
             case "start": start(); return;
             case "preset": ngPreset = (ngPreset + 1) % Data.presetCount(); return;
-            case "size": ngSize = (ngSize + 1) % RegionGen.SIZES.length; ngNational = 0; return;
+            case "size":
+                if (ngNational > 0) ngNational = 0;
+                else do ngSize = (ngSize + 1) % Nation.SIZES.length; while (!sizeOffered(ngSize));
+                return;
             case "seed": ngSeed = (ngSeed * 1103515245L + 12345L + System.nanoTime()) % 1000000L; if (ngSeed < 0) ngSeed = -ngSeed; return;
             case "pause": screen = S_PAUSE; return;
             case "playpause": paused = !paused; return;

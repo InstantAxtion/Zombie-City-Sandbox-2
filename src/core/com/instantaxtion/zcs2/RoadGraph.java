@@ -30,7 +30,23 @@ public final class RoadGraph {
     /** Duplicate-edge index: (smaller node, larger node) to edge. Dropped by finish() and rebuilt if edges are added later. */
     private LongIntMap dup;
 
+    /**
+     * Raised by every change that can change a route (a junction or road added, a road dead or alive, a barricade
+     * penalty set or lifted): long routes are kept until it changes, so asking again gives the very same answer.
+     */
+    public int version;
+
+    public void changed() {
+        version++;
+    }
+
+    private final java.util.HashMap<Long, int[]> routes = new java.util.HashMap<Long, int[]>();
+    private int routesVersion = -1;
+    /** Long routes answered from the cache, for probes. */
+    public long routeHits;
+
     public int addNode(float x, float y, int settlement) {
+        version++;
         if (nodeCount == nx.length) {
             int n = nx.length * 2;
             nx = Arrays.copyOf(nx, n);
@@ -44,6 +60,7 @@ public final class RoadGraph {
     }
 
     public int addEdge(int a, int b, byte kind, float halfWidth) {
+        version++;
         if (a == b) return -1;
         if (dup == null) {
             dup = new LongIntMap(Math.max(16, edgeCount * 2));
@@ -172,7 +189,21 @@ public final class RoadGraph {
      * takes long trips through the two-level search (route2); today's maps always use plain A*.
      */
     public int[] route(int a, int b) {
-        if (l1Of != null && a >= 0 && b >= 0 && a != b && h(a, b) >= shortTrip) return route2(a, b);
+        if (l1Of != null && a >= 0 && b >= 0 && a != b && h(a, b) >= shortTrip) {
+            // a national trip: refugee columns, convoys and formations ask the same few town-to-town routes again
+            // and again (each a two-level search of tens of milliseconds); the answer is kept until the roads change
+            if (routesVersion != version || routes.size() > 4096) {
+                routes.clear();
+                routesVersion = version;
+            }
+            Long k = (long) a << 32 | b;
+            int[] r = routes.get(k);
+            if (r == null && !routes.containsKey(k)) {
+                r = route2(a, b);
+                routes.put(k, r);
+            } else routeHits++;
+            return r == null ? null : r.clone();
+        }
         return astar(a, b);
     }
 

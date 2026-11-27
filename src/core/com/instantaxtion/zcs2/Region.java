@@ -320,6 +320,17 @@ public final class Region {
         return Tile.walkable(tileAtPx(x, y));
     }
 
+    /**
+     * As walkablePx, but a page that isn't resident counts as blocked (never read through the cache): for checks made
+     * in the parallel think phase, which must stay inside the active chunks. On today's maps every page is resident.
+     */
+    public boolean walkableResidentPx(float x, float y) {
+        int tx = (int) Math.floor(x / Tile.SIZE), ty = (int) Math.floor(y / Tile.SIZE);
+        if (tx < 0 || ty < 0 || tx >= W || ty >= H) return walkablePx(x, y);
+        if (!store.resident((ty >> 6) * pw + (tx >> 6))) return false;
+        return walkablePx(x, y);
+    }
+
     /** True when the tile and its eight neighbours can all be walked on (room to stand a few people). */
     private boolean openAround(int tx, int ty) {
         for (int dy = -1; dy <= 1; dy++)
@@ -725,8 +736,10 @@ public final class Region {
                     if (tileAtPx(sx, sy) == Tile.BARRICADE) blocked = true;
                 }
             }
+            float was = g.epen[e];
             if (blocked) g.epen[e] = Math.max(g.epen[e], 1e6f);
             else if (g.epen[e] >= 1e6f) g.epen[e] = 0;
+            if (g.epen[e] != was) g.changed();
         }
     }
 

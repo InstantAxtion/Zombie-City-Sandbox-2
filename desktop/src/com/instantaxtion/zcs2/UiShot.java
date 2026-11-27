@@ -1017,7 +1017,7 @@ public final class UiShot {
         waitPlay();
         game.speedIdx = 0;
         frames(60);
-        float cx = W / 2f, cy = H / 2f;
+        float cx = W > H ? W * 0.72f : W / 2f, cy = H / 2f; // (sideways: right of the palette)
         tap("tool:dead");
         frames(2);
         shot("t03-dead-palette");
@@ -1077,8 +1077,14 @@ public final class UiShot {
         // orders: the squad placed above, its order modes and stance
         tap("tool:orders");
         frames(1);
-        tapAt(cx - 60, cy + 60);
+        // the squad placed above, wherever the zoom has put it on the screen
+        Squads.Squad placed = null;
+        for (Squads.Squad s : game.w.sq.list) if (s.alive && s.faction == Ents.SOLDIER && s.player) placed = s;
+        if (placed == null) for (Squads.Squad s : game.w.sq.list) if (s.alive && s.faction == Ents.SOLDIER) placed = s;
+        float[] sp = game.w.sq.where(placed);
+        tapAt(game.cam.toScreenX(sp[0]), game.cam.toScreenY(sp[1]));
         frames(2);
+        shot("t13b-orders-squad");
         tap("om:route");
         tapAt(walkAt(cx - 120, cy + 140));
         tapAt(walkAt(cx + 20, cy + 180));
